@@ -8283,7 +8283,7 @@ IntExtTextOutW(
     BOOL bResult, DoBreak;
     FONT_CACHE_ENTRY Cache;
     FT_Matrix mat;
-    BOOL bNoTransform, bSubpixel;
+    BOOL bNoTransform, bSubpixel, bStandardSmoothing;
     DWORD ch0, ch1;
     const DWORD del = 0x7f, nbsp = 0xa0; // DEL is ASCII DELETE and nbsp is a non-breaking space
     FONTLINK_CHAIN Chain;
@@ -8449,6 +8449,8 @@ IntExtTextOutW(
     Cache.Hashed.Aspect.RenderMode = IntApplyGaspRenderMode(face, Cache.Hashed.Aspect.RenderMode);
     if (BitsPerFormat(psoDest->iBitmapFormat) <= 8)
         Cache.Hashed.Aspect.RenderMode = FT_RENDER_MODE_MONO;
+    bStandardSmoothing = (Cache.Hashed.Aspect.RenderMode == FT_RENDER_MODE_NORMAL &&
+                          IntGetFontRenderMode(plf) == FT_RENDER_MODE_NORMAL);
 
     /* Is there no transformation? */
     bNoTransform = ((mat.xy == 0) && (mat.yx == 0) &&
@@ -8663,7 +8665,8 @@ IntExtTextOutW(
                                (PPOINTL)&MaskRect,
                                &dc->eboText.BrushObject,
                                &g_PointZero,
-                               bSubpixel))
+                               bSubpixel,
+                               bStandardSmoothing))
             {
                 DPRINT1("Failed to MaskBlt a glyph!\n");
             }

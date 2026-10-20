@@ -1151,6 +1151,87 @@ AlphaBltMask(SURFOBJ* psoDest,
     return TRUE;
 }
 
+static const BYTE gajTextRamp[17] =
+{
+    0x00, 0x4d, 0x68, 0x7c, 0x8c, 0x9a, 0xa7, 0xb2, 0xbd,
+    0xc7, 0xd0, 0xd9, 0xe1, 0xe9, 0xf0, 0xf8, 0xff
+};
+
+static inline BYTE
+TextRampChannel(BYTE Background, BYTE Foreground, ULONG Level)
+{
+    ULONG Low, High;
+
+    if (Background == Foreground)
+        return Background;
+
+    if (Background > Foreground)
+    {
+        High = gajTextRamp[16 - Level] + ((0xff - gajTextRamp[16 - Level]) * Foreground) / 0xff;
+        return (BYTE)(Foreground + ((Background - Foreground) * (High - Foreground)) / (0xff - Foreground));
+    }
+
+    Low = (gajTextRamp[Level] * Foreground) / 0xff;
+    return (BYTE)(Foreground - ((Foreground - Background) * (Foreground - Low)) / Foreground);
+}
+
+static BOOLEAN APIENTRY
+StandardBltMask(SURFOBJ* psoDest,
+                SURFOBJ* psoSource,
+                SURFOBJ* psoMask,
+                XLATEOBJ* pxloRGB2Dest,
+                XLATEOBJ* pxloBrush,
+                RECTL* prclDest,
+                POINTL* pptlSource,
+                POINTL* pptlMask,
+                BRUSHOBJ* pbo,
+                POINTL* pptlBrush)
+{
+    LONG i, j, dx, dy;
+    TEXT_BLEND_CONTEXT Blend;
+    BYTE *tMask, *lMask;
+    ULONG Level, Background;
+
+    ASSERT(psoSource == NULL);
+    ASSERT(pptlSource == NULL);
+
+    dx = prclDest->right  - prclDest->left;
+    dy = prclDest->bottom - prclDest->top;
+
+    if (psoMask == NULL)
+        return FALSE;
+
+    TextBlendInit(&Blend, psoDest, pxloRGB2Dest, pxloBrush, pbo);
+    tMask = (PBYTE)psoMask->pvScan0 + (pptlMask->y * psoMask->lDelta) + pptlMask->x;
+
+    for (j = 0; j < dy; j++)
+    {
+        lMask = tMask;
+        for (i = 0; i < dx; i++)
+        {
+            Level = (*lMask * 16 + 128) / 256;
+            if (Level >= 16)
+            {
+                Blend.pfnPutPixel(psoDest, prclDest->left + i,
+                                  prclDest->top + j, Blend.ulSolidColor);
+            }
+            else if (Level > 1)
+            {
+                Background = DIB_GetSource(psoDest, prclDest->left + i, prclDest->top + j, pxloBrush);
+                Blend.pfnPutPixel(psoDest, prclDest->left + i, prclDest->top + j,
+                                  XLATEOBJ_iXlate(pxloRGB2Dest,
+                                      RGB(TextRampChannel(GetRValue(Background), Blend.FgRed, Level),
+                                          TextRampChannel(GetGValue(Background), Blend.FgGreen, Level),
+                                          TextRampChannel(GetBValue(Background), Blend.FgBlue, Level))));
+            }
+            lMask++;
+        }
+        tMask += psoMask->lDelta;
+    }
+
+    return TRUE;
+}
+
 /* renders an RGB horizontal subpixel alpha mask bitmap */
 static BOOLEAN APIENTRY
 LcdBltMask(SURFOBJ* psoDest,
@@ -1234,7 +1315,8 @@ EngMaskBitBlt(SURFOBJ *psoDest,
               POINTL *pptlMask,
               BRUSHOBJ *pbo,
               POINTL *BrushOrigin,
-              BOOL bSubpixel)
+              BOOL bSubpixel,
+              BOOL bStandardSmoothing)
 {
     BYTE               clippingType;
     RECTL              CombinedRect;
@@ -1255,7 +1337,8 @@ EngMaskBitBlt(SURFOBJ *psoDest,
     ULONG              Direction;
     POINTL             AdjustedBrushOrigin;
     LONG               MaskXScale = bSubpixel ? 3 : 1;
-    PFN_TextMaskBlt    pfnTextMaskBlt = bSubpixel ? LcdBltMask : AlphaBltMask;
+    PFN_TextMaskBlt    pfnTextMaskBlt = bSubpixel ? LcdBltMask :
+                                        (bStandardSmoothing ? StandardBltMask : AlphaBltMask);
 
     ASSERT(psoMask);
 
@@ -1453,7 +1536,8 @@ IntEngMaskBlt(
     _In_ POINTL *pptlMask,
     _In_ BRUSHOBJ *pbo,
     _In_ POINTL *pptlBrushOrg,
-    _In_ BOOL bSubpixel)
+    _In_ BOOL bSubpixel,
+    _In_ BOOL bStandardSmoothing)
 {
     BOOLEAN ret;
     RECTL rcDest;
@@ -1550,7 +1634,8 @@ IntEngMaskBlt(
                                 &ptMask,
                                 pbo,
                                 pptlBrushOrg,
-                                bSubpixel);
+                                bSubpixel,
+                                bStandardSmoothing);
         }
 
         if (ret)
@@ -1579,7 +1664,8 @@ IntEngMaskBlt(
                             &ptMask,
                             pbo,
                             pptlBrushOrg,
-                            bSubpixel);
+                            bSubpixel,
+                            bStandardSmoothing);
     }
 
     return ret;
