@@ -508,7 +508,8 @@ NBResetNeighborTimeout(PIP_ADDRESS Address)
     {
          if (AddrIsEqual(Address, &NCE->Address))
          {
-             NCE->EventCount = 0;
+             if (!(NCE->State & NUD_INCOMPLETE))
+                 NCE->EventCount = 0;
              break;
          }
     }
