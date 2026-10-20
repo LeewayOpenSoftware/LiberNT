@@ -8447,6 +8447,8 @@ IntExtTextOutW(
     Cache.Hashed.Aspect.RenderMode =
         (BYTE)IntGetFontRenderModeForTransform(plf, &Cache.Hashed.matTransform);
     Cache.Hashed.Aspect.RenderMode = IntApplyGaspRenderMode(face, Cache.Hashed.Aspect.RenderMode);
+    if (BitsPerFormat(psoDest->iBitmapFormat) <= 8)
+        Cache.Hashed.Aspect.RenderMode = FT_RENDER_MODE_MONO;
 
     /* Is there no transformation? */
     bNoTransform = ((mat.xy == 0) && (mat.yx == 0) &&
