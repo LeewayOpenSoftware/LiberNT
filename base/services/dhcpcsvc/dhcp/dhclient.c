@@ -564,6 +564,38 @@ unset_domain(
     RegCloseKey(RegKey2);
 }
 
+static BOOL
+IsAddressApplied(
+    DWORD IfIndex,
+    ULONG Address,
+    ULONG Mask)
+{
+    PMIB_IPADDRTABLE Table;
+    ULONG Size = 0;
+    DWORD i;
+    BOOL Found = FALSE;
+
+    if (GetIpAddrTable(NULL, &Size, FALSE) != ERROR_INSUFFICIENT_BUFFER)
+        return FALSE;
+
+    Table = HeapAlloc(GetProcessHeap(), 0, Size);
+    if (!Table)
+        return FALSE;
+
+    if (GetIpAddrTable(Table, &Size, FALSE) == NO_ERROR)
+    {
+        for (i = 0; i < Table->dwNumEntries && !Found; i++)
+        {
+            Found = Table->table[i].dwIndex == IfIndex &&
+                    Table->table[i].dwAddr == Address &&
+                    Table->table[i].dwMask == Mask;
+        }
+    }
+
+    HeapFree(GetProcessHeap(), 0, Table);
+    return Found;
+}
+
 
 void setup_adapter( PDHCP_ADAPTER Adapter, struct client_lease *new_lease ) {
     CHAR Buffer[200] = "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\";
@@ -573,7 +605,8 @@ void setup_adapter( PDHCP_ADAPTER Adapter, struct client_lease *new_lease ) {
     BOOL HaveMask = new_lease->options[DHO_SUBNET_MASK].len == (int)sizeof(ULONG);
     ULONG NewAddress = *((ULONG*)new_lease->address.iabuf);
     ULONG NewMask = HaveMask ? *((ULONG*)new_lease->options[DHO_SUBNET_MASK].data) : 0;
-    BOOL KeepAddress = HaveMask && Adapter->NteContext == NewAddress && Adapter->NteNetmask == NewMask;
+    BOOL KeepAddress = HaveMask && Adapter->NteContext == NewAddress && Adapter->NteNetmask == NewMask &&
+                       IsAddressApplied(Adapter->IfMib.dwIndex, NewAddress, NewMask);
 
     strcat(Buffer, Adapter->DhclientInfo.name);
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, Buffer, 0, KEY_WRITE, &hkey) != ERROR_SUCCESS)
