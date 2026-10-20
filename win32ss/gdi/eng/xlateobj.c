@@ -307,12 +307,24 @@ EXLATEOBJ_iXlateBGRto565(PEXLATEOBJ pxlo, ULONG iColor)
     return iNewColor;
 }
 
+static
+ULONG
+EXLATEOBJ_iNearestDstIndex(
+    _In_ PEXLATEOBJ pexlo,
+    _In_ ULONG iColor)
+{
+    if (pexlo->ppalDst->NumColors == 256 && pexlo->ppalSrc != &gpalRGB)
+        iColor = (iColor & 0xF8F8F8) | 0x040404;
+
+    return PALETTE_ulGetNearestPaletteIndex(pexlo->ppalDst, iColor);
+}
+
 _Function_class_(FN_XLATE)
 ULONG
 FASTCALL
 EXLATEOBJ_iXlateRGBtoPal(PEXLATEOBJ pexlo, ULONG iColor)
 {
-    return PALETTE_ulGetNearestPaletteIndex(pexlo->ppalDst, iColor);
+    return EXLATEOBJ_iNearestDstIndex(pexlo, iColor);
 }
 
 _Function_class_(FN_XLATE)
@@ -385,7 +397,7 @@ EXLATEOBJ_iXlate555toPal(PEXLATEOBJ pexlo, ULONG iColor)
 {
     iColor = EXLATEOBJ_iXlate555toRGB(pexlo, iColor);
 
-    return PALETTE_ulGetNearestPaletteIndex(pexlo->ppalDst, iColor);
+    return EXLATEOBJ_iNearestDstIndex(pexlo, iColor);
 }
 
 _Function_class_(FN_XLATE)
@@ -454,7 +466,7 @@ EXLATEOBJ_iXlate565toPal(EXLATEOBJ *pexlo, ULONG iColor)
 {
     iColor = EXLATEOBJ_iXlate565toRGB(pexlo, iColor);
 
-    return PALETTE_ulGetNearestPaletteIndex(pexlo->ppalDst, iColor);
+    return EXLATEOBJ_iNearestDstIndex(pexlo, iColor);
 }
 
 _Function_class_(FN_XLATE)
@@ -480,7 +492,7 @@ EXLATEOBJ_iXlateBitfieldsToPal(PEXLATEOBJ pexlo, ULONG iColor)
     iColor = EXLATEOBJ_iXlateShiftAndMask(pexlo, iColor);
 
     /* Return nearest index */
-    return PALETTE_ulGetNearestPaletteIndex(pexlo->ppalDst, iColor);
+    return EXLATEOBJ_iNearestDstIndex(pexlo, iColor);
 }
 
 static const BYTE gajFieldMasks[9] =
@@ -548,7 +560,7 @@ EXLATEOBJ_iXlateExpandFieldsToPal(PEXLATEOBJ pexlo, ULONG iColor)
 {
     iColor = EXLATEOBJ_iXlateExpandFields(pexlo, iColor);
 
-    return PALETTE_ulGetNearestPaletteIndex(pexlo->ppalDst, iColor);
+    return EXLATEOBJ_iNearestDstIndex(pexlo, iColor);
 }
 
 static BOOL
