@@ -6616,8 +6616,7 @@ static BOOL
 RestartDevice(
         IN HDEVINFO DeviceInfoSet,
         IN PSP_DEVINFO_DATA DeviceInfoData,
-        IN BOOL RestartStarted,
-        IN BOOL PreviouslyInstalled)
+        IN BOOL RestartStarted)
 {
     struct DeviceInfoSet *set = (struct DeviceInfoSet *)DeviceInfoSet;
     struct DeviceInfo *deviceInfo = (struct DeviceInfo *)DeviceInfoData->Reserved;
@@ -6633,13 +6632,7 @@ RestartDevice(
     if (Status & DN_STARTED)
     {
         if (!RestartStarted)
-        {
-            if (!PreviouslyInstalled)
-                return TRUE;
-
-            cr = CR_FAILURE;
-            goto NeedReboot;
-        }
+            return TRUE;
 
         cr = CM_Query_And_Remove_SubTree_ExW(deviceInfo->dnDevInst,
                                              NULL,
@@ -6662,7 +6655,6 @@ RestartDevice(
     if (cr == CR_SUCCESS)
         return TRUE;
 
-NeedReboot:
     InstallParams.cbSize = sizeof(InstallParams);
     if (!SetupDiGetDeviceInstallParamsW(DeviceInfoSet, DeviceInfoData, &InstallParams))
         return FALSE;
@@ -6865,7 +6857,7 @@ SetupDiChangeState(
         }
         case DICS_PROPCHANGE:
         {
-            ret = RestartDevice(DeviceInfoSet, DeviceInfoData, TRUE, TRUE);
+            ret = RestartDevice(DeviceInfoSet, DeviceInfoData, TRUE);
             break;
         }
         default:
@@ -7550,7 +7542,7 @@ SetupDiInstallDevice(
         !RebootRequired &&
         !(InstallParams.Flags & (DI_NEEDRESTART | DI_NEEDREBOOT | DI_DONOTCALLCONFIGMG)))
     {
-        ret = RestartDevice(DeviceInfoSet, DeviceInfoData, FALSE, PreviouslyInstalled);
+        ret = RestartDevice(DeviceInfoSet, DeviceInfoData, PreviouslyInstalled);
     }
     else
     {
@@ -8110,7 +8102,7 @@ SetupDiRestartDevices(
         return FALSE;
     }
 
-    return RestartDevice(DeviceInfoSet, DeviceInfoData, FALSE, TRUE);
+    return RestartDevice(DeviceInfoSet, DeviceInfoData, TRUE);
 }
 
 /***********************************************************************
