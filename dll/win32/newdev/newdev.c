@@ -1255,20 +1255,7 @@ ScanAutoDriverFoldersResult(
         RegCloseKey(hKey);
     }
 
-    if (!Paths)
-    {
-        /* Default: \Drivers on the system drive */
-        if (!GetSystemWindowsDirectoryW(WinDir, ARRAYSIZE(WinDir)) || WinDir[1] != L':')
-            return DriverSearchNotFound;
-        WinDir[2] = UNICODE_NULL;
-        wcscat(WinDir, L"\\Drivers");
-        TRACE("Auto-searching %s\n", debugstr_w(WinDir));
-        if (SearchDriverRecursiveEx(DevInstData, WinDir, TRUE))
-            return DriverSearchFound;
-        return DriverSearchNotFound;
-    }
-
-    for (Path = Paths; *Path != UNICODE_NULL; Path += wcslen(Path) + 1)
+    for (Path = Paths; Path && *Path != UNICODE_NULL; Path += wcslen(Path) + 1)
     {
         if (ExpandEnvironmentStringsW(Path, Expanded, ARRAYSIZE(Expanded)) == 0 ||
             Expanded[0] == UNICODE_NULL)
@@ -1286,6 +1273,18 @@ ScanAutoDriverFoldersResult(
     }
 
     HeapFree(GetProcessHeap(), 0, Paths);
+
+    if (Result != DriverSearchFound &&
+        GetSystemWindowsDirectoryW(WinDir, ARRAYSIZE(WinDir)) && WinDir[1] == L':')
+    {
+        /* The default folder is always searched last: \Drivers on the system drive */
+        WinDir[2] = UNICODE_NULL;
+        wcscat(WinDir, L"\\Drivers");
+        TRACE("Auto-searching %s\n", debugstr_w(WinDir));
+        if (SearchDriverRecursiveEx(DevInstData, WinDir, TRUE))
+            Result = DriverSearchFound;
+    }
+
     return Result;
 }
 
