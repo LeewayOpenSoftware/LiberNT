@@ -1234,6 +1234,8 @@ Ndis6DispatchPnp(
     if (LowerDevice == NULL)
     {
         /* Shouldn't happen if AddDevice ran correctly. Complete defensively. */
+        DbgPrint("NDIS6: PnP minor 0x%02x on FDO %p: no lower device (adapter %p), completing with STATUS_INVALID_DEVICE_STATE\n",
+                 Stack->MinorFunction, DeviceObject, Adapter);
         return Ndis6CompleteIrp(Irp, STATUS_INVALID_DEVICE_STATE);
     }
 
@@ -1307,6 +1309,10 @@ Ndis6DispatchPnp(
              * internally — we must NOT call HaltEx (MS DDK contract). */
             if (Ndis6HasMandatoryKeywords(Adapter->NdisMiniportBlock.PhysicalDeviceObject))
             {
+                DbgPrint("NDIS6: START PDO %p: resources saved (%lu translated descriptor(s)), calling MiniportInitializeEx\n",
+                         Adapter->NdisMiniportBlock.PhysicalDeviceObject,
+                         (Ext && Ext->AllocatedResourcesTranslated && Ext->AllocatedResourcesTranslated->Count > 0)
+                             ? Ext->AllocatedResourcesTranslated->List[0].PartialResourceList.Count : 0);
                 NdisStatus = Ndis6CallMiniportInitializeEx(Adapter);
             }
             else
