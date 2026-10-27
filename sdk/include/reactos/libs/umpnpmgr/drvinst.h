@@ -79,4 +79,11 @@ typedef struct _DRVINST_JOB_INFO
 #define DRVINST_REG_TIMEOUT         L"WorkerTimeoutMs"
 #define DRVINST_DEFAULT_TIMEOUT_MS  600000
 
+/* Client API, exported by newdev.dll. All return a Win32 error (0 = success). */
+DWORD WINAPI DrvInstSubmitDevice(_In_ PCWSTR DeviceInstanceId, _In_ DWORD Flags, _Out_ DRVINST_JOB_ID *JobId);
+DWORD WINAPI DrvInstGetJob(_In_ DRVINST_JOB_ID JobId, _Out_ PDRVINST_JOB_INFO Info);
+DWORD WINAPI DrvInstEnumJobs(_Out_writes_to_(*Count, *Count) DRVINST_JOB_ID *JobIds, _Inout_ PDWORD Count);
+/* Waits until the job has ended or TimeoutMs has passed (ERROR_TIMEOUT). Info may be NULL. */
+DWORD WINAPI DrvInstWait(_In_ DRVINST_JOB_ID JobId, _In_ DWORD TimeoutMs, _Out_opt_ PDRVINST_JOB_INFO Info);
+
 #endif /* _UMPNPMGR_DRVINST_H_ */
