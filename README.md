@@ -318,6 +318,6 @@ LiberNT is built by the **LiberNT contributors**, started and maintained by [Ahm
 
 This is the Leeway Open Software working fork of LiberNT. We track upstream `main-nt10` closely (it moves many times a day) and test our fixes and improvements on topic branches. Part of this work comes from our research in a parallel project, Aureline - Asterion (our Wine and ReactOS forks). The changes are public so that anyone who finds them useful can look at them.
 
-The topic branches and their status are listed in [FORK.md](FORK.md).
+The topic branches and their status are listed in [FORK.md](FORK.md). Our purpose and development principles are in [PURPOSE.md](PURPOSE.md).
 
-Este es el fork de trabajo de Leeway Open Software de LiberNT: seguimos de cerca el `main-nt10` upstream y probamos nuestras correcciones y mejoras en ramas por tema, en parte fruto de nuestro proyecto paralelo Aureline - Asterion. Los cambios son públicos por si a alguien le resultan útiles.
+Este es el fork de trabajo de Leeway Open Software de LiberNT: seguimos de cerca el `main-nt10` upstream y probamos nuestras correcciones y mejoras en ramas por tema, en parte fruto de nuestro proyecto paralelo Aureline - Asterion. Los cambios son públicos por si a alguien le resultan útiles. Nuestro propósito y principios de desarrollo están en [PURPOSE.md](PURPOSE.md).
