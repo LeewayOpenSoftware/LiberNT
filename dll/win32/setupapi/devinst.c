@@ -6609,6 +6609,23 @@ ResetDevice(
 #endif
 }
 
+/*
+ * Windows restarts a started network adapter in place when its driver is
+ * replaced (stop -> new service/driver key -> start) and only asks for a reboot
+ * if the stack vetoes the removal. Other classes keep the conservative
+ * "reboot required" behaviour: a failed warm restart of a storage or display
+ * stack is far more costly than one reboot.
+ */
+static BOOL
+IsWarmRestartClass(
+        IN const GUID *ClassGuid)
+{
+    static const GUID NetClass =
+        {0x4d36e972, 0xe325, 0x11ce, {0xbf, 0xc1, 0x08, 0x00, 0x2b, 0xe1, 0x03, 0x18}};
+
+    return IsEqualGUID(ClassGuid, &NetClass);
+}
+
 static BOOL
 RestartDevice(
         IN HDEVINFO DeviceInfoSet,
@@ -7547,7 +7564,10 @@ SetupDiInstallDevice(
         !RebootRequired &&
         !(InstallParams.Flags & (DI_NEEDRESTART | DI_NEEDREBOOT | DI_DONOTCALLCONFIGMG)))
     {
-        ret = RestartDevice(DeviceInfoSet, DeviceInfoData, FALSE, PreviouslyInstalled);
+        /* A replaced driver on a started adapter is rebound live; a veto falls back to DI_NEEDREBOOT */
+        ret = RestartDevice(DeviceInfoSet, DeviceInfoData,
+                            PreviouslyInstalled && IsWarmRestartClass(&ClassGuid),
+                            PreviouslyInstalled);
     }
     else
     {
