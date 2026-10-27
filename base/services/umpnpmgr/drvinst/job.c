@@ -330,31 +330,16 @@ Cleanup:
     return State;
 }
 
-/*
- * Run one install job to its end in the calling thread. Installs take turns:
- * setupapi and the class installers are not meant to run twice at once.
- * Returns TRUE when the driver was installed.
- */
-BOOL
-DrvInstRunDeviceJob(
+/* Run a created job to its end in the calling thread. Installs take turns:
+ * setupapi and the class installers are not meant to run twice at once. */
+static BOOL
+ExecuteJob(
+    _In_ DRVINST_JOB_ID JobId,
     _In_ PCWSTR DeviceInstanceId,
-    _In_ ULONG Source,
-    _In_ ULONG Flags,
-    _Out_opt_ PDRVINST_JOB_ID OutJobId)
+    _In_ ULONG Flags)
 {
-    DRVINST_JOB_ID JobId;
     DRVINST_RESULT Result;
     ULONG State;
-
-    if (OutJobId)
-        *OutJobId = 0;
-
-    if (!JobsInitialized)
-        return FALSE;
-
-    JobId = CreateJob(DeviceInstanceId, Source, Flags);
-    if (OutJobId)
-        *OutJobId = JobId;
 
     WaitForSingleObject(hRunMutex, INFINITE);
 
@@ -368,4 +353,95 @@ DrvInstRunDeviceJob(
            JobId, DeviceInstanceId, State, Result.Win32, Result.Problem);
 
     return State == DrvInstJobSucceeded;
+}
+
+/* Run an install job for a device and wait for it. Returns TRUE when the driver was installed. */
+BOOL
+DrvInstRunDeviceJob(
+    _In_ PCWSTR DeviceInstanceId,
+    _In_ ULONG Source,
+    _In_ ULONG Flags,
+    _Out_opt_ PDRVINST_JOB_ID OutJobId)
+{
+    DRVINST_JOB_ID JobId;
+
+    if (OutJobId)
+        *OutJobId = 0;
+
+    if (!JobsInitialized)
+        return FALSE;
+
+    JobId = CreateJob(DeviceInstanceId, Source, Flags);
+    if (OutJobId)
+        *OutJobId = JobId;
+    if (!JobId)
+        return FALSE;
+
+    return ExecuteJob(JobId, DeviceInstanceId, Flags);
+}
+
+typedef struct _ASYNC_JOB
+{
+    DRVINST_JOB_ID JobId;
+    ULONG Flags;
+    WCHAR DeviceInstanceId[DRVINST_DEVICE_ID_CCH];
+} ASYNC_JOB, *PASYNC_JOB;
+
+static DWORD WINAPI
+AsyncJobThread(LPVOID Parameter)
+{
+    PASYNC_JOB Async = Parameter;
+
+    ExecuteJob(Async->JobId, Async->DeviceInstanceId, Async->Flags);
+    HeapFree(GetProcessHeap(), 0, Async);
+
+    return 0;
+}
+
+/* Queue an install job and return at once; the caller follows it with its id. */
+DWORD
+DrvInstSubmitDeviceJob(
+    _In_ PCWSTR DeviceInstanceId,
+    _In_ ULONG Source,
+    _In_ ULONG Flags,
+    _Out_ PDRVINST_JOB_ID OutJobId)
+{
+    PASYNC_JOB Async;
+    DRVINST_JOB_ID JobId;
+    HANDLE hThread;
+    DWORD Error;
+
+    *OutJobId = 0;
+
+    if (!JobsInitialized)
+        return ERROR_SERVICE_NOT_ACTIVE;
+    if (!DeviceInstanceId[0] || lstrlenW(DeviceInstanceId) >= DRVINST_DEVICE_ID_CCH)
+        return ERROR_INVALID_PARAMETER;
+
+    Async = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*Async));
+    if (!Async)
+        return ERROR_NOT_ENOUGH_MEMORY;
+
+    Async->JobId = JobId = CreateJob(DeviceInstanceId, Source, Flags);
+    if (!JobId)
+    {
+        HeapFree(GetProcessHeap(), 0, Async);
+        return ERROR_NO_SYSTEM_RESOURCES;
+    }
+    Async->Flags = Flags;
+    lstrcpynW(Async->DeviceInstanceId, DeviceInstanceId, DRVINST_DEVICE_ID_CCH);
+
+    hThread = CreateThread(NULL, 0, AsyncJobThread, Async, 0, NULL);
+    if (!hThread)
+    {
+        Error = GetLastError();
+        SetJobState(JobId, DrvInstJobFailed, NULL);
+        HeapFree(GetProcessHeap(), 0, Async);
+        return Error;
+    }
+
+    *OutJobId = JobId;
+    CloseHandle(hThread);
+
+    return ERROR_SUCCESS;
 }

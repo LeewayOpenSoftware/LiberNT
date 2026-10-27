@@ -34,6 +34,7 @@
 #include <winsvc_undoc.h>
 #include <pnp_s.h>
 #include <plugplay_s.h>
+#include <drvinst_s.h>
 #include <dll/newdevp.h>
 #include <umpnpmgr/drvinst.h>
 
@@ -129,6 +130,13 @@ DrvInstRunDeviceJob(
     _In_ ULONG Source,
     _In_ ULONG Flags,
     _Out_opt_ PDRVINST_JOB_ID OutJobId);
+
+DWORD
+DrvInstSubmitDeviceJob(
+    _In_ PCWSTR DeviceInstanceId,
+    _In_ ULONG Source,
+    _In_ ULONG Flags,
+    _Out_ PDRVINST_JOB_ID OutJobId);
 
 BOOL
 DrvInstGetJobInfo(

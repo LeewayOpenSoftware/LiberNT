@@ -1,0 +1,57 @@
+/*
+ * PROJECT:     LiberNT Plug and Play Manager
+ * LICENSE:     GPL-3.0-or-later (https://spdx.org/licenses/GPL-3.0-or-later)
+ * PURPOSE:     RPC interface of the driver install jobs
+ * COPYRIGHT:   Copyright 2026 Leeway Open Software
+ *
+ * The interface is served by umpnpmgr on the same endpoint as the Plug and
+ * Play interface (\pipe\plugplay). It has an interface of its own so that it
+ * cannot collide with the operation numbers of pnp.idl.
+ */
+
+#include <ms-dtyp.idl>
+
+[
+    uuid(af9eacbc-8da1-47ea-b60e-2ac45e4a9605),
+    version(1.0),
+    pointer_default(unique),
+    endpoint("ncacn_np:[\\pipe\\plugplay]")
+]
+interface drvinst
+{
+    /* Ask for the driver of a device to be installed. Needs an administrator.
+     * The job runs in the background; follow it with DrvInst_GetJob. */
+    DWORD
+    __stdcall
+    DrvInst_SubmitDevice(
+        [in] handle_t hBinding,
+        [in, string, ref] LPCWSTR pszDeviceInstanceId,
+        [in] DWORD ulFlags,
+        [out] unsigned hyper *pullJobId);
+
+    /* State and result of one job. The device id is returned in pszDeviceInstanceId. */
+    DWORD
+    __stdcall
+    DrvInst_GetJob(
+        [in] handle_t hBinding,
+        [in] unsigned hyper ullJobId,
+        [out] DWORD *pulState,
+        [out] DWORD *pulSource,
+        [out] DWORD *pulFlags,
+        [out] DWORD *pulWin32,
+        [out] DWORD *pulProblem,
+        [out] DWORD *pulResultFlags,
+        [out] DWORD *pulSubmitTick,
+        [out] DWORD *pulEndTick,
+        [out, size_is(ulDeviceCch)] WCHAR *pszDeviceInstanceId,
+        [in] DWORD ulDeviceCch);
+
+    /* The identifiers of the jobs the service remembers, newest first. */
+    DWORD
+    __stdcall
+    DrvInst_EnumJobs(
+        [in] handle_t hBinding,
+        [in] DWORD ulMax,
+        [out, size_is(ulMax), length_is(*pulCount)] unsigned hyper *pullJobIds,
+        [out] DWORD *pulCount);
+}
