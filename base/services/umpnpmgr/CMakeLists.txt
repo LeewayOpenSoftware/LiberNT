@@ -4,6 +4,7 @@ add_rpc_files(server ${REACTOS_SOURCE_DIR}/sdk/include/reactos/idl/pnp.idl ${REA
 spec2def(umpnpmgr.dll umpnpmgr.spec ADD_IMPORTLIB)
 
 add_library(umpnpmgr MODULE
+    drvinst/job.c
     event.c
     install.c
     listener.c

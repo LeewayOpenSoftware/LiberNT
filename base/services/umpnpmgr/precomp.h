@@ -35,6 +35,7 @@
 #include <pnp_s.h>
 #include <plugplay_s.h>
 #include <dll/newdevp.h>
+#include <umpnpmgr/drvinst.h>
 
 
 #define LOGCONF_NAME_BUFFER_SIZE 32
@@ -112,6 +113,32 @@ DWORD
 WINAPI
 DeviceInstallThread(
     LPVOID lpParameter);
+
+
+/* drvinst/job.c */
+
+VOID
+DrvInstInitialize(VOID);
+
+BOOL
+DrvInstUseWorker(VOID);
+
+BOOL
+DrvInstRunDeviceJob(
+    _In_ PCWSTR DeviceInstanceId,
+    _In_ ULONG Source,
+    _In_ ULONG Flags,
+    _Out_opt_ PDRVINST_JOB_ID OutJobId);
+
+BOOL
+DrvInstGetJobInfo(
+    _In_ DRVINST_JOB_ID JobId,
+    _Out_ PDRVINST_JOB_INFO Info);
+
+ULONG
+DrvInstpEnumJobs(
+    _Out_writes_to_(Max, return) PDRVINST_JOB_INFO Info,
+    _In_ ULONG Max);
 
 
 /* rpcserver.c */
