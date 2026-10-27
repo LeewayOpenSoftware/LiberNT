@@ -10,6 +10,8 @@
 #define WIN32_NO_STATUS
 #include <windef.h>
 #include <winbase.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <winreg.h>
 #include <winuser.h>
 #include <cfgmgr32.h>
@@ -79,6 +81,99 @@ QueryDevnode(
         Result->Flags |= DRVINST_RF_NEEDREBOOT;
 }
 
+static PCWSTR
+StateName(
+    _In_ ULONG State)
+{
+    switch (State)
+    {
+        case DrvInstJobQueued: return L"queued";
+        case DrvInstJobRunning: return L"running";
+        case DrvInstJobSucceeded: return L"succeeded";
+        case DrvInstJobFailed: return L"failed";
+        case DrvInstJobTimedOut: return L"timed out";
+        case DrvInstJobCanceled: return L"canceled";
+    }
+    return L"unknown";
+}
+
+static VOID
+PrintJob(
+    _In_ const DRVINST_JOB_INFO *Job)
+{
+    wprintf(L"job %I64u  %-9ls  %ls\n", Job->JobId, StateName(Job->State), Job->DeviceInstanceId);
+    if (Job->State >= DrvInstJobSucceeded)
+    {
+        wprintf(L"    error %lu  problem %lu  started %ls  need-restart %ls\n",
+                Job->Result.Win32, Job->Result.Problem,
+                (Job->Result.Flags & DRVINST_RF_STARTED) ? L"yes" : L"no",
+                (Job->Result.Flags & DRVINST_RF_NEEDREBOOT) ? L"yes" : L"no");
+    }
+}
+
+/* drvinst /list | drvinst /job <id> | drvinst /submit <device instance id> */
+static int
+ClientMain(
+    _In_ int argc,
+    _In_ WCHAR **argv)
+{
+    DRVINST_JOB_INFO Job;
+    DRVINST_JOB_ID Ids[64];
+    DWORD Count, Error, i;
+
+    if (!lstrcmpiW(argv[1], L"/list"))
+    {
+        Count = RTL_NUMBER_OF(Ids);
+        Error = DrvInstEnumJobs(Ids, &Count);
+        if (Error != ERROR_SUCCESS)
+        {
+            wprintf(L"Cannot list the jobs (error %lu)\n", Error);
+            return (int)Error;
+        }
+
+        for (i = 0; i < Count; i++)
+        {
+            if (DrvInstGetJob(Ids[i], &Job) == ERROR_SUCCESS)
+                PrintJob(&Job);
+        }
+        wprintf(L"%lu job(s)\n", Count);
+        return 0;
+    }
+
+    if (!lstrcmpiW(argv[1], L"/job") && argc > 2)
+    {
+        Error = DrvInstGetJob(_wtoi64(argv[2]), &Job);
+        if (Error != ERROR_SUCCESS)
+        {
+            wprintf(L"Cannot read the job (error %lu)\n", Error);
+            return (int)Error;
+        }
+        PrintJob(&Job);
+        return 0;
+    }
+
+    if (!lstrcmpiW(argv[1], L"/submit") && argc > 2)
+    {
+        DRVINST_JOB_ID JobId;
+
+        Error = DrvInstSubmitDevice(argv[2], DRVINST_F_SILENT, &JobId);
+        if (Error != ERROR_SUCCESS)
+        {
+            wprintf(L"Cannot submit the job (error %lu)\n", Error);
+            return (int)Error;
+        }
+
+        wprintf(L"submitted job %I64u\n", JobId);
+        Error = DrvInstWait(JobId, 600000, &Job);
+        if (Error == ERROR_SUCCESS || Error == ERROR_TIMEOUT)
+            PrintJob(&Job);
+        return (int)(Error ? Error : Job.Result.Win32);
+    }
+
+    wprintf(L"usage: drvinst /list | /job <id> | /submit <device instance id>\n");
+    return ERROR_INVALID_PARAMETER;
+}
+
 int
 wmain(
     int argc,
@@ -90,6 +185,13 @@ wmain(
     BOOL ShowWizard = FALSE;
     DWORD Written;
     int i;
+
+    /* Started by a person: talk to the service instead of installing */
+    if (argc > 1 && (!lstrcmpiW(argv[1], L"/list") || !lstrcmpiW(argv[1], L"/job") ||
+                     !lstrcmpiW(argv[1], L"/submit") || !lstrcmpiW(argv[1], L"/?")))
+    {
+        return ClientMain(argc, argv);
+    }
 
     ZeroMemory(&Result, sizeof(Result));
     Result.Size = sizeof(Result);
