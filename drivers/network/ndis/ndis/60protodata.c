@@ -102,6 +102,23 @@ NdisSendNetBufferLists(
         return;
     }
 
+#if DBG
+    {
+        LONG DiagCount = 0, DiagCalls;
+        for (CurrentNbl = NetBufferList; CurrentNbl != NULL; CurrentNbl = NET_BUFFER_LIST_NEXT_NBL(CurrentNbl))
+            DiagCount++;
+        InterlockedExchangeAdd(&Ext->DiagTxNbl, DiagCount);
+        DiagCalls = InterlockedIncrement(&Ext->DiagTxCalls);
+        if (DiagCalls <= 3)
+        {
+            PNET_BUFFER DiagNb = NET_BUFFER_LIST_FIRST_NB(NetBufferList);
+            DbgPrint("NDIS6 DIAG TX #%ld PDO %p: nbls=%ld flags=0x%lx firstlen=%lu\n",
+                     DiagCalls, Ext->PhysicalDeviceObject, DiagCount, SendFlags,
+                     DiagNb ? NET_BUFFER_DATA_LENGTH(DiagNb) : 0);
+        }
+    }
+#endif
+
     /* SourceHandle = Binding marks a native send so completion routes to the
      * protocol's SendNetBufferListsCompleteHandler, not the legacy bridge
      * path. NdisReserved[1] carries the binding reference ownership marker

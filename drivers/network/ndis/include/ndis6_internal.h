@@ -359,6 +359,19 @@ typedef struct _NDIS6_ADAPTER_EXT
     PIO_INTERRUPT_MESSAGE_INFO      MsiTable;
     BOOLEAN                         MsiConnected;
 
+    volatile LONG                   DiagIsr;
+    volatile LONG                   DiagIsrRecognized;
+    volatile LONG                   DiagDpc;
+    volatile LONG                   DiagRxCalls;
+    volatile LONG                   DiagRxNbl;
+    volatile LONG                   DiagTxCalls;
+    volatile LONG                   DiagTxNbl;
+    volatile LONG                   DiagTxComplete;
+    volatile LONG                   DiagOid;
+    KTIMER                          DiagTimer;
+    KDPC                            DiagTimerDpc;
+    BOOLEAN                         DiagTimerStarted;
+
     /* DMA adapter for AllocateCommonBuffer / scatter-gather. */
     struct _DMA_ADAPTER*            DmaAdapter;
     ULONG                           NumberOfMapRegisters;

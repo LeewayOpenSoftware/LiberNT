@@ -305,6 +305,19 @@ NdisMSendNetBufferListsComplete(
     if (Adapter == NULL || !Adapter->IsNdis6)
         return;
 
+#if DBG
+    {
+        PNDIS6_ADAPTER_EXT DiagExt = NDIS6_EXT(Adapter);
+        if (DiagExt != NULL)
+        {
+            LONG DiagCount = 0;
+            for (CurrentNbl = NetBufferList; CurrentNbl != NULL; CurrentNbl = NET_BUFFER_LIST_NEXT_NBL(CurrentNbl))
+                DiagCount++;
+            InterlockedExchangeAdd(&DiagExt->DiagTxComplete, DiagCount);
+        }
+    }
+#endif
+
     /* Phase 8: walk the chain in reverse order — bottommost filter sees
      * the completion first, then up through each filter, finally to
      * Ndis6FilterTerminalSendComplete which routes to MiniSendComplete.
