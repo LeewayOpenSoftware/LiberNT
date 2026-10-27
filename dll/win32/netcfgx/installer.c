@@ -1233,7 +1233,7 @@ NetClassInstaller(
     if (hInf == INVALID_HANDLE_VALUE)
     {
         rc = GetLastError();
-        ERR("SetupOpenInfFileW() failed with error 0x%lx\n", rc);
+        ERR("SetupOpenInfFileW(%S) failed with error 0x%lx\n", DriverInfoDetail.InfFileName, rc);
         goto cleanup;
     }
 
