@@ -205,6 +205,8 @@ UpdateDriverForPlugAndPlayDevicesW(
     BOOL FoundHardwareId, FoundAtLeastOneDevice = FALSE;
     BOOL FoundCurrentDriver = FALSE;
     BOOL ret = FALSE;
+    DWORD InstallError = ERROR_SUCCESS; /* Last InstallCurrentDriver failure on a matching device */
+    DWORD LastError;
 
     DevInstData.hDevInfo = INVALID_HANDLE_VALUE;
 
@@ -366,7 +368,10 @@ UpdateDriverForPlugAndPlayDevicesW(
         //if (!InstallCurrentDriver(&DevInstData))
         if (!InstallCurrentDriver(&DevInstData) && GetLastError() != ERROR_PRIVILEGE_NOT_HELD)
         {
-            TRACE("InstallCurrentDriver() failed with error 0x%x\n", GetLastError());
+            InstallError = GetLastError();
+            if (InstallError == ERROR_SUCCESS)
+                InstallError = ERROR_GEN_FAILURE;
+            TRACE("InstallCurrentDriver() failed with error 0x%x\n", InstallError);
             continue;
         }
 
@@ -381,6 +386,11 @@ UpdateDriverForPlugAndPlayDevicesW(
         SetLastError(NO_ERROR);
         ret = TRUE;
     }
+    else if (InstallError != ERROR_SUCCESS)
+    {
+        /* A device matched but its install failed: report that, not "no such device" */
+        SetLastError(InstallError);
+    }
     else if (FoundCurrentDriver)
     {
         SetLastError(ERROR_NO_MORE_ITEMS);
@@ -392,9 +402,12 @@ UpdateDriverForPlugAndPlayDevicesW(
     }
 
 cleanup:
+    /* The cleanup calls below must not clobber the error reported to the caller */
+    LastError = GetLastError();
     if (DevInstData.hDevInfo != INVALID_HANDLE_VALUE)
         SetupDiDestroyDeviceInfoList(DevInstData.hDevInfo);
     HeapFree(GetProcessHeap(), 0, Buffer);
+    SetLastError(LastError);
     return ret;
 }
 
@@ -1103,9 +1116,10 @@ GetFileExt(IN LPWSTR FileName)
 }
 
 static BOOL
-SearchDriverRecursive(
+SearchDriverRecursiveEx(
     IN PDEVINSTDATA DevInstData,
-    IN LPCWSTR Path)
+    IN LPCWSTR Path,
+    IN BOOL StopAtFirst)
 {
     WIN32_FIND_DATAW wfd;
     WCHAR DirPath[MAX_PATH];
@@ -1144,9 +1158,11 @@ SearchDriverRecursive(
                 continue;
             wcscpy(FullPath, DirPath);
             wcscat(FullPath, FileName);
-            if (SearchDriverRecursive(DevInstData, FullPath))
+            if (SearchDriverRecursiveEx(DevInstData, FullPath, StopAtFirst))
             {
                 retval = TRUE;
+                if (StopAtFirst)
+                    break;
                 /* We continue the search for a better driver */
             }
         }
@@ -1165,6 +1181,8 @@ SearchDriverRecursive(
                 if (SearchDriver(DevInstData, DirPath, NULL))
                 {
                     retval = TRUE;
+                    if (StopAtFirst)
+                        break;
                     /* We continue the search for a better driver */
                 }
 
@@ -1177,12 +1195,98 @@ SearchDriverRecursive(
     return retval;
 }
 
+static BOOL
+SearchDriverRecursive(
+    IN PDEVINSTDATA DevInstData,
+    IN LPCWSTR Path)
+{
+    return SearchDriverRecursiveEx(DevInstData, Path, FALSE);
+}
+
 BOOL
 CheckBestDriver(
     _In_ PDEVINSTDATA DevInstData,
     _In_ PCWSTR pszDir)
 {
     return SearchDriverRecursive(DevInstData, pszDir);
+}
+
+/*
+ * Automatic driver folders (device arrival, no UI).
+ *
+ * Windows keeps third-party packages in the driver store and searches it when a
+ * device arrives. Here the store is a plain folder tree: every directory below a
+ * configured root that holds an INF is a candidate package. The roots come from
+ * HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\DriverStorePaths (REG_MULTI_SZ, may use
+ * %VARS%) and default to \Drivers on the system drive.
+ *
+ * Unlike the interactive wizard (which keeps looking for a better driver) the
+ * first directory that yields a driver for this device wins: every directory
+ * rebuilds the device's driver list, so only the last directory searched would
+ * keep a usable selection.
+ */
+#define NEWDEV_AUTO_SETUP_KEY   L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup"
+#define NEWDEV_AUTO_STORE_VALUE L"DriverStorePaths"
+
+static DRIVER_SEARCH_RESULT
+ScanAutoDriverFoldersResult(
+    IN PDEVINSTDATA DevInstData)
+{
+    HKEY hKey;
+    DWORD Type = 0, Size = 0;
+    PWSTR Paths = NULL;
+    PWSTR Path;
+    WCHAR Expanded[MAX_PATH];
+    WCHAR WinDir[MAX_PATH];
+    DRIVER_SEARCH_RESULT Result = DriverSearchNotFound;
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, NEWDEV_AUTO_SETUP_KEY, 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS)
+    {
+        if (RegQueryValueExW(hKey, NEWDEV_AUTO_STORE_VALUE, NULL, &Type, NULL, &Size) == ERROR_SUCCESS &&
+            (Type == REG_MULTI_SZ || Type == REG_SZ || Type == REG_EXPAND_SZ) && Size >= sizeof(WCHAR))
+        {
+            Paths = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, Size + 2 * sizeof(WCHAR));
+            if (Paths && RegQueryValueExW(hKey, NEWDEV_AUTO_STORE_VALUE, NULL, &Type, (LPBYTE)Paths, &Size) != ERROR_SUCCESS)
+            {
+                HeapFree(GetProcessHeap(), 0, Paths);
+                Paths = NULL;
+            }
+        }
+        RegCloseKey(hKey);
+    }
+
+    if (!Paths)
+    {
+        /* Default: \Drivers on the system drive */
+        if (!GetSystemWindowsDirectoryW(WinDir, ARRAYSIZE(WinDir)) || WinDir[1] != L':')
+            return DriverSearchNotFound;
+        WinDir[2] = UNICODE_NULL;
+        wcscat(WinDir, L"\\Drivers");
+        TRACE("Auto-searching %s\n", debugstr_w(WinDir));
+        if (SearchDriverRecursiveEx(DevInstData, WinDir, TRUE))
+            return DriverSearchFound;
+        return DriverSearchNotFound;
+    }
+
+    for (Path = Paths; *Path != UNICODE_NULL; Path += wcslen(Path) + 1)
+    {
+        if (ExpandEnvironmentStringsW(Path, Expanded, ARRAYSIZE(Expanded)) == 0 ||
+            Expanded[0] == UNICODE_NULL)
+        {
+            continue;
+        }
+        TRACE("Auto-searching %s\n", debugstr_w(Expanded));
+        if (SearchDriverRecursiveEx(DevInstData, Expanded, TRUE))
+        {
+            Result = DriverSearchFound;
+            break;
+        }
+        if (Type != REG_MULTI_SZ)
+            break;
+    }
+
+    HeapFree(GetProcessHeap(), 0, Paths);
+    return Result;
 }
 
 static DRIVER_SEARCH_RESULT
@@ -1307,19 +1411,31 @@ InstallCurrentDriver(
     IN PDEVINSTDATA DevInstData)
 {
     BOOL ret;
+    SP_DRVINFO_DATA_W drvSel;
 
     TRACE("Installing driver %s: %s\n",
         debugstr_w(DevInstData->drvInfoData.MfgName),
         debugstr_w(DevInstData->drvInfoData.Description));
 
-    ret = SetupDiCallClassInstaller(
-        DIF_SELECTBESTCOMPATDRV,
-        DevInstData->hDevInfo,
-        &DevInstData->devInfoData);
-    if (!ret)
+    /*
+     * The search (SearchDriverResult) has already selected the best driver of the
+     * list it built. Re-running DIF_SELECTBESTCOMPATDRV would re-rank whatever list
+     * is attached to the device at this point and can replace that choice (an
+     * explicit INF handed to UpdateDriverForPlugAndPlayDevices, INSTALLFLAG_FORCE).
+     * Only ask for a selection when none is in place.
+     */
+    drvSel.cbSize = sizeof(drvSel);
+    if (!SetupDiGetSelectedDriverW(DevInstData->hDevInfo, &DevInstData->devInfoData, &drvSel))
     {
-        TRACE("SetupDiCallClassInstaller(DIF_SELECTBESTCOMPATDRV) failed with error 0x%x\n", GetLastError());
-        return FALSE;
+        ret = SetupDiCallClassInstaller(
+            DIF_SELECTBESTCOMPATDRV,
+            DevInstData->hDevInfo,
+            &DevInstData->devInfoData);
+        if (!ret)
+        {
+            TRACE("SetupDiCallClassInstaller(DIF_SELECTBESTCOMPATDRV) failed with error 0x%x\n", GetLastError());
+            return FALSE;
+        }
     }
 
     return InstallSelectedDriver(DevInstData);
@@ -1665,6 +1781,17 @@ DevInstallInternal(
         goto cleanup;
     }
     SearchResult = ScanFoldersForDriverResult(DevInstData);
+    if (SearchResult != DriverSearchFound && !DevInstData->bUpdate)
+    {
+        /* Nothing in the INF directory: look in the driver folder(s), like a driver store */
+        DWORD SearchError = GetLastError();
+        DRIVER_SEARCH_RESULT AutoResult = ScanAutoDriverFoldersResult(DevInstData);
+
+        if (AutoResult == DriverSearchFound)
+            SearchResult = DriverSearchFound;
+        else
+            SetLastError(SearchError);
+    }
 handle_search_result:
     if (SearchResult == DriverSearchFound)
     {
