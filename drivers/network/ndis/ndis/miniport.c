@@ -3813,7 +3813,20 @@ NdisMRegisterDevice(
          DeviceBlock->MajorFunction[i] = MajorFunctions[i];
 
     DeviceBlock->DeviceObject = DeviceObject;
-    DeviceBlock->SymbolicName = SymbolicName;
+
+    DeviceBlock->SymbolicName.Length = 0;
+    DeviceBlock->SymbolicName.MaximumLength = SymbolicName->Length;
+    DeviceBlock->SymbolicName.Buffer = ExAllocatePoolWithTag(NonPagedPool,
+                                                             SymbolicName->Length ? SymbolicName->Length : sizeof(WCHAR),
+                                                             NDIS_TAG);
+    if (!DeviceBlock->SymbolicName.Buffer)
+    {
+        NDIS_DbgPrint(MIN_TRACE, ("Insufficient resources\n"));
+        IoDeleteSymbolicLink(SymbolicName);
+        IoDeleteDevice(DeviceObject);
+        return NDIS_STATUS_RESOURCES;
+    }
+    RtlCopyUnicodeString(&DeviceBlock->SymbolicName, SymbolicName);
 
     *pDeviceObject = DeviceObject;
     *NdisDeviceHandle = DeviceBlock;
@@ -3836,10 +3849,20 @@ NdisMDeregisterDevice(
  */
 {
     PNDIS_M_DEVICE_BLOCK DeviceBlock = NdisDeviceHandle;
+    UNICODE_STRING SymbolicName;
+
+    if (!DeviceBlock)
+        return NDIS_STATUS_INVALID_PARAMETER;
+
+    SymbolicName = DeviceBlock->SymbolicName;
+
+    if (SymbolicName.Buffer)
+        IoDeleteSymbolicLink(&SymbolicName);
 
     IoDeleteDevice(DeviceBlock->DeviceObject);
 
-    IoDeleteSymbolicLink(DeviceBlock->SymbolicName);
+    if (SymbolicName.Buffer)
+        ExFreePoolWithTag(SymbolicName.Buffer, NDIS_TAG);
 
     return NDIS_STATUS_SUCCESS;
 }
