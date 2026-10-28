@@ -81,8 +81,10 @@ struct RuntimeHost
     ICLRRuntimeHost ICLRRuntimeHost_iface;
 #ifdef __REACTOS__
     ICLRControl ICLRControl_iface;
+    ICLRDomainManager ICLRDomainManager_iface;
     WCHAR *domain_manager_assembly;
     WCHAR *domain_manager_type;
+    BOOL default_domain_started;
 #endif
     CLRRuntimeInfo *version;
     CRITICAL_SECTION lock;

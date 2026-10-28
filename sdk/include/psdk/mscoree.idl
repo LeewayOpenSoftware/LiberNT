@@ -169,6 +169,28 @@ interface ICLROnEventManager : IUnknown
 
     HRESULT UnregisterActionOnEvent([in] EClrEvent event, [in] IActionOnCLREvent *pAction);
 }
+
+typedef enum
+{
+    eInitializeNewDomainFlags_None = 0,
+    eInitializeNewDomainFlags_NoSecurityChanges = 0x2
+} EInitializeNewDomainFlags;
+
+[
+    uuid(270D00A2-8E15-4d0b-ADEB-37BC3E47DF77),
+    version(1.0),
+    local
+]
+interface ICLRDomainManager : IUnknown
+{
+    HRESULT SetAppDomainManagerType([in] LPCWSTR wszAppDomainManagerAssembly,
+                                    [in] LPCWSTR wszAppDomainManagerType,
+                                    [in] EInitializeNewDomainFlags dwInitializeDomainFlags);
+
+    HRESULT SetPropertiesForDefaultAppDomain([in] DWORD nProperties,
+                                             [in] LPCWSTR *pwszPropertyNames,
+                                             [in] LPCWSTR *pwszPropertyValues);
+}
 #endif
 
 [

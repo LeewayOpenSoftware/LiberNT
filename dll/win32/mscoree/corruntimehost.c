@@ -199,6 +199,9 @@ static HRESULT RuntimeHost_GetDefaultDomain(RuntimeHost *This, const WCHAR *conf
 end:
 
     configured_domain = TRUE;
+#ifdef __REACTOS__
+    This->default_domain_started = TRUE;
+#endif
 
     LeaveCriticalSection(&This->lock);
 
@@ -1159,23 +1162,30 @@ static HRESULT WINAPI CLRControl_GetCLRManager(ICLRControl *iface, REFIID riid, 
         return S_OK;
     }
 
+    if (IsEqualGUID(riid, &IID_ICLRDomainManager))
+    {
+        RuntimeHost *This = impl_from_ICLRControl( iface );
+
+        *ppObject = &This->ICLRDomainManager_iface;
+        ICLRDomainManager_AddRef(&This->ICLRDomainManager_iface);
+        return S_OK;
+    }
+
     FIXME("(%p,%s,%p): no CLR manager\n", iface, debugstr_guid(riid), ppObject);
     return E_NOINTERFACE;
 }
 
-static HRESULT WINAPI CLRControl_SetAppDomainManagerType(ICLRControl *iface,
-    LPCWSTR appDomainManagerAssembly, LPCWSTR appDomainManagerType)
+static HRESULT RuntimeHost_SetDomainManagerType(RuntimeHost *This, LPCWSTR assembly_name,
+    LPCWSTR type_name, DWORD flags)
 {
-    RuntimeHost *This = impl_from_ICLRControl( iface );
     WCHAR *assembly, *type;
+    HRESULT hr = S_OK;
 
-    TRACE("(%p,%s,%s)\n", iface, debugstr_w(appDomainManagerAssembly), debugstr_w(appDomainManagerType));
+    if (!assembly_name || !type_name || (flags & ~eInitializeNewDomainFlags_NoSecurityChanges))
+        return E_INVALIDARG;
 
-    if (!appDomainManagerAssembly || !appDomainManagerType)
-        return E_POINTER;
-
-    assembly = wcsdup(appDomainManagerAssembly);
-    type = wcsdup(appDomainManagerType);
+    assembly = wcsdup(assembly_name);
+    type = wcsdup(type_name);
     if (!assembly || !type)
     {
         free(assembly);
@@ -1184,14 +1194,117 @@ static HRESULT WINAPI CLRControl_SetAppDomainManagerType(ICLRControl *iface,
     }
 
     EnterCriticalSection(&This->lock);
-    free(This->domain_manager_assembly);
-    free(This->domain_manager_type);
-    This->domain_manager_assembly = assembly;
-    This->domain_manager_type = type;
+    if (This->default_domain_started || This->domain_manager_assembly)
+        hr = HOST_E_INVALIDOPERATION;
+    else
+    {
+        This->domain_manager_assembly = assembly;
+        This->domain_manager_type = type;
+    }
     LeaveCriticalSection(&This->lock);
 
-    return S_OK;
+    if (FAILED(hr))
+    {
+        free(assembly);
+        free(type);
+    }
+
+    return hr;
 }
+
+static HRESULT WINAPI CLRControl_SetAppDomainManagerType(ICLRControl *iface,
+    LPCWSTR appDomainManagerAssembly, LPCWSTR appDomainManagerType)
+{
+    RuntimeHost *This = impl_from_ICLRControl( iface );
+
+    TRACE("(%p,%s,%s)\n", iface, debugstr_w(appDomainManagerAssembly), debugstr_w(appDomainManagerType));
+
+    return RuntimeHost_SetDomainManagerType(This, appDomainManagerAssembly, appDomainManagerType,
+        eInitializeNewDomainFlags_None);
+}
+
+static inline RuntimeHost *impl_from_ICLRDomainManager( ICLRDomainManager *iface )
+{
+    return CONTAINING_RECORD(iface, RuntimeHost, ICLRDomainManager_iface);
+}
+
+static HRESULT WINAPI CLRDomainManager_QueryInterface(ICLRDomainManager *iface, REFIID riid, void **ppvObject)
+{
+    TRACE("%p %s %p\n", iface, debugstr_guid(riid), ppvObject);
+
+    if (!ppvObject)
+        return E_POINTER;
+
+    if (IsEqualGUID(riid, &IID_ICLRDomainManager) || IsEqualGUID(riid, &IID_IUnknown))
+    {
+        *ppvObject = iface;
+        ICLRDomainManager_AddRef(iface);
+        return S_OK;
+    }
+
+    *ppvObject = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI CLRDomainManager_AddRef(ICLRDomainManager *iface)
+{
+    RuntimeHost *This = impl_from_ICLRDomainManager( iface );
+    return ICorRuntimeHost_AddRef(&This->ICorRuntimeHost_iface);
+}
+
+static ULONG WINAPI CLRDomainManager_Release(ICLRDomainManager *iface)
+{
+    RuntimeHost *This = impl_from_ICLRDomainManager( iface );
+    return ICorRuntimeHost_Release(&This->ICorRuntimeHost_iface);
+}
+
+static HRESULT WINAPI CLRDomainManager_SetAppDomainManagerType(ICLRDomainManager *iface,
+    LPCWSTR wszAppDomainManagerAssembly, LPCWSTR wszAppDomainManagerType,
+    EInitializeNewDomainFlags dwInitializeDomainFlags)
+{
+    RuntimeHost *This = impl_from_ICLRDomainManager( iface );
+
+    TRACE("(%p,%s,%s,%x)\n", iface, debugstr_w(wszAppDomainManagerAssembly),
+        debugstr_w(wszAppDomainManagerType), dwInitializeDomainFlags);
+
+    return RuntimeHost_SetDomainManagerType(This, wszAppDomainManagerAssembly, wszAppDomainManagerType,
+        dwInitializeDomainFlags);
+}
+
+static HRESULT WINAPI CLRDomainManager_SetPropertiesForDefaultAppDomain(ICLRDomainManager *iface,
+    DWORD nProperties, LPCWSTR *pwszPropertyNames, LPCWSTR *pwszPropertyValues)
+{
+    RuntimeHost *This = impl_from_ICLRDomainManager( iface );
+    HRESULT hr = S_OK;
+    DWORD i;
+
+    TRACE("(%p,%lu,%p,%p)\n", iface, nProperties, pwszPropertyNames, pwszPropertyValues);
+
+    if (nProperties && (!pwszPropertyNames || !pwszPropertyValues))
+        return E_INVALIDARG;
+
+    EnterCriticalSection(&This->lock);
+    if (This->default_domain_started)
+        hr = HOST_E_INVALIDOPERATION;
+    for (i = 0; SUCCEEDED(hr) && i < nProperties; i++)
+    {
+        TRACE("%s=%s\n", debugstr_w(pwszPropertyNames[i]), debugstr_w(pwszPropertyValues[i]));
+        if (!pwszPropertyNames[i] || wcscmp(pwszPropertyNames[i], L"PARTIAL_TRUST_VISIBLE_ASSEMBLIES"))
+            hr = HRESULT_FROM_WIN32(ERROR_UNKNOWN_PROPERTY);
+    }
+    LeaveCriticalSection(&This->lock);
+
+    return hr;
+}
+
+static const struct ICLRDomainManagerVtbl CLRDomainManagerVtbl =
+{
+    CLRDomainManager_QueryInterface,
+    CLRDomainManager_AddRef,
+    CLRDomainManager_Release,
+    CLRDomainManager_SetAppDomainManagerType,
+    CLRDomainManager_SetPropertiesForDefaultAppDomain
+};
 
 static const struct ICLRControlVtbl CLRControlVtbl =
 {
@@ -1951,8 +2064,10 @@ HRESULT RuntimeHost_Construct(CLRRuntimeInfo *runtime_version, RuntimeHost** res
     This->ICLRRuntimeHost_iface.lpVtbl = &CLRHostVtbl;
 #ifdef __REACTOS__
     This->ICLRControl_iface.lpVtbl = &CLRControlVtbl;
+    This->ICLRDomainManager_iface.lpVtbl = &CLRDomainManagerVtbl;
     This->domain_manager_assembly = NULL;
     This->domain_manager_type = NULL;
+    This->default_domain_started = FALSE;
 #endif
 
     This->ref = 1;
