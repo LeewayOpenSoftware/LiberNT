@@ -722,6 +722,17 @@ LxUnixNodeId(
     HANDLE Handle;
     NTSTATUS Status;
 
+    if ((Node->Mount != NULL) && (Node->Mount->Kind == LxFsTmpfs))
+    {
+        PLX_TMPFS_INODE Inode;
+        LONG Error = LxTmpfsLookup(Node->Mount, Node->Relative, &Inode);
+
+        if (Error != 0)
+            return Error;
+        *Id = (LONG64)LxTmpfsInodeId(Inode);
+        LxTmpfsInodeDereference(Inode);
+        return 0;
+    }
     if ((Node->Mount == NULL) || (Node->Mount->Kind != LxFsNt))
         return -LX_ECONNREFUSED;
     InitializeObjectAttributes(&ObjectAttributes, &Node->NtPath, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
@@ -853,7 +864,7 @@ LxUnixBindAddress(
             LxNodeFree(&Node);
             return -LX_EADDRINUSE;
         }
-        if ((Node.Mount == NULL) || (Node.Mount->Kind != LxFsNt))
+        if ((Node.Mount == NULL) || LxMountIsSynthetic(Node.Mount))
         {
             LxNodeFree(&Node);
             return -LX_EACCES;

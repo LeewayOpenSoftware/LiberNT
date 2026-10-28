@@ -54,7 +54,8 @@ LxElfOpen(
         Error = LxVfsOpen(Process, LX_AT_FDCWD, Path, LX_O_RDONLY, 0, &Image->File);
     if (Error != 0)
         return Error;
-    if (Image->File->Directory || (Image->File->Handle == NULL) || Image->File->NtPipe)
+    if (Image->File->Directory || ((Image->File->Handle == NULL) && (LxTmpfsFileInode(Image->File) == NULL)) ||
+        Image->File->NtPipe)
     {
         LxElfClose(Image);
         return -LX_EACCES;
@@ -812,8 +813,11 @@ LxExecImage(
     }
     if (Error == 0)
         Error = LxExecDenyWrite(Main.File, &Deny);
+    if ((Error == 0) && (LxTmpfsFileInode(Main.File) != NULL))
+        LxTmpfsInodeAttributes(LxTmpfsFileInode(Main.File), &Mode, &FileUid, &FileGid, &Device);
     if ((Error == 0) && !Process->NoNewPrivs &&
-        (LxNtReadLxAttributes(Main.File->Handle, &Mode, &FileUid, &FileGid, &Device) == 0) && (Mode != MAXULONG))
+        ((LxTmpfsFileInode(Main.File) != NULL) ||
+         (LxNtReadLxAttributes(Main.File->Handle, &Mode, &FileUid, &FileGid, &Device) == 0)) && (Mode != MAXULONG))
     {
         SetUid = ((Mode & LX_S_ISUID) != 0) && (FileUid != MAXULONG);
         SetGid = ((Mode & (LX_S_ISGID | LX_S_IXGRP)) == (LX_S_ISGID | LX_S_IXGRP)) && (FileGid != MAXULONG);

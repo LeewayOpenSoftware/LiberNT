@@ -3452,7 +3452,8 @@ LxPrctlSetExeFile(
 
     if (File == NULL)
         return -LX_EBADF;
-    if ((File->Type != LX_S_IFREG) || File->Directory || (File->Handle == NULL) || (File->Path == NULL) ||
+    if ((File->Type != LX_S_IFREG) || File->Directory || ((File->Handle == NULL) && (LxTmpfsFileInode(File) == NULL)) ||
+        (File->Path == NULL) ||
         ((File->Mount != NULL) && (File->Mount->Flags & LX_MS_NOEXEC)))
     {
         Error = -LX_EACCES;

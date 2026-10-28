@@ -26,6 +26,7 @@ list(APPEND SOURCE
     socket.c
     sys.c
     sysdev.c
+    tmpfs.c
     tty.c
     unistd.c
     vfs.c)

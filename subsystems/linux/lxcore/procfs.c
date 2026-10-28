@@ -3297,12 +3297,13 @@ LxGenMeminfo(
                  "Buffers:               0 kB\nCached:         %8llu kB\nSwapCached:            0 kB\n"
                  "Active:                0 kB\nInactive:              0 kB\nSwapTotal:      %8llu kB\n"
                  "SwapFree:       %8llu kB\nDirty:                 0 kB\nWriteback:             0 kB\n"
-                 "AnonPages:             0 kB\nMapped:                0 kB\nShmem:                 0 kB\n"
+                 "AnonPages:             0 kB\nMapped:                0 kB\nShmem:          %8llu kB\n"
                  "Slab:                  0 kB\nSReclaimable:          0 kB\nSUnreclaim:            0 kB\n"
                  "KernelStack:           0 kB\nPageTables:            0 kB\nCommitLimit:    %8llu kB\n"
                  "Committed_AS:   %8llu kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:           0 kB\n",
                  State.Total / 1024, State.Free / 1024, State.Available / 1024, State.Cached / 1024,
-                 State.SwapTotal / 1024, State.SwapFree / 1024, State.CommitLimit / 1024, State.Committed / 1024);
+                 State.SwapTotal / 1024, State.SwapFree / 1024, LxTmpfsShmemBytes() / 1024,
+                 State.CommitLimit / 1024, State.Committed / 1024);
     HugeTotal = LxHugeQueryPool(&HugeFree, &HugeSurplus, &HugeReserved);
     LxTextPrintf(Text,
                  "HugePages_Total:   %5llu\nHugePages_Free:    %5llu\nHugePages_Rsvd:    %5llu\n"
@@ -4331,7 +4332,7 @@ LxSynthFdPath(
     PLX_FILE File;
     PSTR Path = NULL;
 
-    if ((Node->Mount == NULL) || (Node->Mount->Kind == LxFsNt) || (Node->Type != LX_S_IFLNK) || (Node->Relative == NULL))
+    if ((Node->Mount == NULL) || !LxMountIsSynthetic(Node->Mount) || (Node->Type != LX_S_IFLNK) || (Node->Relative == NULL))
         return NULL;
     if (LxSynthResolve(Process, Node->Mount, Node->Relative, &Synth) != 0)
         return NULL;

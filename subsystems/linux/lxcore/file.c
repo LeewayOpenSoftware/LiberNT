@@ -633,6 +633,8 @@ LxMemfdSize(
     FILE_STANDARD_INFORMATION Standard;
     IO_STATUS_BLOCK Iosb;
 
+    if (LxTmpfsFileInode(File) != NULL)
+        return (LONG64)LxTmpfsInodeSize(LxTmpfsFileInode(File));
     if ((File->Handle == NULL) ||
         !NT_SUCCESS(ZwQueryInformationFile(File->Handle, &Iosb, &Standard, sizeof(Standard), FileStandardInformation)))
     {
@@ -664,6 +666,8 @@ LxMemfdCheckWrite(
         return 0;
     if (File->Flags & LX_O_APPEND)
         Position = Size;
+    else if ((Position < 0) && (LxTmpfsFileInode(File) != NULL))
+        Position = File->Position;
     else if ((Position < 0) &&
              NT_SUCCESS(ZwQueryInformationFile(File->Handle, &Iosb, &Current, sizeof(Current), FilePositionInformation)))
         Position = Current.CurrentByteOffset.QuadPart;
@@ -783,6 +787,8 @@ LxFileReadKernel(
     NTSTATUS Status = STATUS_SUCCESS;
     ULONG Total = 0;
 
+    if (LxTmpfsFileInode(File) != NULL)
+        return LxTmpfsReadKernel(LxTmpfsFileInode(File), Buffer, Length, Offset);
     if (File->Handle == NULL)
     {
         if ((File->Data == NULL) || (Offset >= File->DataLength))

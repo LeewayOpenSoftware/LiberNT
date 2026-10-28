@@ -564,16 +564,30 @@ LxFifoOpen(
     UNREFERENCED_PARAMETER(Process);
 
     *Result = NULL;
-    InitializeObjectAttributes(&ObjectAttributes, &Node->NtPath, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
-    Status = ZwOpenFile(&Handle, FILE_READ_ATTRIBUTES | SYNCHRONIZE, &ObjectAttributes, &Iosb,
-                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                        FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT);
-    if (!NT_SUCCESS(Status))
-        return -LxStatusToErrno(Status);
-    Status = ZwQueryInformationFile(Handle, &Iosb, &Internal, sizeof(Internal), FileInternalInformation);
-    ZwClose(Handle);
-    if (!NT_SUCCESS(Status))
-        return -LxStatusToErrno(Status);
+    if (Node->Mount->Kind == LxFsTmpfs)
+    {
+        PLX_TMPFS_INODE Inode;
+        LONG Error = LxTmpfsLookup(Node->Mount, Node->Relative, &Inode);
+
+        if (Error != 0)
+            return Error;
+        Internal.IndexNumber.QuadPart = (LONG64)LxTmpfsInodeId(Inode);
+        LxTmpfsInodeDereference(Inode);
+    }
+    else
+    {
+        InitializeObjectAttributes(&ObjectAttributes, &Node->NtPath, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL,
+                                   NULL);
+        Status = ZwOpenFile(&Handle, FILE_READ_ATTRIBUTES | SYNCHRONIZE, &ObjectAttributes, &Iosb,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                            FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT);
+        if (!NT_SUCCESS(Status))
+            return -LxStatusToErrno(Status);
+        Status = ZwQueryInformationFile(Handle, &Iosb, &Internal, sizeof(Internal), FileInternalInformation);
+        ZwClose(Handle);
+        if (!NT_SUCCESS(Status))
+            return -LxStatusToErrno(Status);
+    }
 
     for (;;)
     {

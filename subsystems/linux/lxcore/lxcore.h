@@ -79,6 +79,8 @@ typedef struct _LX_INSTANCE LX_INSTANCE, *PLX_INSTANCE;
 typedef struct _LX_MOUNT LX_MOUNT, *PLX_MOUNT;
 typedef struct _LX_CGROUP LX_CGROUP, *PLX_CGROUP;
 typedef struct _LX_NS LX_NS, *PLX_NS;
+typedef struct _LX_TMPFS LX_TMPFS, *PLX_TMPFS;
+typedef struct _LX_TMPFS_INODE LX_TMPFS_INODE, *PLX_TMPFS_INODE;
 
 typedef enum _LX_NS_KIND
 {
@@ -265,7 +267,8 @@ typedef enum _LX_FS_KIND
     LxFsCgroup,
     LxFsDevpts,
     LxFsNsfs,
-    LxFsMqueue
+    LxFsMqueue,
+    LxFsTmpfs
 } LX_FS_KIND;
 
 struct _LX_MOUNT
@@ -288,6 +291,7 @@ struct _LX_MOUNT
     ULONG64 Magic;
     ULONG Dev;
     UNICODE_STRING NtRoot;
+    PLX_TMPFS Tmpfs;
     PSTR Root;
     PSTR Alias;
     BOOLEAN Detached;
@@ -401,7 +405,6 @@ struct _LX_INSTANCE
     PLX_NS RootNs[LxNsCount];
     ULONG NextMountId;
     ULONG NextPid;
-    ULONG NextTmpId;
     CHAR BootId[37];
     LONG64 BootTime;
     PLX_CGROUP RootCgroup;
@@ -1108,6 +1111,46 @@ LONG LxSynthQuery(_In_ PLX_PROCESS Process, _In_ PLX_MOUNT Mount, _In_ PCSTR Rel
 LONG LxSynthOpen(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node, _In_ ULONG Flags, _Out_ PLX_FILE *File);
 LONG LxSynthStat(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node, _Out_ PLX_STAT Stat);
 LONG LxSynthMkdir(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node);
+VOID LxTmpfsInitialize(VOID);
+PLX_TMPFS LxTmpfsCreate(_In_ ULONG Mode);
+VOID LxTmpfsReference(_In_ PLX_TMPFS Fs);
+VOID LxTmpfsDereference(_In_ PLX_TMPFS Fs);
+VOID LxTmpfsMountReference(_In_ PLX_TMPFS Fs);
+VOID LxTmpfsMountDereference(_In_ PLX_TMPFS Fs);
+VOID LxTmpfsPurge(_In_ PLX_TMPFS Fs);
+ULONG64 LxTmpfsShmemBytes(VOID);
+VOID LxTmpfsStatfs(_In_ PLX_TMPFS Fs, _Out_ PULONG64 Blocks, _Out_ PULONG64 Free, _Out_ PULONG64 Files, _Out_ PULONG64 FreeFiles);
+LONG LxTmpfsQuery(_In_ PLX_MOUNT Mount, _In_ PCSTR Relative, _Out_ PULONG Type, _Out_opt_ PSTR *LinkTarget);
+LONG LxTmpfsLookup(_In_ PLX_MOUNT Mount, _In_ PCSTR Relative, _Out_ PLX_TMPFS_INODE *Inode);
+LONG LxTmpfsCreateNode(_In_ PLX_MOUNT Mount, _In_ PCSTR Relative, _In_ ULONG Mode, _In_ ULONG Uid, _In_ ULONG Gid,
+                       _In_ ULONG64 Device, _In_opt_ PCSTR LinkTarget, _Out_opt_ PLX_TMPFS_INODE *Inode);
+LONG LxTmpfsUnlink(_In_ PLX_MOUNT Mount, _In_ PCSTR Relative, _In_ BOOLEAN Directory);
+LONG LxTmpfsRename(_In_ PLX_MOUNT FromMount, _In_ PCSTR FromRelative, _In_ PLX_MOUNT ToMount, _In_ PCSTR ToRelative,
+                   _In_ ULONG Flags);
+LONG LxTmpfsLink(_In_ PLX_MOUNT FromMount, _In_ PCSTR FromRelative, _In_ PLX_MOUNT ToMount, _In_ PCSTR ToRelative);
+VOID LxTmpfsInodeReference(_In_ PLX_TMPFS_INODE Inode);
+VOID LxTmpfsInodeDereference(_In_ PLX_TMPFS_INODE Inode);
+VOID LxTmpfsInodeStat(_In_ PLX_TMPFS_INODE Inode, _In_opt_ PLX_MOUNT Mount, _Out_ PLX_STAT Stat);
+VOID LxTmpfsInodeAttributes(_In_ PLX_TMPFS_INODE Inode, _Out_ PULONG Mode, _Out_ PULONG Uid, _Out_ PULONG Gid,
+                            _Out_ PULONG64 Device);
+VOID LxTmpfsInodeSetAttributes(_In_ PLX_TMPFS_INODE Inode, _In_ ULONG Mode, _In_ ULONG Uid, _In_ ULONG Gid);
+VOID LxTmpfsInodeSetTimes(_In_ PLX_TMPFS_INODE Inode, _In_reads_(2) PLX_TIMESPEC Times);
+PSTR LxTmpfsInodeLinkTarget(_In_ PLX_TMPFS_INODE Inode);
+PSTR LxTmpfsInodePath(_In_ PLX_TMPFS_INODE Inode, _In_ PLX_MOUNT Mount);
+ULONG64 LxTmpfsInodeId(_In_ PLX_TMPFS_INODE Inode);
+ULONG64 LxTmpfsInodeSize(_In_ PLX_TMPFS_INODE Inode);
+LONG LxTmpfsInodeTruncate(_In_ PLX_TMPFS_INODE Inode, _In_ LONG64 Size);
+LONG LxTmpfsInodeZeroRange(_In_ PLX_TMPFS_INODE Inode, _In_ ULONG64 Start, _In_ ULONG64 End);
+LONG LxTmpfsInodeRemoveRange(_In_ PLX_TMPFS_INODE Inode, _In_ ULONG64 Start, _In_ ULONG64 End);
+LONG LxTmpfsXattrRead(_In_ PLX_TMPFS_INODE Inode, _Out_writes_bytes_to_(Capacity, *Length) PUCHAR Buffer,
+                      _In_ ULONG Capacity, _Out_ PULONG Length);
+LONG LxTmpfsXattrWrite(_In_ PLX_TMPFS_INODE Inode, _In_reads_bytes_(Length) PUCHAR Blob, _In_ ULONG Length);
+LONG LxTmpfsOpenFile(_In_ PLX_TMPFS_INODE Inode, _In_ ULONG Flags, _Out_ PLX_FILE *File);
+LONG LxTmpfsCreateAnonymous(_In_ ULONG Mode, _In_ ULONG Uid, _In_ ULONG Gid, _Out_ PLX_FILE *File);
+PLX_TMPFS_INODE LxTmpfsFileInode(_In_opt_ PLX_FILE File);
+NTSTATUS LxTmpfsMapSection(_In_ PLX_TMPFS_INODE Inode, _In_ BOOLEAN Shared, _Out_ PHANDLE Section, _Out_opt_ PULONG64 Size);
+LONG64 LxTmpfsReadKernel(_In_ PLX_TMPFS_INODE Inode, _Out_writes_bytes_(Length) PVOID Buffer, _In_ ULONG Length,
+                         _In_ ULONG64 Offset);
 LONG LxSynthRmdir(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node);
 LONG LxSynthReadlink(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node, _Out_ PSTR *Target);
 VOID LxSynthInitialize(VOID);
@@ -1228,6 +1271,8 @@ ULONG64 LxMmLockedBytes(_In_ PLX_PROCESS Process);
 VOID LxSharedVmTerminate(_In_ PLX_PROCESS Process, _In_ NTSTATUS ExitCode, _In_ BOOLEAN CurrentNtProcessOnly);
 VOID LxSharedVmExited(_In_ PLX_PROCESS Process);
 ULONG LxMmTruncateViews(_In_ HANDLE Handle);
+ULONG LxMmReleaseKeyedViews(_In_ PVOID Key, _In_opt_ VOID (*Visit)(_In_ PVOID Context, _In_ PLX_PROCESS Process),
+                            _In_opt_ PVOID Context);
 VOID LxMmForkChild(_In_ PLX_PROCESS Parent, _In_ PLX_PROCESS Child, _In_ HANDLE ProcessHandle);
 LONG64 LxMmMincore(_In_ PLX_PROCESS Process, _In_ ULONG64 Address, _In_ ULONG64 End, _In_ ULONG64 Output);
 ULONG64 LxMmVmaResident(_In_ HANDLE ProcessHandle, _In_ PLX_VMA Vma);
@@ -1320,6 +1365,14 @@ PUCHAR LxKernelConfigGzip(_Out_ PULONG Length);
 VOID LxBpfInitialize(VOID);
 LONG LxBpfDeviceCheck(_In_ PLX_PROCESS Process, _In_ BOOLEAN Block, _In_ ULONG Major, _In_ ULONG Minor, _In_ ULONG Access);
 VOID LxBpfCgroupRelease(_In_ PLX_CGROUP Cgroup);
+
+FORCEINLINE
+BOOLEAN
+LxMountIsSynthetic(
+    _In_ PLX_MOUNT Mount)
+{
+    return (Mount->Kind != LxFsNt) && (Mount->Kind != LxFsTmpfs);
+}
 
 FORCEINLINE
 PLX_NS

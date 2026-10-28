@@ -1095,6 +1095,44 @@ LxMmCopyRestore(
 
 static
 NTSTATUS
+LxMmFileSection(
+    _In_ PLX_FILE File,
+    _In_ ULONG Protect,
+    _Out_ PHANDLE Section)
+{
+    OBJECT_ATTRIBUTES ObjectAttributes;
+
+    if (LxTmpfsFileInode(File) != NULL)
+        return LxTmpfsMapSection(LxTmpfsFileInode(File), TRUE, Section, NULL);
+    InitializeObjectAttributes(&ObjectAttributes, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
+    return ZwCreateSection(Section, SECTION_ALL_ACCESS, &ObjectAttributes, NULL, Protect, SEC_COMMIT, File->Handle);
+}
+
+static
+BOOLEAN
+LxMmFileSize(
+    _In_ PLX_FILE File,
+    _Out_ PLONG64 Size)
+{
+    FILE_STANDARD_INFORMATION Standard;
+    IO_STATUS_BLOCK Iosb;
+
+    if (LxTmpfsFileInode(File) != NULL)
+    {
+        *Size = (LONG64)LxTmpfsInodeSize(LxTmpfsFileInode(File));
+        return TRUE;
+    }
+    if ((File->Handle == NULL) ||
+        !NT_SUCCESS(ZwQueryInformationFile(File->Handle, &Iosb, &Standard, sizeof(Standard), FileStandardInformation)))
+    {
+        return FALSE;
+    }
+    *Size = Standard.EndOfFile.QuadPart;
+    return TRUE;
+}
+
+static
+NTSTATUS
 LxMmCreateCowSection(
     _In_ PLX_FILE File,
     _Out_ PVOID *Section)
@@ -1104,8 +1142,11 @@ LxMmCreateCowSection(
     NTSTATUS Status;
 
     InitializeObjectAttributes(&ObjectAttributes, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
-    Status = ZwCreateSection(&Handle, SECTION_MAP_READ | SECTION_MAP_EXECUTE | SECTION_QUERY, &ObjectAttributes, NULL,
-                             PAGE_EXECUTE_WRITECOPY, SEC_COMMIT, File->Handle);
+    if (LxTmpfsFileInode(File) != NULL)
+        Status = LxTmpfsMapSection(LxTmpfsFileInode(File), FALSE, &Handle, NULL);
+    else
+        Status = ZwCreateSection(&Handle, SECTION_MAP_READ | SECTION_MAP_EXECUTE | SECTION_QUERY, &ObjectAttributes,
+                                 NULL, PAGE_EXECUTE_WRITECOPY, SEC_COMMIT, File->Handle);
     if (!NT_SUCCESS(Status))
         return Status;
     Status = ObReferenceObjectByHandle(Handle, 0, NULL, KernelMode, Section, NULL);
@@ -1237,7 +1278,6 @@ LxMmMapSharedPiece(
     _In_ ULONG64 Offset,
     _In_ ULONG Maximum)
 {
-    OBJECT_ATTRIBUTES ObjectAttributes;
     SECTION_BASIC_INFORMATION Basic;
     LARGE_INTEGER SectionOffset;
     SIZE_T ViewSize = (SIZE_T)Length;
@@ -1252,9 +1292,7 @@ LxMmMapSharedPiece(
     }
     else
     {
-        InitializeObjectAttributes(&ObjectAttributes, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
-        Status = ZwCreateSection(&Section, SECTION_ALL_ACCESS, &ObjectAttributes, NULL, Maximum, SEC_COMMIT,
-                                 Vma->File->Handle);
+        Status = LxMmFileSection(Vma->File, Maximum, &Section);
     }
     if (!NT_SUCCESS(Status))
         return Status;
@@ -1294,7 +1332,8 @@ LxMmSplitSharedView(
         if ((Vma->Start >= End) || (Vma->End <= Base))
             continue;
         if (!(Vma->Flags & LX_MAP_SHARED) || !(Vma->Flags & LX_VMA_VIEW) || (Vma->MapEnd != 0) ||
-            ((Vma->Section == NULL) && ((Vma->File == NULL) || (Vma->File->Handle == NULL))))
+            ((Vma->Section == NULL) &&
+             ((Vma->File == NULL) || ((Vma->File->Handle == NULL) && (LxTmpfsFileInode(Vma->File) == NULL)))))
         {
             return -LX_EBUSY;
         }
@@ -1752,16 +1791,11 @@ ULONG64
 LxMmFileEnd(
     _In_ PLX_FILE File)
 {
-    FILE_STANDARD_INFORMATION Standard;
-    IO_STATUS_BLOCK Iosb;
+    LONG64 Size;
 
-    if ((File->Handle == NULL) || (File->Type != LX_S_IFREG) ||
-        !NT_SUCCESS(ZwQueryInformationFile(File->Handle, &Iosb, &Standard, sizeof(Standard), FileStandardInformation)) ||
-        (Standard.EndOfFile.QuadPart < 0))
-    {
+    if ((File->Type != LX_S_IFREG) || !LxMmFileSize(File, &Size) || (Size < 0))
         return MAXULONG64;
-    }
-    return LX_ALIGN_UP((ULONG64)Standard.EndOfFile.QuadPart, LX_PAGE_SIZE);
+    return LX_ALIGN_UP((ULONG64)Size, LX_PAGE_SIZE);
 }
 
 static
@@ -1849,18 +1883,16 @@ LxMmGrowView(
     ULONG64 Base = Vma->ViewBase, FileOffset = Vma->ViewOffset, MapEnd = Base, FileEnd, NewSize, OldEnd = Base;
     PLX_FILE File = Vma->File;
     BOOLEAN Writable = ((File->Flags & LX_O_ACCMODE) == LX_O_RDWR);
-    FILE_STANDARD_INFORMATION Standard;
     MEMORY_BASIC_INFORMATION Information;
-    OBJECT_ATTRIBUTES ObjectAttributes;
     LARGE_INTEGER SectionOffset;
-    IO_STATUS_BLOCK Iosb;
     PLIST_ENTRY Entry;
     SIZE_T ViewSize;
+    LONG64 Size;
     PVOID View;
     HANDLE Section;
     NTSTATUS Status;
 
-    if ((File == NULL) || (File->Handle == NULL))
+    if ((File == NULL) || ((File->Handle == NULL) && (LxTmpfsFileInode(File) == NULL)))
         return -LX_EFAULT;
     for (Entry = Process->Vmas.Flink; Entry != &Process->Vmas; Entry = Entry->Flink)
     {
@@ -1870,9 +1902,9 @@ LxMmGrowView(
             continue;
         MapEnd = max(MapEnd, min(Piece->End, Piece->MapEnd));
     }
-    if (!NT_SUCCESS(ZwQueryInformationFile(File->Handle, &Iosb, &Standard, sizeof(Standard), FileStandardInformation)))
+    if (!LxMmFileSize(File, &Size))
         return -LX_EFAULT;
-    FileEnd = (ULONG64)Standard.EndOfFile.QuadPart;
+    FileEnd = (ULONG64)Size;
     if (FileEnd <= FileOffset + (LX_ALIGN_DOWN(Address, LX_PAGE_SIZE) - Base))
         return -LX_ENXIO;
     NewSize = min(FileEnd - FileOffset, MapEnd - Base);
@@ -1887,9 +1919,7 @@ LxMmGrowView(
     }
     LxVmReleaseReservations(LX_ALIGN_UP(OldEnd, LX_ALLOC_GRANULARITY), LX_ALIGN_UP(MapEnd, LX_ALLOC_GRANULARITY));
 
-    InitializeObjectAttributes(&ObjectAttributes, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
-    Status = ZwCreateSection(&Section, SECTION_ALL_ACCESS, &ObjectAttributes, NULL,
-                             Writable ? PAGE_EXECUTE_READWRITE : PAGE_EXECUTE_READ, SEC_COMMIT, File->Handle);
+    Status = LxMmFileSection(File, Writable ? PAGE_EXECUTE_READWRITE : PAGE_EXECUTE_READ, &Section);
     if (NT_SUCCESS(Status))
     {
         View = (PVOID)(ULONG_PTR)Base;
@@ -2264,6 +2294,12 @@ LxMmSharedKey(
             *Offset = Vma->Offset + (Address - Vma->Start);
             Found = TRUE;
         }
+        else if (LxTmpfsFileInode(Vma->File) != NULL)
+        {
+            *Object = LxTmpfsFileInode(Vma->File);
+            *Offset = Vma->Offset + (Address - Vma->Start);
+            Found = TRUE;
+        }
         else if ((Vma->File != NULL) && (Vma->File->Handle != NULL) &&
                  NT_SUCCESS(ObReferenceObjectByHandle(Vma->File->Handle, 0, *IoFileObjectType, KernelMode,
                                                       (PVOID *)&FileObject, NULL)))
@@ -2355,8 +2391,6 @@ LxMmMapView(
     _Out_ PULONG64 GrowBase)
 {
     OBJECT_ATTRIBUTES ObjectAttributes;
-    FILE_STANDARD_INFORMATION Standard;
-    IO_STATUS_BLOCK Iosb;
     LARGE_INTEGER MaximumSize, SectionOffset;
     ULONG64 Delta = Offset & (LX_ALLOC_GRANULARITY - 1);
     BOOLEAN Writable = (File == NULL) || ((File->Flags & LX_O_ACCMODE) == LX_O_RDWR);
@@ -2375,17 +2409,17 @@ LxMmMapView(
 
     if (File != NULL)
     {
-        if (File->Handle == NULL)
+        LONG64 Size;
+
+        if ((File->Handle == NULL) && (LxTmpfsFileInode(File) == NULL))
             return 2;
-        Status = ZwQueryInformationFile(File->Handle, &Iosb, &Standard, sizeof(Standard), FileStandardInformation);
-        if (!NT_SUCCESS(Status) || (Standard.EndOfFile.QuadPart < 0))
+        if (!LxMmFileSize(File, &Size) || (Size < 0))
         {
-            DPRINT1("Linux shared mapping cannot query the file size: 0x%08lx\n", Status);
+            DPRINT1("Linux shared mapping cannot query the size of '%s'\n", File->Path);
             return 3;
         }
-        Grow = (Offset + Length > LX_ALIGN_UP((ULONG64)Standard.EndOfFile.QuadPart, LX_PAGE_SIZE));
-        ViewSize = ((ULONG64)Standard.EndOfFile.QuadPart > Offset - Delta) ?
-                   (SIZE_T)min(Length + Delta, (ULONG64)Standard.EndOfFile.QuadPart - (Offset - Delta)) : 0;
+        Grow = (Offset + Length > LX_ALIGN_UP((ULONG64)Size, LX_PAGE_SIZE));
+        ViewSize = ((ULONG64)Size > Offset - Delta) ? (SIZE_T)min(Length + Delta, (ULONG64)Size - (Offset - Delta)) : 0;
     }
 
     if (Fixed)
@@ -2418,9 +2452,7 @@ LxMmMapView(
         }
         if (ViewSize != 0)
         {
-            InitializeObjectAttributes(&ObjectAttributes, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
-            Status = ZwCreateSection(&Section, SECTION_ALL_ACCESS, &ObjectAttributes, NULL, Maximum, SEC_COMMIT,
-                                     File->Handle);
+            Status = LxMmFileSection(File, Maximum, &Section);
             if (!NT_SUCCESS(Status))
                 return 6;
             SectionOffset.QuadPart = (LONG64)(Offset - Delta);
@@ -2450,13 +2482,11 @@ LxMmMapView(
 
     MaximumSize.QuadPart = (LONG64)Length;
     InitializeObjectAttributes(&ObjectAttributes, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
-    Status = ZwCreateSection(&Section,
-                             SECTION_ALL_ACCESS,
-                             &ObjectAttributes,
-                             (File == NULL) ? &MaximumSize : NULL,
-                             Maximum,
-                             SEC_COMMIT,
-                             (File != NULL) ? File->Handle : NULL);
+    if (File != NULL)
+        Status = LxMmFileSection(File, Maximum, &Section);
+    else
+        Status = ZwCreateSection(&Section, SECTION_ALL_ACCESS, &ObjectAttributes, &MaximumSize, Maximum, SEC_COMMIT,
+                                 NULL);
     if (!NT_SUCCESS(Status))
     {
         DPRINT1("Linux shared mapping cannot create a section: 0x%08lx\n", Status);
@@ -2586,16 +2616,15 @@ LxMmMapCow(
 {
     BOOLEAN Fixed = (Flags & (LX_MAP_FIXED | LX_MAP_FIXED_NOREPLACE)) != 0;
     ULONG64 Delta = Offset & (LX_ALLOC_GRANULARITY - 1), Base = 0, ViewEnd, Probe;
-    FILE_STANDARD_INFORMATION Standard;
-    IO_STATUS_BLOCK Iosb;
+    LONG64 FileSize;
     PVOID Section;
     NTSTATUS Status;
     LONG Error;
 
-    if ((File->Handle == NULL) || (File->Type != LX_S_IFREG) || ((File->Flags & LX_O_ACCMODE) == LX_O_WRONLY))
+    if (((File->Handle == NULL) && (LxTmpfsFileInode(File) == NULL)) || (File->Type != LX_S_IFREG) ||
+        ((File->Flags & LX_O_ACCMODE) == LX_O_WRONLY))
         return 1;
-    Status = ZwQueryInformationFile(File->Handle, &Iosb, &Standard, sizeof(Standard), FileStandardInformation);
-    if (!NT_SUCCESS(Status) || (Standard.EndOfFile.QuadPart <= 0) || ((ULONG64)Standard.EndOfFile.QuadPart <= Offset))
+    if (!LxMmFileSize(File, &FileSize) || (FileSize <= 0) || ((ULONG64)FileSize <= Offset))
         return 1;
 
     if (Fixed)
@@ -2626,7 +2655,7 @@ LxMmMapCow(
         }
         Address = Base + Delta;
     }
-    ViewEnd = Address + min(Length, LX_ALIGN_UP((ULONG64)Standard.EndOfFile.QuadPart, LX_PAGE_SIZE) - Offset);
+    ViewEnd = Address + min(Length, LX_ALIGN_UP((ULONG64)FileSize, LX_PAGE_SIZE) - Offset);
 
     Status = LxMmCreateCowSection(File, &Section);
     if (!NT_SUCCESS(Status))
@@ -3392,7 +3421,9 @@ LX_SYSCALL(LxSysMmap)
     {
         Result = -LX_EPERM;
     }
-    else if ((File != NULL) && (((File->Handle == NULL) && (File->Data == NULL)) || File->Directory || File->NtPipe))
+    else if ((File != NULL) &&
+             (((File->Handle == NULL) && (File->Data == NULL) && (LxTmpfsFileInode(File) == NULL)) || File->Directory ||
+              File->NtPipe))
     {
         Zero = (File->Type == LX_S_IFCHR) && (File->Rdev == ((1 << 8) | 5));
         if (!Zero)
@@ -3557,6 +3588,12 @@ LxMadviseRemove(
     ULONG64 Cursor;
     NTSTATUS Status = STATUS_SUCCESS;
 
+    if (!(Vma->Flags & LX_VMA_HUGETLB) && (LxTmpfsFileInode(Vma->File) != NULL))
+    {
+        ULONG64 First = Vma->Offset + (Start - Vma->Start);
+
+        return LxTmpfsInodeRemoveRange(LxTmpfsFileInode(Vma->File), First, First + (End - Start));
+    }
     if (!(Vma->Flags & LX_VMA_HUGETLB) && (Vma->File != NULL) && (Vma->File->Handle != NULL))
     {
         Zero = LxAllocPaged(LX_IO_CHUNK);
@@ -4117,7 +4154,8 @@ LxMmReleaseFileViews(
         ULONG64 Base, ViewOffset, MapEnd;
 
         if (((Vma->Flags & (LX_VMA_VIEW | LX_MAP_SHARED)) != (LX_VMA_VIEW | LX_MAP_SHARED)) || (Vma->File == NULL) ||
-            (LxMmHandleKey(Vma->File->Handle) != Key))
+            (((LxTmpfsFileInode(Vma->File) != NULL) ? (PVOID)LxTmpfsFileInode(Vma->File) :
+                                                      LxMmHandleKey(Vma->File->Handle)) != Key))
         {
             continue;
         }
@@ -4156,12 +4194,20 @@ LxMmTruncateViews(
     _In_ HANDLE Handle)
 {
     PVOID Key = LxMmHandleKey(Handle);
+
+    return (Key != NULL) ? LxMmReleaseKeyedViews(Key, NULL, NULL) : 0;
+}
+
+ULONG
+LxMmReleaseKeyedViews(
+    _In_ PVOID Key,
+    _In_opt_ VOID (*Visit)(_In_ PVOID Context, _In_ PLX_PROCESS Process),
+    _In_opt_ PVOID Context)
+{
     PLX_PROCESS *Processes;
     PLIST_ENTRY Entry;
     ULONG Count = 0, Capacity = 0, Index, Changed = 0;
 
-    if (Key == NULL)
-        return 0;
     ExAcquireFastMutex(&LxProcessListLock);
     for (Entry = LxProcessList.Flink; Entry != &LxProcessList; Entry = Entry->Flink)
         Capacity++;
@@ -4197,6 +4243,8 @@ LxMmTruncateViews(
         }
         LxMmLock(Process);
         Changed += LxMmReleaseFileViews(Process, Key);
+        if (Visit != NULL)
+            Visit(Context, Process);
         LxMmUnlock(Process);
         if (Attached)
         {

@@ -1360,6 +1360,27 @@ LX_SYSCALL(LxSysMemfdCreate)
     if (Result != 0)
         return (Result == -LX_ENAMETOOLONG) ? -LX_EINVAL : Result;
 
+    if (!(Flags & LX_MFD_HUGETLB))
+    {
+        Result = LxTmpfsCreateAnonymous(LX_S_IFREG | 0777, Call->Process->Fsuid, Call->Process->Fsgid, &File);
+        if (Result == 0)
+        {
+            File->Path = LxStrPrintf("/memfd:%s (deleted)", Name);
+            File->Memfd = LxAlloc(sizeof(*File->Memfd));
+            if ((File->Path == NULL) || (File->Memfd == NULL))
+            {
+                LxFileDereference(File);
+                Result = -LX_ENOMEM;
+            }
+        }
+        LxFree(Name);
+        if (Result != 0)
+            return Result;
+        File->Memfd->RefCount = 1;
+        File->Memfd->Seals = (Flags & LX_MFD_ALLOW_SEALING) ? 0 : LX_F_SEAL_SEAL;
+        return LxInstallNewFile(Call->Process, File, (Flags & LX_MFD_CLOEXEC) != 0);
+    }
+
     RtlStringCbPrintfW(Suffix, sizeof(Suffix), L"\\memfd.%lu", (ULONG)InterlockedIncrement(&LxMemfdCounter));
     NtPath.MaximumLength = Instance->TmpNt.Length + (USHORT)(wcslen(Suffix) * sizeof(WCHAR)) + sizeof(WCHAR);
     NtPath.Length = 0;
