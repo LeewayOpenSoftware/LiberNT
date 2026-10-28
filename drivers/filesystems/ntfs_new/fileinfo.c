@@ -2135,6 +2135,7 @@ NtfsFsdQueryInformation(_In_    PDEVICE_OBJECT VolumeDeviceObject,
         case FileAllInformation:
         case FileNormalizedNameInformation:
         case FileIdInformation:
+        case FileCaseSensitiveInformation:
             if (!FileCB->FileRec || !VolCB || !VolCB->DiskVolume)
             {
                 Status = STATUS_INVALID_PARAMETER;
@@ -2313,6 +2314,22 @@ NtfsFsdQueryInformation(_In_    PDEVICE_OBJECT VolumeDeviceObject,
                     break;
             }
             BufferLength -= sizeof(FILE_ATTRIBUTE_TAG_INFORMATION);
+            break;
+        }
+        case FileCaseSensitiveInformation:
+        {
+            PFILE_CASE_SENSITIVE_INFORMATION CaseSensitive = (PFILE_CASE_SENSITIVE_INFORMATION)SystemBuffer;
+
+            if (BufferLength < sizeof(FILE_CASE_SENSITIVE_INFORMATION))
+            {
+                Status = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+            CaseSensitive->Flags = NtfsFileRecordIsCaseSensitiveDirectory(FileCB->FileRec)
+                                       ? FILE_CS_FLAG_CASE_SENSITIVE_DIR
+                                       : 0;
+            BufferLength -= sizeof(FILE_CASE_SENSITIVE_INFORMATION);
+            Status = STATUS_SUCCESS;
             break;
         }
         case FileAllInformation:
@@ -2645,6 +2662,32 @@ NtfsFsdSetInformation(_In_ PDEVICE_OBJECT VolumeDeviceObject,
                 InterlockedIncrement(&VolCB->DirGeneration);
             }
             goto Complete;
+
+        case FileCaseSensitiveInformation:
+        {
+            PFILE_CASE_SENSITIVE_INFORMATION CaseSensitive =
+                (PFILE_CASE_SENSITIVE_INFORMATION)SystemBuffer;
+
+            if (BufferLength < sizeof(FILE_CASE_SENSITIVE_INFORMATION))
+            {
+                Status = STATUS_INFO_LENGTH_MISMATCH;
+                goto Complete;
+            }
+            if (!(FileCB->DesiredAccess & FILE_WRITE_ATTRIBUTES))
+            {
+                Status = STATUS_ACCESS_DENIED;
+                goto Complete;
+            }
+            Status = NtfsRefreshDirectoryRecord(VolCB, FileCB);
+            if (!NT_SUCCESS(Status))
+                goto Complete;
+            Status = NtfsFileRecordSetCaseSensitiveDirectory(
+                FileCB->FileRec,
+                (CaseSensitive->Flags & FILE_CS_FLAG_CASE_SENSITIVE_DIR) != 0);
+            if (NT_SUCCESS(Status))
+                InterlockedIncrement(&VolCB->DirGeneration);
+            goto Complete;
+        }
 
         case FileDispositionInformation:
         {

@@ -211,11 +211,13 @@ NtfsGetAttributeInfo(PNtfsVolume DiskVolume,
      *
      * TODO: Add attributes as needed.
      */
-    Buffer->FileSystemAttributes = FILE_CASE_PRESERVED_NAMES
+    Buffer->FileSystemAttributes = FILE_CASE_SENSITIVE_SEARCH
+                                   | FILE_CASE_PRESERVED_NAMES
                                    | FILE_UNICODE_ON_DISK
                                    | FILE_NAMED_STREAMS
                                    | FILE_SUPPORTS_REPARSE_POINTS
-                                   | FILE_SUPPORTS_EXTENDED_ATTRIBUTES;
+                                   | FILE_SUPPORTS_EXTENDED_ATTRIBUTES
+                                   | FILE_SUPPORTS_CASE_SENSITIVE_DIRS;
 
     if (NtfsVolumeIsReadOnly(DiskVolume))
         Buffer->FileSystemAttributes |= FILE_READ_ONLY_VOLUME;
@@ -558,11 +560,8 @@ NtfsMissingNameMatches(_In_ PNtfsMissingName Entry,
 
     for (Index = 0; Index < Length; Index++)
     {
-        if (RtlUpcaseUnicodeChar(Entry->Name[Index]) !=
-            RtlUpcaseUnicodeChar(Name[Index]))
-        {
+        if (Entry->Name[Index] != Name[Index])
             return FALSE;
-        }
     }
     return TRUE;
 }
@@ -771,11 +770,8 @@ NtfsCachedRecordMatches(_In_ PNtfsCachedRecord Entry,
 
     for (Index = 0; Index < Length; Index++)
     {
-        if (RtlUpcaseUnicodeChar(Entry->Name[Index]) !=
-            RtlUpcaseUnicodeChar(Name[Index]))
-        {
+        if (Entry->Name[Index] != Name[Index])
             return FALSE;
-        }
     }
     return TRUE;
 }
