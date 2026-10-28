@@ -140,6 +140,46 @@ static HRESULT RuntimeHost_GetIUnknownForObject(RuntimeHost *This, MonoObject *o
 
 #ifdef __REACTOS__
 static void RuntimeHost_InitializeDomainManager(RuntimeHost *This, MonoDomain *domain);
+
+static void RuntimeHost_SetPrivatePath(const WCHAR *config_path, const WCHAR *base_dir, SIZE_T base_dir_size)
+{
+    parsed_config_file parsed_config;
+    WCHAR *temp, *save, **priv_path;
+    int i, count = 0;
+    HRESULT hr;
+
+    hr = parse_config_file(config_path, &parsed_config);
+    if (SUCCEEDED(hr) && parsed_config.private_path && parsed_config.private_path[0])
+    {
+        for (i = 0; parsed_config.private_path[i] != 0; i++)
+            if (parsed_config.private_path[i] == ';') count++;
+        if (parsed_config.private_path[wcslen(parsed_config.private_path) - 1] != ';') count++;
+
+        priv_path = calloc(count + 1, sizeof(WCHAR *));
+        if (priv_path)
+        {
+            temp = wcstok_s(parsed_config.private_path, L";", &save);
+            for (i = 0; i < count && temp; i++)
+            {
+                priv_path[i] = malloc((base_dir_size + wcslen(temp) + 1) * sizeof(WCHAR));
+                if (!priv_path[i])
+                    break;
+                memcpy(priv_path[i], base_dir, base_dir_size * sizeof(WCHAR));
+                wcscpy(priv_path[i] + base_dir_size, temp);
+                temp = wcstok_s(NULL, L";", &save);
+            }
+
+            if (InterlockedCompareExchangePointer((void **)&private_path, priv_path, NULL))
+            {
+                for (i = 0; priv_path[i]; i++)
+                    free(priv_path[i]);
+                free(priv_path);
+            }
+        }
+    }
+
+    free_parsed_config_file(&parsed_config);
+}
 #endif
 
 static HRESULT RuntimeHost_GetDefaultDomain(RuntimeHost *This, const WCHAR *config_path, MonoDomain **result)
@@ -189,6 +229,10 @@ static HRESULT RuntimeHost_GetDefaultDomain(RuntimeHost *This, const WCHAR *conf
 
     TRACE("setting base_dir: %s, config_path: %s\n", base_dirA, config_pathA);
     mono_domain_set_config(*result, base_dirA, config_pathA);
+#ifdef __REACTOS__
+    if (wcsrchr(base_dir, '\\'))
+        RuntimeHost_SetPrivatePath(config_path, base_dir, wcsrchr(base_dir, '\\') - base_dir + 1);
+#endif
 
     free(config_pathA);
     free(base_dirA);
