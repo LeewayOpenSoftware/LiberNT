@@ -67,6 +67,27 @@ static CRITICAL_SECTION fixup_list_cs = { &fixup_list_cs_debug, -1, 0, 0, 0, 0 }
 
 static struct list dll_fixups;
 
+#ifdef __REACTOS__
+struct clr_event_action
+{
+    struct list entry;
+    EClrEvent event;
+    IActionOnCLREvent *action;
+};
+
+static CRITICAL_SECTION clr_event_cs;
+static CRITICAL_SECTION_DEBUG clr_event_cs_debug =
+{
+    0, 0, &clr_event_cs,
+    { &clr_event_cs_debug.ProcessLocksList,
+      &clr_event_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": clr_event_cs") }
+};
+static CRITICAL_SECTION clr_event_cs = { &clr_event_cs_debug, -1, 0, 0, 0, 0 };
+
+static struct list clr_event_actions = LIST_INIT(clr_event_actions);
+#endif
+
 WCHAR **private_path = NULL;
 
 struct dll_fixup
@@ -1002,14 +1023,143 @@ static ULONG WINAPI CLRControl_Release(ICLRControl *iface)
     return ICorRuntimeHost_Release(&This->ICorRuntimeHost_iface);
 }
 
-static HRESULT WINAPI CLRControl_GetCLRManager(ICLRControl *iface, REFIID riid, void **ppObject)
+static HRESULT WINAPI CLROnEventManager_QueryInterface(ICLROnEventManager *iface, REFIID riid, void **ppvObject)
 {
-    FIXME("(%p,%s,%p): no CLR manager\n", iface, debugstr_guid(riid), ppObject);
+    TRACE("%p %s %p\n", iface, debugstr_guid(riid), ppvObject);
 
-    if (!ppObject)
+    if (!ppvObject)
         return E_POINTER;
 
-    *ppObject = NULL;
+    if (IsEqualGUID(riid, &IID_ICLROnEventManager) || IsEqualGUID(riid, &IID_IUnknown))
+    {
+        *ppvObject = iface;
+        return S_OK;
+    }
+
+    *ppvObject = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI CLROnEventManager_AddRef(ICLROnEventManager *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI CLROnEventManager_Release(ICLROnEventManager *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI CLROnEventManager_RegisterActionOnEvent(ICLROnEventManager *iface,
+    EClrEvent event, IActionOnCLREvent *action)
+{
+    struct clr_event_action *entry;
+
+    TRACE("(%p,%d,%p)\n", iface, event, action);
+
+    if ((unsigned int)event >= MaxClrEvent || !action)
+        return E_INVALIDARG;
+
+    entry = malloc(sizeof(*entry));
+    if (!entry)
+        return E_OUTOFMEMORY;
+
+    entry->event = event;
+    entry->action = action;
+    IActionOnCLREvent_AddRef(action);
+
+    EnterCriticalSection(&clr_event_cs);
+    list_add_tail(&clr_event_actions, &entry->entry);
+    LeaveCriticalSection(&clr_event_cs);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI CLROnEventManager_UnregisterActionOnEvent(ICLROnEventManager *iface,
+    EClrEvent event, IActionOnCLREvent *action)
+{
+    struct clr_event_action *entry, *found = NULL;
+
+    TRACE("(%p,%d,%p)\n", iface, event, action);
+
+    EnterCriticalSection(&clr_event_cs);
+    LIST_FOR_EACH_ENTRY(entry, &clr_event_actions, struct clr_event_action, entry)
+    {
+        if (entry->event == event && entry->action == action)
+        {
+            found = entry;
+            list_remove(&entry->entry);
+            break;
+        }
+    }
+    LeaveCriticalSection(&clr_event_cs);
+
+    if (!found)
+        return HOST_E_INVALIDOPERATION;
+
+    IActionOnCLREvent_Release(found->action);
+    free(found);
+    return S_OK;
+}
+
+static const struct ICLROnEventManagerVtbl CLROnEventManagerVtbl =
+{
+    CLROnEventManager_QueryInterface,
+    CLROnEventManager_AddRef,
+    CLROnEventManager_Release,
+    CLROnEventManager_RegisterActionOnEvent,
+    CLROnEventManager_UnregisterActionOnEvent
+};
+
+static ICLROnEventManager clr_on_event_manager = { &CLROnEventManagerVtbl };
+
+void RuntimeHost_NotifyEvent(EClrEvent event, void *data)
+{
+    struct clr_event_action *entry;
+    IActionOnCLREvent **actions = NULL, **grown;
+    unsigned int count = 0, size = 0, i;
+
+    EnterCriticalSection(&clr_event_cs);
+    LIST_FOR_EACH_ENTRY(entry, &clr_event_actions, struct clr_event_action, entry)
+    {
+        if (entry->event != event)
+            continue;
+        if (count == size)
+        {
+            size = size ? size * 2 : 4;
+            grown = realloc(actions, size * sizeof(*actions));
+            if (!grown)
+                break;
+            actions = grown;
+        }
+        actions[count] = entry->action;
+        IActionOnCLREvent_AddRef(actions[count]);
+        count++;
+    }
+    LeaveCriticalSection(&clr_event_cs);
+
+    for (i = 0; i < count; i++)
+    {
+        IActionOnCLREvent_OnEvent(actions[i], event, data);
+        IActionOnCLREvent_Release(actions[i]);
+    }
+    free(actions);
+}
+
+static HRESULT WINAPI CLRControl_GetCLRManager(ICLRControl *iface, REFIID riid, void **ppObject)
+{
+    TRACE("(%p,%s,%p)\n", iface, debugstr_guid(riid), ppObject);
+
+    if (!ppObject)
+        return E_INVALIDARG;
+
+    if (IsEqualGUID(riid, &IID_ICLROnEventManager))
+    {
+        *ppObject = &clr_on_event_manager;
+        return S_OK;
+    }
+
+    FIXME("(%p,%s,%p): no CLR manager\n", iface, debugstr_guid(riid), ppObject);
     return E_NOINTERFACE;
 }
 

@@ -154,6 +154,8 @@ extern void free_parsed_config_file(parsed_config_file *file);
 extern HRESULT check_host_config_file(LPCWSTR filename);
 
 extern HRESULT set_startup_flags(ICLRRuntimeInfo *iface, DWORD flags, BOOL set_config, LPCWSTR host_config_file);
+
+extern void RuntimeHost_NotifyEvent(EClrEvent event, void *data);
 #endif
 
 typedef enum {

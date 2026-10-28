@@ -138,6 +138,39 @@ interface ICLRControl : IUnknown
                           [in] LPCWSTR appDomainManagerType);
 }
 
+#ifdef __REACTOS__
+typedef enum
+{
+    Event_DomainUnload,
+    Event_ClrDisabled,
+    Event_MDAFired,
+    Event_StackOverflow,
+    MaxClrEvent
+} EClrEvent;
+
+[
+    uuid(607BE24B-D91B-4E28-A242-61871CE56E35),
+    version(1.0),
+    local
+]
+interface IActionOnCLREvent : IUnknown
+{
+    HRESULT OnEvent([in] EClrEvent event, [in] PVOID data);
+}
+
+[
+    uuid(1D0E0132-E64F-493D-9260-025C0E32C175),
+    version(1.0),
+    local
+]
+interface ICLROnEventManager : IUnknown
+{
+    HRESULT RegisterActionOnEvent([in] EClrEvent event, [in] IActionOnCLREvent *pAction);
+
+    HRESULT UnregisterActionOnEvent([in] EClrEvent event, [in] IActionOnCLREvent *pAction);
+}
+#endif
+
 [
     uuid(02CA073C-7079-4860-880A-C2F7A449C991),
     version(1.0),

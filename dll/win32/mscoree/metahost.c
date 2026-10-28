@@ -90,6 +90,11 @@ static BOOL is_mono_shutdown;
 typedef struct _MonoProfilerDesc *MonoProfilerHandle;
 
 typedef void (CDECL *MonoProfilerRuntimeShutdownBeginCallback) (MonoProfiler *prof);
+#ifdef __REACTOS__
+typedef void (CDECL *MonoProfilerDomainUnloadingCallback) (MonoProfiler *prof, MonoDomain *domain);
+
+static LONG clr_disabled_notified;
+#endif
 
 MonoImage* (CDECL *mono_assembly_get_image)(MonoAssembly *assembly);
 MonoAssembly* (CDECL *mono_assembly_load_from)(MonoImage *image, const char *fname, MonoImageOpenStatus *status);
@@ -122,6 +127,10 @@ void* (CDECL *mono_object_unbox)(MonoObject *obj);
 static MonoProfilerHandle (CDECL *mono_profiler_create)(MonoProfiler *prof);
 static void (CDECL *mono_profiler_install)(MonoProfiler *prof, MonoProfileFunc shutdown_callback);
 static void (CDECL *mono_profiler_set_runtime_shutdown_begin_callback)(MonoProfilerHandle handle, MonoProfilerRuntimeShutdownBeginCallback cb);
+#ifdef __REACTOS__
+static void (CDECL *mono_profiler_set_domain_unloading_callback)(MonoProfilerHandle handle, MonoProfilerDomainUnloadingCallback cb);
+static int (CDECL *mono_domain_get_id)(MonoDomain *domain);
+#endif
 MonoType* (CDECL *mono_reflection_type_from_name)(char *name, MonoImage *image);
 MonoObject* (CDECL *mono_runtime_invoke)(MonoMethod *method, void *obj, void **params, MonoObject **exc);
 void (CDECL *mono_runtime_object_init)(MonoObject *this_obj);
@@ -148,6 +157,9 @@ static MonoAssembly* CDECL wine_mono_assembly_preload_hook_fn(MonoAssemblyName *
 static MonoAssembly* CDECL wine_mono_assembly_preload_hook_v2_fn(MonoAssemblyName *aname, char **assemblies_path, int *flags, void *user_data);
 
 static void CDECL mono_shutdown_callback_fn(MonoProfiler *prof);
+#ifdef __REACTOS__
+static void CDECL mono_domain_unloading_callback_fn(MonoProfiler *prof, MonoDomain *domain);
+#endif
 
 static MonoImage* CDECL image_open_module_handle_dummy(HMODULE module_handle,
     char* fname, UINT has_entry_point, MonoImageOpenStatus* status)
@@ -262,6 +274,10 @@ static HRESULT load_mono(LPCWSTR mono_path)
         LOAD_OPT_MONO_FUNCTION(mono_profiler_create, NULL);
         LOAD_OPT_MONO_FUNCTION(mono_profiler_install, NULL);
         LOAD_OPT_MONO_FUNCTION(mono_profiler_set_runtime_shutdown_begin_callback, NULL);
+#ifdef __REACTOS__
+        LOAD_OPT_MONO_FUNCTION(mono_profiler_set_domain_unloading_callback, NULL);
+        LOAD_OPT_MONO_FUNCTION(mono_domain_get_id, NULL);
+#endif
         LOAD_OPT_MONO_FUNCTION(mono_set_crash_chaining, set_crash_chaining_dummy);
         LOAD_OPT_MONO_FUNCTION(mono_trace_set_print_handler, set_print_handler_dummy);
         LOAD_OPT_MONO_FUNCTION(mono_trace_set_printerr_handler, set_print_handler_dummy);
@@ -283,6 +299,10 @@ static HRESULT load_mono(LPCWSTR mono_path)
             /* Profiler API v2 */
             MonoProfilerHandle handle = mono_profiler_create(NULL);
             mono_profiler_set_runtime_shutdown_begin_callback(handle, mono_shutdown_callback_fn);
+#ifdef __REACTOS__
+            if (mono_profiler_set_domain_unloading_callback && mono_domain_get_id)
+                mono_profiler_set_domain_unloading_callback(handle, mono_domain_unloading_callback_fn);
+#endif
         }
         else if (mono_profiler_install != NULL)
         {
@@ -400,7 +420,18 @@ MonoDomain* get_root_domain(void)
 static void CDECL mono_shutdown_callback_fn(MonoProfiler *prof)
 {
     is_mono_shutdown = TRUE;
+#ifdef __REACTOS__
+    if (!InterlockedExchange(&clr_disabled_notified, TRUE))
+        RuntimeHost_NotifyEvent(Event_ClrDisabled, NULL);
+#endif
 }
+
+#ifdef __REACTOS__
+static void CDECL mono_domain_unloading_callback_fn(MonoProfiler *prof, MonoDomain *domain)
+{
+    RuntimeHost_NotifyEvent(Event_DomainUnload, (void *)(DWORD_PTR)mono_domain_get_id(domain));
+}
+#endif
 
 static HRESULT WINAPI thread_set_fn(void)
 {
@@ -472,6 +503,10 @@ void expect_no_runtimes(void)
 {
     if (mono_handle && is_mono_started && !is_mono_shutdown)
     {
+#ifdef __REACTOS__
+        if (!InterlockedExchange(&clr_disabled_notified, TRUE))
+            RuntimeHost_NotifyEvent(Event_ClrDisabled, NULL);
+#endif
         ERR("Process exited with a Mono runtime loaded.\n");
         return;
     }
