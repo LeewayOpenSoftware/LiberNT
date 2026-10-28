@@ -4,7 +4,8 @@
 #
 # Builds the Wine Mono payload of a LiberNT release:
 #   libernt-wine-mono-<version>-<release>-<arch>.msi  the upstream Wine Mono MSI with the
-#   assemblies rebuilt from patches/ (build_assemblies.sh, docker) swapped into image.cab and
+#   assemblies rebuilt from patches/ (build_assemblies.sh, docker) and the runtime DLLs rebuilt
+#   from patches/mono-runtime-*.patch (build_runtime.sh, docker) swapped into image.cab, and
 #   the Windows Runtime projection built from winrt/ added next to mscorlib.
 # The MSI is rewritten with gcab and msibuild (msitools).
 
@@ -29,6 +30,11 @@ ASSEMBLIES = {
     "System.Security": "lib\\mono\\gac\\System.Security\\4.0.0.0__b03f5f7f11d50a3a\\System.Security.dll",
     "System.ServiceProcess": "lib\\mono\\gac\\System.ServiceProcess\\4.0.0.0__b03f5f7f11d50a3a\\System.ServiceProcess.dll",
     "WindowsBase": "lib\\mono\\gac\\WindowsBase\\4.0.0.0__31bf3856ad364e35\\WindowsBase.dll",
+}
+RUNTIMES = {
+    "x86": "bin\\libmono-2.0-x86.dll",
+    "x86_64": "bin\\libmono-2.0-x86_64.dll",
+    "arm64": "bin\\libmono-2.0-arm64.dll",
 }
 ADDITIONS = {
     "Windows.built.dll": ("lib\\mono\\4.5\\Windows.dll", "lib|mono|4.5", "Windows.dll"),
@@ -75,6 +81,8 @@ def repack(src, dst, replacements, additions):
         with open(cab, "wb") as out:
             run("msiinfo", "extract", src, "image.cab", stdout=out)
         order = run("gcab", "-t", cab, capture_output=True, text=True).stdout.splitlines()
+        replacements = {key: path for key, path in replacements.items()
+                        if key in order or key not in RUNTIMES.values()}
         missing = [key for key in replacements if key not in order]
         if missing:
             sys.exit(f"{src}: not in image.cab: {', '.join(missing)}")
@@ -156,7 +164,10 @@ def main():
         sys.exit("the x86 and arm64 MSIs do not ship the same assemblies")
     build = args.work / "build"
     run("bash", Path(__file__).with_name("build_assemblies.sh"), build, msis["x86"])
+    runtime = args.work / "runtime"
+    run("bash", Path(__file__).with_name("build_runtime.sh"), runtime)
     replacements = {key: build / f"{name}.patched.dll" for name, key in ASSEMBLIES.items()}
+    replacements.update({key: runtime / f"libmono-2.0-{arch}.patched.dll" for arch, key in RUNTIMES.items()})
     additions = {key: (component, filename, build / built) for built, (key, component, filename) in ADDITIONS.items()}
     for arch, msi in msis.items():
         dst = args.out / f"libernt-wine-mono-{VERSION}-{args.release}-{arch}.msi"
