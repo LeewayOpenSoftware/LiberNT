@@ -50,10 +50,17 @@ static const struct ICLRRuntimeInfoVtbl CLRRuntimeInfoVtbl;
 #define NUM_RUNTIMES 4
 
 static struct CLRRuntimeInfo runtimes[NUM_RUNTIMES] = {
+#ifdef __REACTOS__
+    {{&CLRRuntimeInfoVtbl}, 1, 0, 3705, 0, STARTUP_CONCURRENT_GC, NULL},
+    {{&CLRRuntimeInfoVtbl}, 1, 1, 4322, 0, STARTUP_CONCURRENT_GC, NULL},
+    {{&CLRRuntimeInfoVtbl}, 2, 0, 50727, 0, STARTUP_CONCURRENT_GC, NULL},
+    {{&CLRRuntimeInfoVtbl}, 4, 0, 30319, 0, STARTUP_CONCURRENT_GC, NULL}
+#else
     {{&CLRRuntimeInfoVtbl}, 1, 0, 3705, 0},
     {{&CLRRuntimeInfoVtbl}, 1, 1, 4322, 0},
     {{&CLRRuntimeInfoVtbl}, 2, 0, 50727, 0},
     {{&CLRRuntimeInfoVtbl}, 4, 0, 30319, 0}
+#endif
 };
 
 static CRITICAL_SECTION runtime_list_cs;
@@ -661,20 +668,96 @@ static HRESULT WINAPI CLRRuntimeInfo_IsLoadable(ICLRRuntimeInfo* iface,
     return E_NOTIMPL;
 }
 
+#ifdef __REACTOS__
+static HRESULT store_startup_flags(struct CLRRuntimeInfo *This, DWORD flags, BOOL set_config, LPCWSTR host_config_file)
+{
+    WCHAR *config = NULL;
+
+    if (set_config && host_config_file)
+    {
+        config = wcsdup(host_config_file);
+        if (!config)
+            return E_OUTOFMEMORY;
+    }
+
+    EnterCriticalSection(&runtime_list_cs);
+    This->startup_flags = flags;
+    if (set_config)
+    {
+        free(This->host_config_file);
+        This->host_config_file = config;
+    }
+    LeaveCriticalSection(&runtime_list_cs);
+
+    return S_OK;
+}
+
+HRESULT set_startup_flags(ICLRRuntimeInfo *iface, DWORD flags, BOOL set_config, LPCWSTR host_config_file)
+{
+    return store_startup_flags(impl_from_ICLRRuntimeInfo(iface), flags, set_config, host_config_file);
+}
+#endif
+
 static HRESULT WINAPI CLRRuntimeInfo_SetDefaultStartupFlags(ICLRRuntimeInfo* iface,
     DWORD dwStartupFlags, LPCWSTR pwzHostConfigFile)
 {
+#ifdef __REACTOS__
+    struct CLRRuntimeInfo *This = impl_from_ICLRRuntimeInfo(iface);
+    HRESULT hr;
+
+    TRACE("%p %lx %s\n", iface, dwStartupFlags, debugstr_w(pwzHostConfigFile));
+
+    if (pwzHostConfigFile)
+    {
+        hr = check_host_config_file(pwzHostConfigFile);
+        if (FAILED(hr))
+            return hr;
+    }
+
+    return store_startup_flags(This, dwStartupFlags, TRUE, pwzHostConfigFile);
+#else
     FIXME("%p %lx %s\n", iface, dwStartupFlags, debugstr_w(pwzHostConfigFile));
 
     return E_NOTIMPL;
+#endif
 }
 
 static HRESULT WINAPI CLRRuntimeInfo_GetDefaultStartupFlags(ICLRRuntimeInfo* iface,
     DWORD *pdwStartupFlags, LPWSTR pwzHostConfigFile, DWORD *pcchHostConfigFile)
 {
+#ifdef __REACTOS__
+    struct CLRRuntimeInfo *This = impl_from_ICLRRuntimeInfo(iface);
+    HRESULT hr = S_OK;
+    DWORD size;
+
+    TRACE("%p %p %p %p\n", iface, pdwStartupFlags, pwzHostConfigFile, pcchHostConfigFile);
+
+    if (!pdwStartupFlags && !pcchHostConfigFile)
+        return E_POINTER;
+
+    EnterCriticalSection(&runtime_list_cs);
+
+    if (pdwStartupFlags)
+        *pdwStartupFlags = This->startup_flags;
+
+    if (pcchHostConfigFile)
+    {
+        size = (This->host_config_file ? lstrlenW(This->host_config_file) : 0) + 1;
+        if (*pcchHostConfigFile < size)
+            hr = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+        else if (pwzHostConfigFile)
+            lstrcpyW(pwzHostConfigFile, This->host_config_file ? This->host_config_file : L"");
+        *pcchHostConfigFile = size;
+    }
+
+    LeaveCriticalSection(&runtime_list_cs);
+
+    return hr;
+#else
     FIXME("%p %p %p %p\n", iface, pdwStartupFlags, pwzHostConfigFile, pcchHostConfigFile);
 
     return E_NOTIMPL;
+#endif
 }
 
 static HRESULT WINAPI CLRRuntimeInfo_BindAsLegacyV2Runtime(ICLRRuntimeInfo* iface)

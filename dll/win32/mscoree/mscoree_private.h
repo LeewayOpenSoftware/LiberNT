@@ -69,6 +69,10 @@ typedef struct CLRRuntimeInfo
     DWORD minor;
     DWORD build;
     struct RuntimeHost *loaded_runtime;
+#ifdef __REACTOS__
+    DWORD startup_flags;
+    WCHAR *host_config_file;
+#endif
 } CLRRuntimeInfo;
 
 struct RuntimeHost
@@ -126,6 +130,9 @@ typedef struct parsed_config_file
 {
     struct list supported_runtimes;
     LPWSTR private_path;
+#ifdef __REACTOS__
+    HRESULT parse_result;
+#endif
 } parsed_config_file;
 
 typedef struct supported_runtime
@@ -142,6 +149,12 @@ extern HRESULT parse_config_file(LPCWSTR filename, parsed_config_file *result);
 extern HRESULT parse_config_stream(IStream *stream, parsed_config_file *result);
 
 extern void free_parsed_config_file(parsed_config_file *file);
+
+#ifdef __REACTOS__
+extern HRESULT check_host_config_file(LPCWSTR filename);
+
+extern HRESULT set_startup_flags(ICLRRuntimeInfo *iface, DWORD flags, BOOL set_config, LPCWSTR host_config_file);
+#endif
 
 typedef enum {
 	MONO_IMAGE_OK,

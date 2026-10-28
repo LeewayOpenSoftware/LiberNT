@@ -622,6 +622,9 @@ static void init_config(parsed_config_file *config)
 {
     list_init(&config->supported_runtimes);
     config->private_path = NULL;
+#ifdef __REACTOS__
+    config->parse_result = S_OK;
+#endif
 }
 
 static HRESULT parse_config(VARIANT input, parsed_config_file *result)
@@ -659,6 +662,9 @@ static HRESULT parse_config(VARIANT input, parsed_config_file *result)
 
     ISAXContentHandler_Release(&handler->ISAXContentHandler_iface);
 
+#ifdef __REACTOS__
+    result->parse_result = hr;
+#endif
     return S_OK;
 }
 
@@ -699,6 +705,33 @@ HRESULT parse_config_file(LPCWSTR filename, parsed_config_file *result)
 
     return hr;
 }
+
+#ifdef __REACTOS__
+HRESULT check_host_config_file(LPCWSTR filename)
+{
+    parsed_config_file config;
+    LARGE_INTEGER size;
+    HANDLE file;
+    HRESULT hr;
+    BOOL empty;
+
+    file = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
+    if (file == INVALID_HANDLE_VALUE)
+        return HRESULT_FROM_WIN32(GetLastError());
+
+    empty = GetFileSizeEx(file, &size) && !size.QuadPart;
+    CloseHandle(file);
+    if (empty)
+        return S_OK;
+
+    hr = parse_config_file(filename, &config);
+    if (SUCCEEDED(hr))
+        hr = config.parse_result;
+    free_parsed_config_file(&config);
+
+    return hr;
+}
+#endif
 
 void free_parsed_config_file(parsed_config_file *file)
 {
