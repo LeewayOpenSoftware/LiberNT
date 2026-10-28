@@ -100,7 +100,10 @@ CreateJob(
     DRVINST_JOB_ID JobId = 0;
 
     if (!DeviceInstanceId[0] || !IsValidDeviceInstanceId(DeviceInstanceId))
+    {
+        DPRINT1("Rejecting driver install job for invalid device instance id %ls\n", DeviceInstanceId);
         return 0;
+    }
 
     EnterCriticalSection(&JobLock);
 
@@ -445,7 +448,8 @@ DrvInstSubmitDeviceJob(
 
     if (!JobsInitialized)
         return ERROR_SERVICE_NOT_ACTIVE;
-    if (!DeviceInstanceId[0] || lstrlenW(DeviceInstanceId) >= DRVINST_DEVICE_ID_CCH)
+    if (!DeviceInstanceId[0] || lstrlenW(DeviceInstanceId) >= DRVINST_DEVICE_ID_CCH ||
+        !IsValidDeviceInstanceId(DeviceInstanceId))
         return ERROR_INVALID_PARAMETER;
 
     Async = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*Async));
