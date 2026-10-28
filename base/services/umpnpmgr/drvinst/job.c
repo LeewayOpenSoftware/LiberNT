@@ -70,6 +70,26 @@ AllocateJob(VOID)
     return Oldest;
 }
 
+static BOOL
+IsValidDeviceInstanceId(
+    _In_ PCWSTR DeviceInstanceId)
+{
+    static const WCHAR Allowed[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789\\&_.#{}()-+";
+    PCWSTR p;
+
+    for (; *DeviceInstanceId; DeviceInstanceId++)
+    {
+        for (p = Allowed; *p; p++)
+        {
+            if (*p == *DeviceInstanceId)
+                break;
+        }
+        if (!*p)
+            return FALSE;
+    }
+    return TRUE;
+}
+
 static DRVINST_JOB_ID
 CreateJob(
     _In_ PCWSTR DeviceInstanceId,
@@ -78,6 +98,9 @@ CreateJob(
 {
     PDRVINST_JOB_INFO Job;
     DRVINST_JOB_ID JobId = 0;
+
+    if (!DeviceInstanceId[0] || !IsValidDeviceInstanceId(DeviceInstanceId))
+        return 0;
 
     EnterCriticalSection(&JobLock);
 
@@ -230,7 +253,8 @@ RunWorker(
     PROCESS_INFORMATION ProcessInfo;
     HANDLE hRead = NULL, hWrite = NULL;
     LPVOID Environment = NULL;
-    WCHAR CommandLine[DRVINST_DEVICE_ID_CCH + 64];
+    WCHAR SystemDir[MAX_PATH];
+    WCHAR CommandLine[MAX_PATH + DRVINST_DEVICE_ID_CCH + 64];
     DWORD WaitResult, Read, ExitCode = 0;
     ULONG State = DrvInstJobFailed;
     BOOL Created = FALSE;
@@ -250,8 +274,14 @@ RunWorker(
     }
     SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
 
-    _snwprintf(CommandLine, RTL_NUMBER_OF(CommandLine), L"%ls /i \"%ls\" /h %lx%ls",
-               DRVINST_WORKER_NAME, DeviceInstanceId, (ULONG)(ULONG_PTR)hWrite,
+    if (!GetWindowsDirectoryW(SystemDir, RTL_NUMBER_OF(SystemDir)))
+    {
+        Result->Win32 = GetLastError();
+        goto Cleanup;
+    }
+
+    _snwprintf(CommandLine, RTL_NUMBER_OF(CommandLine), L"\"%ls\\system32\\%ls\" /i \"%ls\" /h %lx%ls",
+               SystemDir, DRVINST_WORKER_NAME, DeviceInstanceId, (ULONG)(ULONG_PTR)hWrite,
                ShowWizard ? L" /w" : L"");
     CommandLine[RTL_NUMBER_OF(CommandLine) - 1] = UNICODE_NULL;
 
