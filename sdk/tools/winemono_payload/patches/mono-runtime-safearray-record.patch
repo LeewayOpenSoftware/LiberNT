@@ -1,0 +1,160 @@
+--- a/mono/metadata/cominterop.c
++++ b/mono/metadata/cominterop.c
+@@ -4829,6 +4829,139 @@
+ {
+ 	mono_marshal_safearray_end (safearray, NULL);
+ }
++#ifdef HOST_WIN32
++static const IID cominterop_iid_ITypeInfo = {0x00020401, 0x0000, 0x0000, {0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
++
++static VARTYPE
++cominterop_record_field_vt (MonoType *type)
++{
++	if (type->byref)
++		return VT_EMPTY;
++	switch (type->type) {
++	case MONO_TYPE_I1: return VT_I1;
++	case MONO_TYPE_U1: return VT_UI1;
++	case MONO_TYPE_I2: return VT_I2;
++	case MONO_TYPE_U2: return VT_UI2;
++	case MONO_TYPE_CHAR: return VT_UI2;
++	case MONO_TYPE_I4: return VT_I4;
++	case MONO_TYPE_U4: return VT_UI4;
++	case MONO_TYPE_I8: return VT_I8;
++	case MONO_TYPE_U8: return VT_UI8;
++	case MONO_TYPE_R4: return VT_R4;
++	case MONO_TYPE_R8: return VT_R8;
++	default: return VT_EMPTY;
++	}
++}
++
++static IRecordInfo *
++cominterop_record_info_for_class (MonoClass *klass)
++{
++	ERROR_DECL (error);
++	ICreateTypeLib2 *create_lib = NULL;
++	ICreateTypeInfo *create_info = NULL;
++	ITypeInfo *type_info = NULL;
++	IRecordInfo *record_info = NULL;
++	TYPEATTR *attr = NULL;
++	MonoClassField *field;
++	gpointer iter = NULL;
++	gunichar2 *name;
++	guint8 guid [16];
++	UINT index = 0;
++	HRESULT hr;
++
++	if (!m_class_is_valuetype (klass) || !m_class_is_blittable (klass))
++		return NULL;
++
++	mono_metadata_get_class_guid (klass, guid, error);
++	if (!is_ok (error)) {
++		mono_error_cleanup (error);
++		return NULL;
++	}
++
++	hr = CreateTypeLib2 (sizeof (gpointer) == 8 ? SYS_WIN64 : SYS_WIN32, L"mono_records.tlb", &create_lib);
++	if (FAILED (hr))
++		return NULL;
++	name = g_utf8_to_utf16 (m_class_get_name (klass), -1, NULL, NULL, NULL);
++	hr = create_lib->lpVtbl->CreateTypeInfo (create_lib, (LPOLESTR)name, TKIND_RECORD, &create_info);
++	g_free (name);
++	if (SUCCEEDED (hr))
++		hr = create_info->lpVtbl->SetGuid (create_info, (REFGUID)guid);
++
++	while (SUCCEEDED (hr) && (field = mono_class_get_fields_internal (klass, &iter))) {
++		VARDESC desc;
++
++		if (field->type->attrs & FIELD_ATTRIBUTE_STATIC)
++			continue;
++		memset (&desc, 0, sizeof (desc));
++		desc.memid = index;
++		desc.varkind = VAR_PERINSTANCE;
++		desc.elemdescVar.tdesc.vt = cominterop_record_field_vt (field->type);
++		if (desc.elemdescVar.tdesc.vt == VT_EMPTY) {
++			hr = E_FAIL;
++			break;
++		}
++		hr = create_info->lpVtbl->AddVarDesc (create_info, index, &desc);
++		if (SUCCEEDED (hr)) {
++			name = g_utf8_to_utf16 (mono_field_get_name (field), -1, NULL, NULL, NULL);
++			hr = create_info->lpVtbl->SetVarName (create_info, index, (LPOLESTR)name);
++			g_free (name);
++		}
++		index++;
++	}
++
++	if (SUCCEEDED (hr))
++		hr = create_info->lpVtbl->LayOut (create_info);
++	if (SUCCEEDED (hr))
++		hr = create_info->lpVtbl->QueryInterface (create_info, &cominterop_iid_ITypeInfo, (void **)&type_info);
++	if (SUCCEEDED (hr))
++		hr = type_info->lpVtbl->GetTypeAttr (type_info, &attr);
++	if (SUCCEEDED (hr)) {
++		if (attr->cbSizeInstance == (ULONG)mono_class_value_size (klass, NULL))
++			hr = GetRecordInfoFromTypeInfo (type_info, &record_info);
++		else
++			hr = E_FAIL;
++		type_info->lpVtbl->ReleaseTypeAttr (type_info, attr);
++	}
++
++	if (type_info)
++		type_info->lpVtbl->Release (type_info);
++	if (create_info)
++		create_info->lpVtbl->Release (create_info);
++	if (create_lib)
++		create_lib->lpVtbl->Release (create_lib);
++	return SUCCEEDED (hr) ? record_info : NULL;
++}
++
++static gpointer
++cominterop_safearray_from_record_array (MonoArray *array, guint32 dim, SAFEARRAYBOUND *bnd)
++{
++	MonoClass *eklass = m_class_get_element_class (mono_object_class (array));
++	IRecordInfo *record_info;
++	SAFEARRAY *safearray;
++	gpointer data;
++	gint32 size;
++
++	if (dim != 1)
++		return NULL;
++	record_info = cominterop_record_info_for_class (eklass);
++	if (!record_info)
++		return NULL;
++	safearray = SafeArrayCreateEx (VT_RECORD, dim, bnd, record_info);
++	record_info->lpVtbl->Release (record_info);
++	if (!safearray || !bnd [0].cElements)
++		return safearray;
++
++	size = mono_class_value_size (eklass, NULL);
++	if (FAILED (SafeArrayAccessData (safearray, &data))) {
++		SafeArrayDestroy (safearray);
++		return NULL;
++	}
++	memcpy (data, mono_array_addr_with_size_fast (array, size, 0), (gsize)size * bnd [0].cElements);
++	SafeArrayUnaccessData (safearray);
++	return safearray;
++}
++#endif
++
+ 
+ gpointer
+ mono_marshal_safearray_from_array_impl (MonoArrayHandle rarray, guint32 vt, MonoError *error)
+@@ -4857,7 +4990,16 @@
+ 		bnd [0].cElements = mono_array_length_internal (array);
+ 	}
+ 
+-	gpointer safearray = mono_marshal_safearray_create_internal (vt, dim, bnd);
++	gpointer safearray;
++#ifdef HOST_WIN32
++	if (vt == VT_RECORD) {
++		safearray = cominterop_safearray_from_record_array (array, dim, bnd);
++		if (!safearray)
++			mono_error_set_execution_engine (error, "Failed to create SafeArray");
++		goto leave;
++	}
++#endif
++	safearray = mono_marshal_safearray_create_internal (vt, dim, bnd);
+ 	if (!safearray) {
+ 		mono_error_set_execution_engine (error, "Failed to create SafeArray");
+ 		goto leave;
