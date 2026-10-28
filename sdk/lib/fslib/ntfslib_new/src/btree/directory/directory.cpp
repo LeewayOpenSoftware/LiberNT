@@ -454,6 +454,7 @@ Directory::LoadDirectory(_In_ PFileRecord File)
     ULONGLONG FileReference;
     // This only works on files that are directories.
     ASSERT(File->Header->Flags & FR_IS_DIRECTORY);
+    CaseSensitive = File->IsCaseSensitiveDirectory();
 
     // Get the root node for the directory
     Status = CreateRootNode(File, &RootNode);
@@ -590,6 +591,78 @@ Directory::GetShortNameKey(_In_ PBTreeKey Key)
         return NULL;
 
     return Key->ShortNameKey;
+}
+
+NTSTATUS
+Directory::CheckCaseSensitivityChange(_In_ PFileRecord File,
+                                      _In_ BOOLEAN CaseSensitive)
+{
+    PNtfsDirectoryEntry Entries;
+    ULONG Count = 0;
+    NTSTATUS Status;
+
+    if (!File || !File->Header ||
+        !(File->Header->Flags & FR_IS_DIRECTORY))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (!!CaseSensitive == !!File->IsCaseSensitiveDirectory())
+        return STATUS_SUCCESS;
+
+    Status = LoadDirectory(File);
+    if (!NT_SUCCESS(Status))
+        return Status;
+
+    Entries = new(PagedPool, TAG_BTREE) NtfsDirectoryEntry[2];
+    if (!Entries)
+        return STATUS_INSUFFICIENT_RESOURCES;
+
+    for (;;)
+    {
+        PNtfsDirectoryEntry Entry = &Entries[Count & 1];
+        PNtfsDirectoryEntry Previous = &Entries[(Count + 1) & 1];
+        UNICODE_STRING EntryName;
+        UNICODE_STRING PreviousName;
+        LONG Comparison;
+
+        Status = GetNextEntry(Count == 0, Entry);
+        if (Status == STATUS_NO_MORE_FILES)
+        {
+            Status = STATUS_SUCCESS;
+            break;
+        }
+        if (!NT_SUCCESS(Status))
+            break;
+        if (CaseSensitive)
+        {
+            Status = STATUS_DIRECTORY_NOT_EMPTY;
+            break;
+        }
+        if (Count != 0)
+        {
+            EntryName = NtfsMakeCountedUnicodeString(
+                Entry->Name,
+                Entry->NameLength * sizeof(WCHAR));
+            PreviousName = NtfsMakeCountedUnicodeString(
+                Previous->Name,
+                Previous->NameLength * sizeof(WCHAR));
+            Status = DiskVolume->CompareFileNames(
+                &PreviousName,
+                &EntryName,
+                &Comparison);
+            if (!NT_SUCCESS(Status))
+                break;
+            if (Comparison == 0)
+            {
+                Status = STATUS_CASE_DIFFERING_NAMES_IN_DIR;
+                break;
+            }
+        }
+        Count++;
+    }
+
+    delete[] Entries;
+    return Status;
 }
 
 Directory::Directory(_In_ PVolume DiskVolume)

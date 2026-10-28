@@ -389,6 +389,15 @@ NtfsFileRecordSetBasicInformation(
     _In_ NtfsFileRecord *FileRecord,
     _In_ const NtfsFileBasicInformation *Information);
 
+BOOLEAN
+NtfsFileRecordIsCaseSensitiveDirectory(
+    _In_ NtfsFileRecord *FileRecord);
+
+NTSTATUS
+NtfsFileRecordSetCaseSensitiveDirectory(
+    _In_ NtfsFileRecord *FileRecord,
+    _In_ BOOLEAN CaseSensitive);
+
 NTSTATUS
 NtfsFileRecordSetAutomaticTimestampMask(
     _In_ NtfsFileRecord *FileRecord,

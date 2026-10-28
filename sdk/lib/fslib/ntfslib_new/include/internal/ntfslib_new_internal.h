@@ -688,6 +688,12 @@ public:
                      _In_  PUNICODE_STRING Right,
                      _Out_ LONG* Result);
 
+    NTSTATUS
+    CollateFileNames(_In_  PUNICODE_STRING Left,
+                     _In_  PUNICODE_STRING Right,
+                     _In_  BOOLEAN CaseSensitive,
+                     _Out_ LONG* Result);
+
     PWSTR
     GetUpcaseTable()
     {
@@ -904,6 +910,12 @@ public:
     NTSTATUS
     SetBasicInformation(
         _In_ const NtfsFileBasicInformation* Information);
+
+    BOOLEAN
+    IsCaseSensitiveDirectory();
+
+    NTSTATUS
+    SetCaseSensitiveDirectory(_In_ BOOLEAN CaseSensitive);
 
     NTSTATUS
     SetAutomaticTimestampMask(_In_ UINT32 Fields);
@@ -1422,6 +1434,7 @@ typedef struct IndexSearchKey
     PUNICODE_STRING Name;
     const UCHAR* Value;
     ULONG ValueLength;
+    BOOLEAN CaseSensitive;
 } IndexSearchKey, *PIndexSearchKey;
 
 typedef class Directory : BTree
@@ -1434,6 +1447,9 @@ public:
     LoadDirectory(_In_ PFileRecord File);
     NTSTATUS
     LoadDirectoryForEnumeration(_In_ PFileRecord File);
+    NTSTATUS
+    CheckCaseSensitivityChange(_In_ PFileRecord File,
+                               _In_ BOOLEAN CaseSensitive);
 
     // ./find.cpp
     NTSTATUS
@@ -1504,6 +1520,7 @@ private:
     };
 
     PVolume DiskVolume;
+    BOOLEAN CaseSensitive = FALSE;
     PUCHAR IndexAllocationData = NULL;
     ULONG IndexAllocationLength = 0;
     PDIRECTORY_KEY_BLOCK KeyBlocks = NULL;

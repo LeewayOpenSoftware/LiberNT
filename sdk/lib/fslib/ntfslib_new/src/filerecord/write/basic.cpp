@@ -474,3 +474,73 @@ Restore:
     delete[] RecordBackup;
     return Status;
 }
+
+BOOLEAN
+FileRecord::IsCaseSensitiveDirectory()
+{
+    PAttribute Target;
+
+    if (!Header || !(Header->Flags & FR_IS_DIRECTORY))
+        return FALSE;
+    Target = GetAttribute(TypeStandardInformation, NULL);
+    if (!Target || Target->IsNonResident ||
+        Target->Resident.DataLength <
+            FIELD_OFFSET(StandardInformationEx, VersionNum) +
+                sizeof(UINT32))
+    {
+        return FALSE;
+    }
+    return (reinterpret_cast<PStandardInformationEx>(
+                GetResidentDataPointer(Target))->VersionNum &
+            STANDARD_INFORMATION_CASE_SENSITIVE_DIR) != 0;
+}
+
+NTSTATUS
+FileRecord::SetCaseSensitiveDirectory(
+    _In_ BOOLEAN CaseSensitive)
+{
+    PAttribute Attribute;
+    PStandardInformationEx Standard;
+    UINT32 OldValue;
+    NTSTATUS Status;
+
+    if (!DiskVolume || !Header)
+        return STATUS_INVALID_PARAMETER;
+    if (!(Header->Flags & FR_IS_DIRECTORY))
+        return STATUS_INVALID_PARAMETER;
+    if (DiskVolume->IsReadOnly)
+        return STATUS_ACCESS_DENIED;
+
+    {
+        Directory Index(DiskVolume);
+
+        Status = Index.CheckCaseSensitivityChange(this, CaseSensitive);
+        if (!NT_SUCCESS(Status))
+            return Status;
+    }
+
+    Status = GetStandardInformationForUpdate(
+        &Attribute,
+        &Standard);
+    if (!NT_SUCCESS(Status))
+        return Status;
+    if (Attribute->Resident.DataLength <
+        FIELD_OFFSET(StandardInformationEx, VersionNum) +
+            sizeof(UINT32))
+    {
+        return STATUS_FILE_CORRUPT_ERROR;
+    }
+
+    OldValue = Standard->VersionNum;
+    if (CaseSensitive)
+        Standard->VersionNum |= STANDARD_INFORMATION_CASE_SENSITIVE_DIR;
+    else
+        Standard->VersionNum &= ~(UINT32)STANDARD_INFORMATION_CASE_SENSITIVE_DIR;
+    if (Standard->VersionNum == OldValue)
+        return STATUS_SUCCESS;
+
+    Status = DiskVolume->MFT->WriteFileRecordToMFT(this);
+    if (!NT_SUCCESS(Status))
+        Standard->VersionNum = OldValue;
+    return Status;
+}
