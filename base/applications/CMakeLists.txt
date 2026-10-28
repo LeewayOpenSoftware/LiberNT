@@ -1,5 +1,6 @@
 
 add_subdirectory(atactl)
+add_subdirectory(audiotest)
 add_subdirectory(bench)
 add_subdirectory(cacls)
 add_subdirectory(calc)
