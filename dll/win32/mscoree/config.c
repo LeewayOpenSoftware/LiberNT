@@ -47,6 +47,9 @@ enum parse_state
     STATE_PROBING,
     STATE_RUNTIME,
     STATE_STARTUP,
+#ifdef __REACTOS__
+    STATE_DEPENDENT_ASSEMBLY,
+#endif
     STATE_UNKNOWN
 };
 
@@ -58,7 +61,16 @@ typedef struct ConfigFileHandler
     enum parse_state states[16];
     int statenum;
     parsed_config_file *result;
+#ifdef __REACTOS__
+    LPWSTR identity_name;
+    LPWSTR identity_token;
+    LPWSTR identity_culture;
+#endif
 } ConfigFileHandler;
+
+#ifdef __REACTOS__
+static void free_assembly_identity(ConfigFileHandler *This);
+#endif
 
 typedef struct
 {
@@ -288,7 +300,12 @@ static ULONG WINAPI ConfigFileHandler_Release(ISAXContentHandler *iface)
     ULONG ref = InterlockedDecrement(&This->ref);
 
     if (ref == 0)
+    {
+#ifdef __REACTOS__
+        free_assembly_identity(This);
+#endif
         free(This);
+    }
 
     return ref;
 }
@@ -358,6 +375,153 @@ static HRESULT parse_probing(ConfigFileHandler *This, ISAXAttributes *pAttr)
     return hr;
 }
 
+
+#ifdef __REACTOS__
+static LPWSTR get_attribute(ISAXAttributes *pAttr, const WCHAR *name)
+{
+    LPCWSTR value;
+    int value_size;
+    LPWSTR result;
+
+    if (FAILED(ISAXAttributes_getValueFromName(pAttr, L"", 0, name, lstrlenW(name), &value, &value_size)))
+        return NULL;
+
+    result = malloc((value_size + 1) * sizeof(WCHAR));
+    if (result)
+    {
+        memcpy(result, value, value_size * sizeof(WCHAR));
+        result[value_size] = 0;
+    }
+    return result;
+}
+
+static BOOL parse_assembly_version(const WCHAR *text, const WCHAR **end, WORD version[4])
+{
+    WCHAR *next;
+    unsigned long part;
+    int i;
+
+    for (i = 0; i < 4; i++)
+    {
+        part = wcstoul(text, &next, 10);
+        if (next == text || part > 0xffff)
+            return FALSE;
+        version[i] = (WORD)part;
+        text = next;
+        if (i < 3)
+        {
+            if (*text != '.')
+                return FALSE;
+            text++;
+        }
+    }
+
+    *end = text;
+    return TRUE;
+}
+
+static void free_assembly_identity(ConfigFileHandler *This)
+{
+    free(This->identity_name);
+    free(This->identity_token);
+    free(This->identity_culture);
+    This->identity_name = This->identity_token = This->identity_culture = NULL;
+}
+
+static HRESULT parse_assembly_identity(ConfigFileHandler *This, ISAXAttributes *pAttr)
+{
+    free_assembly_identity(This);
+    This->identity_name = get_attribute(pAttr, L"name");
+    This->identity_token = get_attribute(pAttr, L"publicKeyToken");
+    This->identity_culture = get_attribute(pAttr, L"culture");
+    return S_OK;
+}
+
+static HRESULT add_assembly_binding(ConfigFileHandler *This, assembly_binding *binding)
+{
+    binding->name = wcsdup(This->identity_name);
+    binding->public_key_token = This->identity_token ? wcsdup(This->identity_token) : NULL;
+    binding->culture = This->identity_culture ? wcsdup(This->identity_culture) : NULL;
+    if (!binding->name || (This->identity_token && !binding->public_key_token) ||
+        (This->identity_culture && !binding->culture))
+    {
+        free(binding->name);
+        free(binding->public_key_token);
+        free(binding->culture);
+        free(binding->code_base);
+        free(binding);
+        return E_OUTOFMEMORY;
+    }
+
+    list_add_tail(&This->result->assembly_bindings, &binding->entry);
+    return S_OK;
+}
+
+static HRESULT parse_binding_redirect(ConfigFileHandler *This, ISAXAttributes *pAttr)
+{
+    LPWSTR old_version, new_version;
+    assembly_binding *binding;
+    const WCHAR *end;
+    HRESULT hr = S_OK;
+
+    if (!This->identity_name)
+        return S_OK;
+
+    old_version = get_attribute(pAttr, L"oldVersion");
+    new_version = get_attribute(pAttr, L"newVersion");
+    binding = calloc(1, sizeof(*binding));
+    if (!binding)
+        hr = E_OUTOFMEMORY;
+    else if (old_version && new_version && parse_assembly_version(old_version, &end, binding->low) &&
+             (*end == 0 || (*end == '-' && parse_assembly_version(end + 1, &end, binding->high) && *end == 0)) &&
+             parse_assembly_version(new_version, &end, binding->target) && *end == 0)
+    {
+        if (!wcschr(old_version, '-'))
+            memcpy(binding->high, binding->low, sizeof(binding->high));
+        hr = add_assembly_binding(This, binding);
+        binding = NULL;
+    }
+    else
+        WARN("Invalid binding redirect %s -> %s\n", debugstr_w(old_version), debugstr_w(new_version));
+
+    free(binding);
+    free(old_version);
+    free(new_version);
+    return hr;
+}
+
+static HRESULT parse_code_base(ConfigFileHandler *This, ISAXAttributes *pAttr)
+{
+    LPWSTR version, href;
+    assembly_binding *binding;
+    const WCHAR *end;
+    HRESULT hr = S_OK;
+
+    if (!This->identity_name)
+        return S_OK;
+
+    version = get_attribute(pAttr, L"version");
+    href = get_attribute(pAttr, L"href");
+    binding = calloc(1, sizeof(*binding));
+    if (!binding)
+        hr = E_OUTOFMEMORY;
+    else if (version && href && parse_assembly_version(version, &end, binding->target) && *end == 0)
+    {
+        binding->is_code_base = TRUE;
+        binding->code_base = href;
+        href = NULL;
+        hr = add_assembly_binding(This, binding);
+        binding = NULL;
+    }
+    else
+        WARN("Invalid code base %s for version %s\n", debugstr_w(href), debugstr_w(version));
+
+    free(binding);
+    free(version);
+    free(href);
+    return hr;
+}
+#endif
 
 static HRESULT parse_supported_runtime(ConfigFileHandler *This, ISAXAttributes *pAttr)
 {
@@ -474,8 +638,29 @@ static HRESULT WINAPI ConfigFileHandler_startElement(ISAXContentHandler *iface,
             This->states[++This->statenum] = STATE_PROBING;
             break;
         }
+#ifdef __REACTOS__
+        else if (nLocalName == 17 && wcsncmp(pLocalName, L"dependentAssembly", 17) == 0)
+        {
+            free_assembly_identity(This);
+            This->states[++This->statenum] = STATE_DEPENDENT_ASSEMBLY;
+            break;
+        }
+#endif
         else
             goto unknown;
+#ifdef __REACTOS__
+    case STATE_DEPENDENT_ASSEMBLY:
+        if (nLocalName == 16 && wcsncmp(pLocalName, L"assemblyIdentity", 16) == 0)
+            hr = parse_assembly_identity(This, pAttr);
+        else if (nLocalName == 15 && wcsncmp(pLocalName, L"bindingRedirect", 15) == 0)
+            hr = parse_binding_redirect(This, pAttr);
+        else if (nLocalName == 8 && wcsncmp(pLocalName, L"codeBase", 8) == 0)
+            hr = parse_code_base(This, pAttr);
+        else
+            goto unknown;
+        This->states[++This->statenum] = STATE_UNKNOWN;
+        break;
+#endif
     case STATE_STARTUP:
         if (nLocalName == ARRAY_SIZE(supportedRuntime) - 1 &&
             wcscmp(pLocalName, supportedRuntime) == 0)
@@ -624,6 +809,7 @@ static void init_config(parsed_config_file *config)
     config->private_path = NULL;
 #ifdef __REACTOS__
     config->parse_result = S_OK;
+    list_init(&config->assembly_bindings);
 #endif
 }
 
@@ -643,6 +829,9 @@ static HRESULT parse_config(VARIANT input, parsed_config_file *result)
     handler->states[0] = STATE_ROOT;
     handler->statenum = 0;
     handler->result = result;
+#ifdef __REACTOS__
+    handler->identity_name = handler->identity_token = handler->identity_culture = NULL;
+#endif
 
     hr = CoCreateInstance(&CLSID_SAXXMLReader, NULL, CLSCTX_INPROC_SERVER,
         &IID_ISAXXMLReader, (LPVOID*)&reader);
@@ -744,6 +933,22 @@ void free_parsed_config_file(parsed_config_file *file)
         list_remove(&cursor->entry);
         free(cursor);
     }
+
+#ifdef __REACTOS__
+    {
+        assembly_binding *binding, *binding2;
+
+        LIST_FOR_EACH_ENTRY_SAFE(binding, binding2, &file->assembly_bindings, assembly_binding, entry)
+        {
+            list_remove(&binding->entry);
+            free(binding->name);
+            free(binding->public_key_token);
+            free(binding->culture);
+            free(binding->code_base);
+            free(binding);
+        }
+    }
+#endif
 
     free(file->private_path);
 }

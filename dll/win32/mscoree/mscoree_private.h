@@ -129,12 +129,28 @@ extern HRESULT ICLRRuntimeInfo_GetRuntimeHost(ICLRRuntimeInfo *iface, RuntimeHos
 
 extern HRESULT MetaDataDispenser_CreateInstance(IUnknown **ppUnk);
 
+#ifdef __REACTOS__
+typedef struct assembly_binding
+{
+    struct list entry;
+    LPWSTR name;
+    LPWSTR public_key_token;
+    LPWSTR culture;
+    BOOL is_code_base;
+    WORD low[4];
+    WORD high[4];
+    WORD target[4];
+    LPWSTR code_base;
+} assembly_binding;
+#endif
+
 typedef struct parsed_config_file
 {
     struct list supported_runtimes;
     LPWSTR private_path;
 #ifdef __REACTOS__
     HRESULT parse_result;
+    struct list assembly_bindings;
 #endif
 } parsed_config_file;
 
@@ -161,6 +177,8 @@ extern HRESULT set_startup_flags(ICLRRuntimeInfo *iface, DWORD flags, BOOL set_c
 extern void RuntimeHost_NotifyEvent(EClrEvent event, void *data);
 
 extern int (CDECL *mono_domain_get_id)(MonoDomain *domain);
+
+extern void set_app_assembly_bindings(struct list *bindings, const WCHAR *base_dir, SIZE_T base_dir_size);
 #endif
 
 typedef enum {

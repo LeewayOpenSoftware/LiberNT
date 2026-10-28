@@ -152,7 +152,7 @@ static HRESULT RuntimeHost_GetIUnknownForObject(RuntimeHost *This, MonoObject *o
 #ifdef __REACTOS__
 static void RuntimeHost_InitializeDomainManager(RuntimeHost *This, MonoDomain *domain);
 
-static void RuntimeHost_SetPrivatePath(const WCHAR *config_path, const WCHAR *base_dir, SIZE_T base_dir_size)
+static void RuntimeHost_SetAssemblyProbing(const WCHAR *config_path, const WCHAR *base_dir, SIZE_T base_dir_size)
 {
     parsed_config_file parsed_config;
     WCHAR *temp, *save, **priv_path;
@@ -188,6 +188,9 @@ static void RuntimeHost_SetPrivatePath(const WCHAR *config_path, const WCHAR *ba
             }
         }
     }
+
+    if (SUCCEEDED(hr))
+        set_app_assembly_bindings(&parsed_config.assembly_bindings, base_dir, base_dir_size);
 
     free_parsed_config_file(&parsed_config);
 }
@@ -242,7 +245,7 @@ static HRESULT RuntimeHost_GetDefaultDomain(RuntimeHost *This, const WCHAR *conf
     mono_domain_set_config(*result, base_dirA, config_pathA);
 #ifdef __REACTOS__
     if (wcsrchr(base_dir, '\\'))
-        RuntimeHost_SetPrivatePath(config_path, base_dir, wcsrchr(base_dir, '\\') - base_dir + 1);
+        RuntimeHost_SetAssemblyProbing(config_path, base_dir, wcsrchr(base_dir, '\\') - base_dir + 1);
 #endif
 
     free(config_pathA);

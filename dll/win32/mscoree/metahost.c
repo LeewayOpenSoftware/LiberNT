@@ -130,6 +130,13 @@ static void (CDECL *mono_profiler_set_runtime_shutdown_begin_callback)(MonoProfi
 #ifdef __REACTOS__
 static void (CDECL *mono_profiler_set_domain_unloading_callback)(MonoProfilerHandle handle, MonoProfilerDomainUnloadingCallback cb);
 int (CDECL *mono_domain_get_id)(MonoDomain *domain);
+static const char* (CDECL *mono_assembly_name_get_pubkeytoken)(MonoAssemblyName *aname);
+static MonoAssemblyName* (CDECL *mono_assembly_get_name)(MonoAssembly *assembly);
+
+static struct list app_assembly_bindings = LIST_INIT(app_assembly_bindings);
+static WCHAR *app_base_dir;
+static LONG app_bindings_set;
+static SRWLOCK app_bindings_lock = SRWLOCK_INIT;
 #endif
 MonoType* (CDECL *mono_reflection_type_from_name)(char *name, MonoImage *image);
 MonoObject* (CDECL *mono_runtime_invoke)(MonoMethod *method, void *obj, void **params, MonoObject **exc);
@@ -277,6 +284,8 @@ static HRESULT load_mono(LPCWSTR mono_path)
 #ifdef __REACTOS__
         LOAD_OPT_MONO_FUNCTION(mono_profiler_set_domain_unloading_callback, NULL);
         LOAD_OPT_MONO_FUNCTION(mono_domain_get_id, NULL);
+        LOAD_OPT_MONO_FUNCTION(mono_assembly_name_get_pubkeytoken, NULL);
+        LOAD_OPT_MONO_FUNCTION(mono_assembly_get_name, NULL);
 #endif
         LOAD_OPT_MONO_FUNCTION(mono_set_crash_chaining, set_crash_chaining_dummy);
         LOAD_OPT_MONO_FUNCTION(mono_trace_set_print_handler, set_print_handler_dummy);
@@ -1854,6 +1863,120 @@ static MonoAssembly* mono_assembly_try_load(WCHAR *path)
     return result;
 }
 
+#ifdef __REACTOS__
+void set_app_assembly_bindings(struct list *bindings, const WCHAR *base_dir, SIZE_T base_dir_size)
+{
+    WCHAR *dir;
+
+    if (InterlockedCompareExchange(&app_bindings_set, TRUE, FALSE))
+        return;
+
+    dir = malloc((base_dir_size + 1) * sizeof(WCHAR));
+    if (dir)
+    {
+        memcpy(dir, base_dir, base_dir_size * sizeof(WCHAR));
+        dir[base_dir_size] = 0;
+    }
+
+    AcquireSRWLockExclusive(&app_bindings_lock);
+    app_base_dir = dir;
+    list_move_tail(&app_assembly_bindings, bindings);
+    ReleaseSRWLockExclusive(&app_bindings_lock);
+}
+
+static BOOL binding_matches(const assembly_binding *binding, const WCHAR *name, const WCHAR *token, const WCHAR *culture)
+{
+    if (_wcsicmp(binding->name, name))
+        return FALSE;
+    if (binding->public_key_token && _wcsicmp(binding->public_key_token, token ? token : L"null"))
+        return FALSE;
+    if (binding->culture && _wcsicmp(binding->culture, culture && culture[0] ? culture : L"neutral"))
+        return FALSE;
+    return TRUE;
+}
+
+static int compare_assembly_version(const WORD *a, const WORD *b)
+{
+    int i;
+
+    for (i = 0; i < 4; i++)
+        if (a[i] != b[i])
+            return a[i] < b[i] ? -1 : 1;
+    return 0;
+}
+
+static void get_assembly_name_version(MonoAssemblyName *aname, WORD version[4])
+{
+    version[0] = mono_assembly_name_get_version(aname, &version[1], &version[2], &version[3]);
+}
+
+static MonoAssembly* load_from_assembly_bindings(const WCHAR *name, const WCHAR *token,
+    const WCHAR *culture, WORD version[4])
+{
+    assembly_binding *binding;
+    WCHAR path[MAX_PATH];
+    const WCHAR *href = NULL;
+    MonoAssembly *result = NULL;
+
+    AcquireSRWLockShared(&app_bindings_lock);
+    LIST_FOR_EACH_ENTRY(binding, &app_assembly_bindings, assembly_binding, entry)
+    {
+        if (!binding->is_code_base && binding_matches(binding, name, token, culture) &&
+            compare_assembly_version(version, binding->low) >= 0 &&
+            compare_assembly_version(version, binding->high) <= 0)
+        {
+            memcpy(version, binding->target, sizeof(binding->target));
+            break;
+        }
+    }
+
+    if (token)
+    {
+        LIST_FOR_EACH_ENTRY(binding, &app_assembly_bindings, assembly_binding, entry)
+        {
+            if (binding->is_code_base && binding_matches(binding, name, token, culture) &&
+                !compare_assembly_version(version, binding->target))
+            {
+                href = binding->code_base;
+                break;
+            }
+        }
+    }
+
+    if (href)
+    {
+        if (!_wcsnicmp(href, L"file:///", 8))
+            lstrcpynW(path, href + 8, MAX_PATH);
+        else if (PathIsRelativeW(href) && app_base_dir)
+            PathCombineW(path, app_base_dir, href);
+        else
+            lstrcpynW(path, href, MAX_PATH);
+        ReleaseSRWLockShared(&app_bindings_lock);
+
+        TRACE("code base for %s: %s\n", debugstr_w(name), debugstr_w(path));
+        result = mono_assembly_try_load(path);
+        if (!result)
+            WARN("Could not load %s from its code base %s\n", debugstr_w(name), debugstr_w(path));
+        return result;
+    }
+
+    ReleaseSRWLockShared(&app_bindings_lock);
+    return NULL;
+}
+
+static BOOL assembly_version_matches(MonoAssembly *assembly, const WORD version[4])
+{
+    MonoAssemblyName *aname;
+    WORD found[4];
+
+    if (!mono_assembly_get_name || !(aname = mono_assembly_get_name(assembly)))
+        return TRUE;
+
+    get_assembly_name_version(aname, found);
+    return !compare_assembly_version(found, version);
+}
+#endif
+
 static MonoAssembly* CDECL mono_assembly_preload_hook_fn(MonoAssemblyName *aname, char **assemblies_path, void *user_data)
 {
     int flags = 0;
@@ -1885,6 +2008,12 @@ static MonoAssembly* CDECL wine_mono_assembly_preload_hook_v2_fn(MonoAssemblyNam
     int i;
     static const WCHAR dotdllW[] = {'.','d','l','l',0};
     static const WCHAR dotexeW[] = {'.','e','x','e',0};
+#ifdef __REACTOS__
+    WCHAR tokenW[32] = {0}, *nameW;
+    int nameW_size;
+    BOOL have_token = FALSE;
+    WORD version[4];
+#endif
 
     stringname = mono_stringify_assembly_name(aname);
     assemblyname = mono_assembly_name_get_name(aname);
@@ -1902,6 +2031,30 @@ static MonoAssembly* CDECL wine_mono_assembly_preload_hook_v2_fn(MonoAssemblyNam
     if (!stringname || !assemblyname) return NULL;
 
     search_flags = get_assembly_search_flags(aname);
+#ifdef __REACTOS__
+    if (mono_assembly_name_get_pubkeytoken)
+    {
+        const char *token = mono_assembly_name_get_pubkeytoken(aname);
+
+        if (token)
+            MultiByteToWideChar(CP_UTF8, 0, token, -1, tokenW, ARRAY_SIZE(tokenW));
+        have_token = token && tokenW[0];
+    }
+    get_assembly_name_version(aname, version);
+    nameW_size = MultiByteToWideChar(CP_UTF8, 0, assemblyname, -1, NULL, 0);
+    nameW = malloc(nameW_size * sizeof(WCHAR));
+    if (nameW)
+    {
+        MultiByteToWideChar(CP_UTF8, 0, assemblyname, -1, nameW, nameW_size);
+        result = load_from_assembly_bindings(nameW, have_token ? tokenW : NULL, cultureW, version);
+        free(nameW);
+        if (result)
+        {
+            *flags |= WINE_PRELOAD_SET_GAC;
+            goto done;
+        }
+    }
+#endif
     if (private_path && (search_flags & ASSEMBLY_SEARCH_PRIVATEPATH) != 0)
     {
         stringnameW_size = MultiByteToWideChar(CP_UTF8, 0, assemblyname, -1, NULL, 0);
@@ -1938,6 +2091,16 @@ static MonoAssembly* CDECL wine_mono_assembly_preload_hook_v2_fn(MonoAssemblyNam
                 if (result) break;
             }
             free(stringnameW);
+#ifdef __REACTOS__
+            if (result && have_token && !assembly_version_matches(result, version))
+            {
+                WARN("%s has a different version than %u.%u.%u.%u\n", debugstr_w(path),
+                    version[0], version[1], version[2], version[3]);
+                result = NULL;
+                *flags |= WINE_PRELOAD_SKIP_PRIVATE_PATH;
+                goto done;
+            }
+#endif
             if (result) goto done;
         }
     }
