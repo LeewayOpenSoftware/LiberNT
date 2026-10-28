@@ -469,15 +469,11 @@ LxTmpfsMountRoot(
     _Out_ PLX_TMPFS_INODE *Root)
 {
     PCSTR Path = (Mount->Root != NULL) ? Mount->Root : "/";
-    LONG Error;
 
     *Root = NULL;
     if (Mount->Tmpfs == NULL)
         return -LX_ENOENT;
-    Error = LxTmpfsWalk(Mount->Tmpfs->Root, Path, Path + strlen(Path), Root);
-    if ((Error == 0) && !LxTmpfsIsDirectory(*Root))
-        Error = -LX_ENOTDIR;
-    return Error;
+    return LxTmpfsWalk(Mount->Tmpfs->Root, Path, Path + strlen(Path), Root);
 }
 
 static
