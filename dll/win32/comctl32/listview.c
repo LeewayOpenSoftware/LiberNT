@@ -1153,6 +1153,63 @@ static int LISTVIEW_GetThemedItemState(const LISTVIEW_INFO *infoPtr, UINT uItemS
         return LISS_HOT;
     return 0;
 }
+
+/* Win11-style translucent rubber-band (marquee) selection: a 1px solid border plus an
+ * alpha-blended fill, instead of the classic XOR DrawFocusRect. Real Windows docs tie this to
+ * LVS_EX_DOUBLEBUFFER; mirror that, and ALSO turn it on whenever the window is explicitly themed
+ * as "Explorer" (CDefView always is, but deliberately runs without LVS_EX_DOUBLEBUFFER --
+ * CORE-19818) so Explorer/the desktop get it without needing that flag. Any other ListView (no
+ * double buffer, no Explorer theme) keeps the exact old behavior, unchanged. */
+static void LISTVIEW_DrawMarquee(const LISTVIEW_INFO *infoPtr, HDC hdc)
+{
+    HTHEME theme = GetWindowTheme(infoPtr->hwndSelf);
+    BOOL themed = theme && IsThemePartDefined(theme, LVP_LISTITEM, 0);
+    RECT rect = infoPtr->marqueeDrawRect;
+    int width = rect.right - rect.left, height = rect.bottom - rect.top;
+    COLORREF fillColor, borderColor;
+    HDC hdcMem;
+    HPEN hPen, hOldPen;
+    HGDIOBJ hOldBrush;
+
+    if (!(infoPtr->dwLvExStyle & LVS_EX_DOUBLEBUFFER) && !themed)
+    {
+        DrawFocusRect(hdc, &rect);
+        return;
+    }
+    if (width <= 0 || height <= 0)
+        return;
+
+    if (!themed || FAILED(GetThemeColor(theme, LVP_LISTITEM, LISS_SELECTED, TMT_FILLCOLOR, &fillColor)))
+        fillColor = GetSysColor(COLOR_HIGHLIGHT);
+    if (!themed || FAILED(GetThemeColor(theme, LVP_LISTITEM, LISS_SELECTED, TMT_BORDERCOLOR, &borderColor)))
+        borderColor = GetSysColor(COLOR_HIGHLIGHT);
+
+    hdcMem = CreateCompatibleDC(hdc);
+    if (hdcMem)
+    {
+        HBITMAP hbmMem = CreateCompatibleBitmap(hdc, width, height);
+        if (hbmMem)
+        {
+            BLENDFUNCTION blend = { AC_SRC_OVER, 0, 90, 0 }; /* ~35% opacity fill */
+            HGDIOBJ hbmOld = SelectObject(hdcMem, hbmMem);
+            hOldBrush = SelectObject(hdcMem, CreateSolidBrush(fillColor));
+            PatBlt(hdcMem, 0, 0, width, height, PATCOPY);
+            DeleteObject(SelectObject(hdcMem, hOldBrush));
+            AlphaBlend(hdc, rect.left, rect.top, width, height, hdcMem, 0, 0, width, height, blend);
+            SelectObject(hdcMem, hbmOld);
+            DeleteObject(hbmMem);
+        }
+        DeleteDC(hdcMem);
+    }
+
+    hPen = CreatePen(PS_SOLID, 1, borderColor);
+    hOldPen = SelectObject(hdc, hPen);
+    hOldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
+    SelectObject(hdc, hOldBrush);
+    SelectObject(hdc, hOldPen);
+    DeleteObject(hPen);
+}
 #endif
 
 static void prepaint_setup (const LISTVIEW_INFO *infoPtr, HDC hdc, const NMLVCUSTOMDRAW *cd, BOOL SubItem)
@@ -5630,7 +5687,11 @@ enddraw:
 
     /* Draw marquee rectangle if appropriate */
     if (infoPtr->bMarqueeSelect)
+#if __WINE_COMCTL32_VERSION == 6
+        LISTVIEW_DrawMarquee(infoPtr, hdc);
+#else
         DrawFocusRect(hdc, &infoPtr->marqueeDrawRect);
+#endif
 
     if (cdmode & CDRF_NOTIFYPOSTPAINT)
 	notify_postpaint(infoPtr, &nmlvcd);
