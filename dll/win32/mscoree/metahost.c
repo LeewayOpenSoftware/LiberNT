@@ -433,6 +433,15 @@ static HRESULT CLRRuntimeInfo_GetRuntimeHost(CLRRuntimeInfo *This, RuntimeHost *
         return hr;
     }
 
+#ifdef __REACTOS__
+    hr = load_mono(mono_path);
+
+    if (SUCCEEDED(hr))
+        hr = RuntimeHost_Construct(This, &This->loaded_runtime);
+
+    if (SUCCEEDED(hr) && GlobalCLRMetaHost.callback)
+        GlobalCLRMetaHost.callback(&This->ICLRRuntimeInfo_iface, thread_set_fn, thread_unset_fn);
+#else
     if (GlobalCLRMetaHost.callback)
     {
         GlobalCLRMetaHost.callback(&This->ICLRRuntimeInfo_iface, thread_set_fn, thread_unset_fn);
@@ -442,6 +451,7 @@ static HRESULT CLRRuntimeInfo_GetRuntimeHost(CLRRuntimeInfo *This, RuntimeHost *
 
     if (SUCCEEDED(hr))
         hr = RuntimeHost_Construct(This, &This->loaded_runtime);
+#endif
 
     LeaveCriticalSection(&runtime_list_cs);
 
@@ -851,6 +861,10 @@ static BOOL get_mono_path_datadir(LPWSTR path)
     if (!wcsncmp( data_dir, L"\\??\\unix", 8 )) return FALSE;
     data_dir += 4;  /* skip \??\ prefix */
     package_dir = malloc((wcslen(data_dir) + wcslen(suffix) + 1) * sizeof(WCHAR));
+#ifdef __REACTOS__
+    if (!package_dir)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     lstrcpyW( package_dir, data_dir );
     lstrcatW( package_dir, suffix );
 

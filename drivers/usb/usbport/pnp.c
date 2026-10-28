@@ -1062,7 +1062,7 @@ USBPORT_IsCompanionController(IN PDEVICE_OBJECT DeviceObject,
         return Status;
     }
 
-    Parameters.Size = sizeof(PCI_DEVICE_PRESENT_INTERFACE);
+    Parameters.Size = sizeof(PCI_DEVICE_PRESENCE_PARAMETERS);
 
     Parameters.BaseClass = PCI_CLASS_SERIAL_BUS_CTLR;
     Parameters.SubClass = PCI_SUBCLASS_SB_USB;
@@ -1872,7 +1872,7 @@ USBPORT_StartDevice(IN PDEVICE_OBJECT FdoDevice,
     {
         Status = USBPORT_IsCompanionController(FdoDevice, &IsCompanion);
 
-        if (!NT_SUCCESS(Status))
+        if (NT_SUCCESS(Status))
         {
             if (IsCompanion)
             {
@@ -3272,7 +3272,6 @@ USBPORT_PdoPnP(IN PDEVICE_OBJECT PdoDevice,
 
             Irp->IoStatus.Status = STATUS_SUCCESS;
             IoCompleteRequest(Irp, IO_NO_INCREMENT);
-            IoDeleteDevice(PdoDevice);
             return STATUS_SUCCESS;
 
         case IRP_MN_CANCEL_REMOVE_DEVICE:

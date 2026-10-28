@@ -53,7 +53,8 @@ CFunctionGroupNode::SetEAPDBTL(
     ULONG Verb;
     ULONG Response = 0;
 
-    Verb = (m_CodecAddress << 28) | (NodeId << 20) | (AC_VERB_SET_EAPD_BTLENABLE << 8) | LRSwap | EAPD | BTL;
+    Verb = (m_CodecAddress << 28) | (NodeId << 20) | (AC_VERB_SET_EAPD_BTLENABLE << 8) |
+        (LRSwap ? AC_EAPDBTL_LR_SWAP : 0) | (EAPD ? AC_EAPDBTL_EAPD : 0) | (BTL ? AC_EAPDBTL_BALANCED : 0);
     Status = m_Adapter->TransferVerb(Verb, &Response);
     if (!NT_SUCCESS(Status))
     {
@@ -323,6 +324,29 @@ CFunctionGroupNode::EnumConnections()
             Entry = Entry->Flink;
         }
     } while (NeedRevisit);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+NTAPI
+CFunctionGroupNode::GetAssociatedPinNodes(
+    IN ULONG PinId,
+    IN UCHAR DefaultAssociation,
+    IN UCHAR Digital,
+    OUT PULONG NodeCount,
+    OUT PULONG * Nodes)
+{
+    if (DefaultAssociation != 0xF)
+        return GetPinNodesWithDefaultAssociation(DefaultAssociation, Digital, NodeCount, Nodes);
+
+    *Nodes = (PULONG)ExAllocatePoolZero(NonPagedPool, sizeof(ULONG), TAG_HDAUDIO);
+    if (!*Nodes)
+    {
+        *NodeCount = 0;
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    (*Nodes)[0] = PinId;
+    *NodeCount = 1;
     return STATUS_SUCCESS;
 }
 
@@ -701,6 +725,28 @@ CFunctionGroupNode::SetAmplifierGainMute(
 
 NTSTATUS
 NTAPI
+CFunctionGroupNode::ActivateAmplifier(
+    IN ULONG NodeId,
+    IN ULONG Input,
+    IN ULONG Index)
+{
+    AMPLIFIER_CAPABILITIES Caps;
+    ULONG Verb;
+    ULONG Response = 0;
+    NTSTATUS Status;
+
+    Status = GetAmplifierDetails(NodeId, Input, &Caps);
+    if (!NT_SUCCESS(Status))
+        return Status;
+
+    Verb = (m_CodecAddress << 28) | (NodeId << 20) | (AC_VERB_SET_AMP_GAIN_MUTE << 8) |
+    (Input ? AC_AMP_SET_INPUT : AC_AMP_SET_OUTPUT) | AC_AMP_SET_LEFT | AC_AMP_SET_RIGHT |
+    ((Index << AC_AMP_SET_INDEX_SHIFT) & AC_AMP_SET_INDEX) | (Caps.Offset & AC_AMP_GAIN);
+    return m_Adapter->TransferVerb(Verb, &Response);
+}
+
+NTSTATUS
+NTAPI
 CFunctionGroupNode::EnableUnsolicitedResponse(
     IN ULONG NodeId,
     IN UCHAR Enable,
@@ -735,7 +781,8 @@ CFunctionGroupNode::SetPinWidgetControl(
     NTSTATUS Status;
 
     Verb = (m_CodecAddress << 28) | (NodeId << 20) | (AC_VERB_SET_PIN_WIDGET_CONTROL << 8) |
-    HPhnEnable | OutEnable | InEnable | VRefEn2 | VRefEn1;
+    (HPhnEnable ? AC_PINCTL_HP_EN : 0) | (OutEnable ? AC_PINCTL_OUT_EN : 0) | (InEnable ? AC_PINCTL_IN_EN : 0) |
+    ((VRefEn2 | VRefEn1) & AC_PINCTL_VREFEN);
     Status = m_Adapter->TransferVerb(Verb, &Response);
     if (!NT_SUCCESS(Status))
     {
@@ -868,8 +915,6 @@ CFunctionGroupNode::GetPinSense(
         DPRINT1("HDAUDIO: GetPinSense failed with %x\n", Status);
         return Status;
     }
-    if (Response == 0)
-        return STATUS_UNSUCCESSFUL;
     *DevicePresent = (Response >> 31) & 0x1;
     return STATUS_SUCCESS;
 }

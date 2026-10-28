@@ -568,6 +568,10 @@ directedLine** directedLine::toArrayAllPolygons(Int& total_num_edges)
 {
   total_num_edges=numEdgesAllPolygons();
   directedLine** ret = (directedLine**) malloc(sizeof(directedLine*) * total_num_edges);
+#ifdef __REACTOS__
+  if (!ret)
+    abort();
+#endif
   assert(ret);
 
   directedLine *temp;
@@ -756,6 +760,10 @@ directedLine* directedLine::rootLinkFindRoot()
 void directedLine::writeAllPolygons(char* filename)
 {
   FILE* fp = fopen(filename, "w");
+#ifdef __REACTOS__
+  if (!fp)
+    return;
+#endif
   assert(fp);
   Int nPolygons = numPolygons();
   directedLine *root;
@@ -793,6 +801,10 @@ directedLine* readAllPolygons(char* filename)
 {
   Int i,j;
   FILE* fp = fopen(filename, "r");
+#ifdef __REACTOS__
+  if (!fp)
+    return NULL;
+#endif
   Int nPolygons;
   int result;
 

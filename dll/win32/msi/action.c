@@ -230,6 +230,10 @@ UINT msi_parse_command_line( MSIPACKAGE *package, LPCWSTR szCommandLine,
         while (ptr[len - 1] == ' ') len--;
 
         prop = malloc( (len + 1) * sizeof(WCHAR) );
+#ifdef __REACTOS__
+        if (!prop)
+            RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
         memcpy( prop, ptr, len * sizeof(WCHAR) );
         prop[len] = 0;
         if (!preserve_case) wcsupr( prop );
@@ -239,6 +243,10 @@ UINT msi_parse_command_line( MSIPACKAGE *package, LPCWSTR szCommandLine,
 
         num_quotes = 0;
         val = malloc( (wcslen( ptr2 ) + 1) * sizeof(WCHAR) );
+#ifdef __REACTOS__
+        if (!val)
+            RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
         len = parse_prop( ptr2, val, &num_quotes );
         if (num_quotes % 2)
         {
@@ -360,6 +368,10 @@ UINT msi_set_sourcedir_props(MSIPACKAGE *package, BOOL replace)
     }
     len = p - db + 2;
     source = malloc( len * sizeof(WCHAR) );
+#ifdef __REACTOS__
+    if (!source)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     lstrcpynW( source, db, len );
     free( db );
 
@@ -1579,7 +1591,11 @@ static BOOL process_state_property(MSIPACKAGE* package, int level,
 
             while (ptr)
             {
+#ifdef __REACTOS__
+                int len = ptr2 ? ptr2 - ptr : 0;
+#else
                 int len = ptr2 - ptr;
+#endif
 
                 if ((ptr2 && lstrlenW(feature->Feature) == len && !wcsncmp(ptr, feature->Feature, len))
                     || (!ptr2 && !wcscmp(ptr, feature->Feature)))
@@ -2056,6 +2072,10 @@ WCHAR * WINAPIV msi_build_directory_name( DWORD count, ... )
     va_end( va );
 
     dir = malloc( sz * sizeof(WCHAR) );
+#ifdef __REACTOS__
+    if (!dir)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     dir[0] = 0;
 
     va_start( va, count );
@@ -2804,6 +2824,10 @@ static UINT ITERATE_WriteRegistryValues(MSIRECORD *row, LPVOID param)
 
     deformat_string(package, key , &deformated);
     uikey = malloc( (wcslen(deformated) + wcslen(szRoot) + 1) * sizeof(WCHAR) );
+#ifdef __REACTOS__
+    if (!uikey)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     lstrcpyW(uikey,szRoot);
     lstrcatW(uikey,deformated);
 
@@ -3023,6 +3047,10 @@ static UINT ITERATE_RemoveRegistryValuesOnUninstall( MSIRECORD *row, LPVOID para
     deformat_string( package, key_str, &deformated_key );
     size = lstrlenW( deformated_key ) + lstrlenW( root_key_str ) + 1;
     ui_key_str = malloc( size * sizeof(WCHAR) );
+#ifdef __REACTOS__
+    if (!ui_key_str)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     lstrcpyW( ui_key_str, root_key_str );
     lstrcatW( ui_key_str, deformated_key );
 
@@ -3086,6 +3114,10 @@ static UINT ITERATE_RemoveRegistryValuesOnInstall( MSIRECORD *row, LPVOID param 
     deformat_string( package, key_str, &deformated_key );
     size = lstrlenW( deformated_key ) + lstrlenW( root_key_str ) + 1;
     ui_key_str = malloc( size * sizeof(WCHAR) );
+#ifdef __REACTOS__
+    if (!ui_key_str)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     lstrcpyW( ui_key_str, root_key_str );
     lstrcatW( ui_key_str, deformated_key );
 
@@ -4871,6 +4903,10 @@ static UINT ACTION_PublishFeatures(MSIPACKAGE *package)
             size += lstrlenW( feature->Feature_Parent )+2;
 
         data = malloc(size * sizeof(WCHAR));
+#ifdef __REACTOS__
+        if (!data)
+            RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
 
         data[0] = 0;
         LIST_FOR_EACH_ENTRY( cl, &feature->Components, ComponentList, entry )
@@ -4911,6 +4947,10 @@ static UINT ACTION_PublishFeatures(MSIPACKAGE *package)
         {
             size += 2*sizeof(WCHAR);
             data = malloc(size);
+#ifdef __REACTOS__
+            if (!data)
+                RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
             data[0] = 0x6;
             data[1] = 0;
             if (feature->Feature_Parent)
@@ -5724,6 +5764,10 @@ static UINT ITERATE_PublishComponent(MSIRECORD *rec, LPVOID param)
     if (text)
     {
         p = malloc( (wcslen( advertise ) + wcslen( text ) + 1) * sizeof(WCHAR) );
+#ifdef __REACTOS__
+        if (!p)
+            RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
         lstrcpyW( p, advertise );
         lstrcatW( p, text );
         free( advertise );
@@ -6491,6 +6535,10 @@ static UINT ITERATE_InstallODBCDriver( MSIRECORD *rec, LPVOID param )
         driver_file->TargetPath = msi_build_directory_name( 2, dir, driver_file->FileName );
     }
     driver_path = wcsdup(driver_file->TargetPath);
+#ifdef __REACTOS__
+    if (!driver_path)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     ptr = wcsrchr(driver_path, '\\');
     if (ptr) *ptr = '\0';
 
@@ -6574,6 +6622,10 @@ static UINT ITERATE_InstallODBCTranslator( MSIRECORD *rec, LPVOID param )
     *ptr = '\0';
 
     translator_path = wcsdup(translator_file->TargetPath);
+#ifdef __REACTOS__
+    if (!translator_path)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     ptr = wcsrchr(translator_path, '\\');
     if (ptr) *ptr = '\0';
 
@@ -8048,6 +8100,10 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
         LPCWSTR file;
 
         dir = wcsdup(szPackagePath);
+#ifdef __REACTOS__
+        if (!dir)
+            RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
         p = wcsrchr(dir, '\\');
         if (p)
         {
@@ -8058,6 +8114,10 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
         {
             free(dir);
             dir = malloc(MAX_PATH * sizeof(WCHAR));
+#ifdef __REACTOS__
+            if (!dir)
+                RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
             GetCurrentDirectoryW(MAX_PATH, dir);
             lstrcatW(dir, L"\\");
             file = szPackagePath;

@@ -644,6 +644,11 @@ KiCaptureUserLegacyFloatingState(
 
 VOID
 NTAPI
+KiRestoreUserLegacyFloatingState(
+    _In_ PXSAVE_FORMAT FltSave);
+
+VOID
+NTAPI
 KiInitializeMxCsrMask(VOID);
 
 FORCEINLINE
@@ -684,6 +689,47 @@ KiClearDpcRequestState(
     _Inout_ PKPRCB Prcb)
 {
     Prcb->DpcInterruptRequested = FALSE;
+}
+
+FORCEINLINE
+BOOLEAN
+KiIsDpcThreadActive(
+    _In_ PKPRCB Prcb)
+{
+    return Prcb->DpcThreadActive != FALSE;
+}
+
+FORCEINLINE
+BOOLEAN
+KiIsDpcThreadRequested(
+    _In_ PKPRCB Prcb)
+{
+    return Prcb->DpcThreadRequested != FALSE;
+}
+
+FORCEINLINE
+VOID
+KiSetDpcThreadActive(
+    _Inout_ PKPRCB Prcb)
+{
+    Prcb->DpcThreadActive = TRUE;
+}
+
+FORCEINLINE
+VOID
+KiSetDpcThreadRequested(
+    _Inout_ PKPRCB Prcb)
+{
+    Prcb->DpcThreadRequested = TRUE;
+}
+
+FORCEINLINE
+VOID
+KiClearDpcThreadState(
+    _Inout_ PKPRCB Prcb)
+{
+    Prcb->DpcThreadActive = FALSE;
+    Prcb->DpcThreadRequested = FALSE;
 }
 
 #define KiPrcbDpcTimeCount(Prcb) ((Prcb)->DpcTimeCount)

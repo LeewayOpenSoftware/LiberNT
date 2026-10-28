@@ -1843,10 +1843,7 @@ acpi_bus_scan_fixed (
 	 * method power button is present. Otherwise, a fixed
 	 * power button is present.
 	 */
-	if (AcpiGbl_FADT.Flags & ACPI_FADT_POWER_BUTTON)
-		result = acpi_bus_add(&device, acpi_root,
-			NULL, ACPI_BUS_TYPE_POWER_BUTTON);
-	else
+	if (!AcpiGbl_ReducedHardware && !(AcpiGbl_FADT.Flags & ACPI_FADT_POWER_BUTTON))
 	{
 		/* Enable the fixed power button so we get notified if it is pressed */
 		AcpiWriteBitRegister(ACPI_BITREG_POWER_BUTTON_ENABLE, 1);
@@ -1862,10 +1859,7 @@ acpi_bus_scan_fixed (
 	 * a fixed sleep button. If the flag is set and there is a device object
 	 * the we have a control method button just like above.
 	 */
-	if (AcpiGbl_FADT.Flags & ACPI_FADT_SLEEP_BUTTON)
-		result = acpi_bus_add(&device, acpi_root,
-			NULL, ACPI_BUS_TYPE_SLEEP_BUTTON);
-	else
+	if (!AcpiGbl_ReducedHardware && !(AcpiGbl_FADT.Flags & ACPI_FADT_SLEEP_BUTTON))
 	{
 		/* Enable the fixed sleep button so we get notified if it is pressed */
 		AcpiWriteBitRegister(ACPI_BITREG_SLEEP_BUTTON_ENABLE, 1);
@@ -1912,6 +1906,8 @@ acpi_bus_init (void)
 		DPRINT1("Unable to initialize ACPI objects\n");
 		goto error1;
 	}
+
+	acpi_ec_dsdt_probe();
 
 	status = AcpiUpdateAllGpes();
 	if (ACPI_FAILURE(status)) {
@@ -2075,6 +2071,7 @@ acpi_init (void)
 	acpi_system_init();	/* ACPI System */
 	acpi_power_init();	/* ACPI Bus Power Management */
 	acpi_button_init();
+	acpi_ged_init();
 	acpi_ec_init();		/* ACPI Embedded Controller */
 	acpi_fan_init();		/* ACPI Fan */
 	acpi_thermal_init();	/* ACPI Thermal Zone */

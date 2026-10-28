@@ -772,6 +772,10 @@ static void *parser_alloc( void *info, unsigned int sz )
     struct list *mem;
 
     mem = malloc( sizeof (struct list) + sz );
+#ifdef __REACTOS__
+    if (!mem)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     list_add_tail( sql->mem, mem );
     return &mem[1];
 }
@@ -961,6 +965,10 @@ static void swap_columns( column_info **cols, column_info *A, int idx )
         ptr = ptr->next;
     }
 
+#ifdef __REACTOS__
+    if( !B )
+        return;
+#endif
     if( preB ) preB->next = A;
     if( preA ) preA->next = B;
     ptr = A->next;

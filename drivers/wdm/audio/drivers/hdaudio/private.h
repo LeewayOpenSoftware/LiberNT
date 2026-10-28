@@ -183,7 +183,7 @@ class CAdapterCommon : public CUnknownImpl<IAdapterPowerManagement>
         IN PULONG AssociatedPins,
         IN UCHAR Digital);
     VOID NTAPI ClearRef(IN ULONG RefValue, IN ULONG NodeCount, IN PULONG Nodes);
-    BOOLEAN NTAPI FindPinConverter(IN PVOID Node, IN ULONG NodeId, IN UCHAR Digital, IN ULONG Depth, OUT PULONG Converter);
+    BOOLEAN NTAPI FindPinConverter(IN PVOID Node, IN ULONG NodeId, IN UCHAR Digital, IN ULONG Depth, IN ULONG Required, OUT PULONG Converter);
     NTSTATUS
     NTAPI
     ProcessDacNodes(
@@ -233,6 +233,7 @@ class CAdapterCommon : public CUnknownImpl<IAdapterPowerManagement>
         IN PDEVICE_OBJECT DeviceObject,
         IN PIRP Irp,
         IN PRESOURCELIST ResourceList,
+        IN ULONG PinId,
         IN UCHAR DefaultAssociation,
         IN PVOID Node,
         IN ULONG PinNodeCount,
@@ -288,7 +289,7 @@ class CAdapterCommon : public CUnknownImpl<IAdapterPowerManagement>
         m_TagIndex(0), m_WaveRTOutPortUnknown(NULL), m_WaveRTInPortUnknown(NULL), m_TopoOutPortUnknown(NULL),
         m_TopoInPortUnknown(NULL), m_WaveInDataRange(), m_WaveInDataRanges(), m_WaveOutDataRange(),
         m_WaveOutDataRanges(), m_ClaimedConverters(), m_ClaimedConverterCount(0), m_SubdeviceNames(),
-        m_PowerState(PowerDeviceD0)
+        m_PowerState(PowerDeviceUnspecified)
     {
         RtlCopyMemory(m_WaveInPins, WaveInPins, sizeof(m_WaveInPins));
         RtlCopyMemory(m_WaveOutPins, WaveOutPins, sizeof(m_WaveOutPins));
@@ -370,12 +371,14 @@ class CFunctionGroupNode
     NTSTATUS NTAPI GetAmplifierDetails(IN ULONG NodeId, IN ULONG Input, OUT PAMPLIFIER_CAPABILITIES Caps);
     NTSTATUS NTAPI GetAmplifierGainMute(IN ULONG NodeId, IN ULONG Input, IN ULONG Right, OUT PUCHAR Mute, OUT PUCHAR Gain);
     NTSTATUS NTAPI SetAmplifierGainMute(IN ULONG NodeId, IN ULONG Input, IN ULONG Right, IN UCHAR Mute, IN UCHAR Gain);
+    NTSTATUS NTAPI ActivateAmplifier(IN ULONG NodeId, IN ULONG Input, IN ULONG Index);
     NTSTATUS NTAPI GetPinCapabilities(IN ULONG NodeId, OUT PPIN_CAPABILITIES PinCaps);
     NTSTATUS NTAPI GetPinSense(IN ULONG NodeId, IN PULONG DevicePresent);
     NTSTATUS NTAPI GetVolumeKnob(IN ULONG NodeId, OUT PUCHAR Direct, OUT PUCHAR Volume);
     NTSTATUS NTAPI SetVolumeKnob(IN ULONG NodeId, IN UCHAR Direct, IN UCHAR Volume);
     NTSTATUS NTAPI GetVolumeCapabilities(IN ULONG NodeId, IN PUCHAR Delta, IN PUCHAR NumSteps);
     NTSTATUS NTAPI GetPinNodesWithDefaultAssociation(IN UCHAR DefaultAssociation, IN UCHAR Digital, OUT PULONG NodeCount, OUT PULONG * Nodes);
+    NTSTATUS NTAPI GetAssociatedPinNodes(IN ULONG PinId, IN UCHAR DefaultAssociation, IN UCHAR Digital, OUT PULONG NodeCount, OUT PULONG * Nodes);
     VOID NTAPI ClearVisitedState();
 
     NTSTATUS
@@ -460,8 +463,10 @@ class CMiniportTopology : public CUnknownImpl<IMiniportTopology>
         CFunctionGroupNode *Node,
         CAdapterCommon *Adapter,
         PPCFILTER_DESCRIPTOR Filter)
-        : m_Port(0), m_Node(Node), m_FilterDescription(Filter)
+        : m_Port(0), m_Node(Node), m_FilterDescription(Filter), m_PinCount(0)
     {
+        for (ULONG Index = 0; Index < AssociatedPinCount && Index < ARRAYSIZE(m_PinIds); Index++)
+            m_PinIds[m_PinCount++] = AssociatedPinIds[Index];
     }
     virtual ~CMiniportTopology()
     {
@@ -479,10 +484,24 @@ class CMiniportTopology : public CUnknownImpl<IMiniportTopology>
         return m_Port;
     }
 
+    ULONG
+    GetPinCount()
+    {
+        return m_PinCount;
+    }
+
+    ULONG
+    GetPinId(ULONG Index)
+    {
+        return m_PinIds[Index];
+    }
+
   private:
     PPORTTOPOLOGY m_Port;
     CFunctionGroupNode *m_Node;
     PPCFILTER_DESCRIPTOR m_FilterDescription;
+    ULONG m_PinCount;
+    ULONG m_PinIds[16];
 };
 
 class CMiniportWaveRT : public CUnknownImpl<IMiniportWaveRT>

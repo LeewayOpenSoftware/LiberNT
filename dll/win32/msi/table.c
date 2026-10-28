@@ -2389,7 +2389,11 @@ static UINT record_stream_name( const struct table_view *tv, MSIRECORD *rec, WCH
             name[p] = '.';
         p++;
 
+#ifdef __REACTOS__
+        l = (name && *len > p ? *len - p : 0);
+#else
         l = (*len > p ? *len - p : 0);
+#endif
         r = MSI_RecordGetStringW( rec, i + 1, name ? name + p : NULL, &l );
         if (r != ERROR_SUCCESS)
             return r;
@@ -3258,6 +3262,10 @@ static UINT *record_to_row( const struct table_view *tv, MSIRECORD *rec )
     UINT i, r, *data;
 
     data = malloc( tv->num_cols * sizeof (UINT) );
+#ifdef __REACTOS__
+    if (!data)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     for( i=0; i<tv->num_cols; i++ )
     {
         data[i] = 0;

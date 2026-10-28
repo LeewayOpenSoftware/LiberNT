@@ -600,6 +600,10 @@ static LPSTR convert_file_list(LPCSTR FileList, DWORD *dwNumFiles)
 
     dwLen = last - first + 3; /* room for double-null termination */
     szConvertedList = malloc(dwLen);
+#ifdef __REACTOS__
+    if (!szConvertedList)
+        RaiseException(STATUS_NO_MEMORY, EXCEPTION_NONCONTINUABLE, 0, NULL);
+#endif
     lstrcpynA(szConvertedList, first, dwLen - 1);
     szConvertedList[dwLen - 1] = '\0';
 

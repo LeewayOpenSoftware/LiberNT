@@ -2261,10 +2261,6 @@ PiIrpSendRemoveCheckVpb(
     return IopSynchronousCall(targetDevice, &stack, &info);
 }
 
-NTSTATUS
-IopUpdateResourceMapForPnPDevice(
-    IN PDEVICE_NODE DeviceNode);
-
 static
 VOID
 PiSetDeviceStackRemovePending(
@@ -2388,9 +2384,11 @@ IopSendRemoveDevice(IN PDEVICE_OBJECT DeviceObject)
     if (DeviceNode->ResourceList)
     {
         ASSERT(DeviceNode->ResourceListTranslated);
+        IopReleaseNewMessageVectors(DeviceNode->ResourceListTranslated, 0);
+        IopReleaseMessageTokens(DeviceNode->ResourceList);
         DeviceNode->ResourceList->Count = 0;
         DeviceNode->ResourceListTranslated->Count = 0;
-        IopUpdateResourceMapForPnPDevice(DeviceNode);
+        IopUpdateControlKeyWithResources(DeviceNode);
     }
 
     PiSetDevNodeState(DeviceNode, DeviceNodeRemoved);

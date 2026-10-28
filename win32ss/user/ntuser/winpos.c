@@ -452,9 +452,13 @@ done:
 
    if (gpqForeground && (!gpqForeground->spwndActive || Wnd == gpqForeground->spwndActive))
    {
+      PUSER_MESSAGE_QUEUE Queue = gptiCurrent->MessageQueue;
+      PWND ActiveBefore = Queue->spwndActive;
+
       /* ReactOS can pass WndTo = NULL to co_IntSetForegroundWindow and returns FALSE. */
       //ERR("WinPosActivateOtherWindow Set FG 0x%p hWnd %p\n", WndTo, WndTo ? UserHMGetHandle(WndTo) : NULL);
-      if (co_IntSetForegroundWindow(WndTo))
+      if (co_IntSetForegroundWindow(WndTo) ||
+          (gptiCurrent->MessageQueue == Queue && Queue->spwndActive != ActiveBefore))
       {
          if (WndTo) UserDerefObjectCo(WndTo);
          return;
@@ -3300,7 +3304,10 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
    {
       if ( Wnd == pti->MessageQueue->spwndActive && pti->MessageQueue == IntGetFocusMessageQueue()  )
       {
-          if (UserIsDesktopWindow(Wnd->spwndParent))
+          PWND Owner = (Cmd == SW_HIDE && (Wnd->style & WS_POPUP) && Wnd->spwndOwner) ?
+                       UserGetAncestor(Wnd->spwndOwner, GA_ROOT) : NULL;
+
+          if (UserIsDesktopWindow(Wnd->spwndParent) && !can_activate_window(Owner))
           {
               if (!ActivateOtherWindowMin(Wnd))
               {

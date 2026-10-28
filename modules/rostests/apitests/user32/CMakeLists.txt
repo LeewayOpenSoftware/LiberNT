@@ -51,6 +51,7 @@ list(APPEND SOURCE
     InvalidHandles.c
     IsTopLevelWindow.c
     IsServerSideWindow.c
+    JobUiWindowAccess.c
     KbdLayout.c
     LargeMessageBuffers.c
     keybd_event.c
@@ -62,6 +63,7 @@ list(APPEND SOURCE
     MessageStateAnalyzer.c
     MinimizedPosition.c
     ModernUser32.c
+    NestedActivation.c
     NestedWindowPos.c
     NcPaintRgn.c
     NextDlgItem.c

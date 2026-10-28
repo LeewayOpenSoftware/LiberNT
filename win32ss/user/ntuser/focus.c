@@ -205,9 +205,24 @@ co_IntSendDeactivateMessages(HWND hWndPrev, HWND hWnd, BOOL Clear)
 
       if (co_IntSendMessage(hWndPrev, WM_NCACTIVATE, FALSE, lParam))
       {
+         USER_REFERENCE_ENTRY Ref;
+         PWND Wnd = hWnd ? ValidateHwndNoErr(hWnd) : NULL;
+
+         if (Wnd)
+         {
+            UserRefObjectCo(Wnd, &Ref);
+            Wnd->state |= WNDS_BEINGACTIVATED;
+         }
+
          co_IntSendMessage(hWndPrev, WM_ACTIVATE,
                     MAKEWPARAM(WA_INACTIVE, (WndPrev->style & WS_MINIMIZE) ? 0x20 : 0),
                     (LPARAM)hWnd);
+
+         if (Wnd)
+         {
+            Wnd->state &= ~WNDS_BEINGACTIVATED;
+            UserDerefObjectCo(Wnd);
+         }
 
          if (WndPrev && Clear)
             WndPrev->state &= ~(WNDS_ACTIVEFRAME|WNDS_HASCAPTION);
@@ -1172,8 +1187,25 @@ co_IntSetActiveWindow(
 
    if (WndPrev)
    {
+      USER_REFERENCE_ENTRY RefPrev;
+      BOOL PrevValid, PrevDestroyed;
+
       if (ThreadQueue == gpqForeground) gpqForegroundPrev = ThreadQueue;
-      if (!co_IntSendDeactivateMessages(UserHMGetHandle(WndPrev), hWnd, TRUE)) return FALSE;
+      UserRefObjectCo(WndPrev, &RefPrev);
+      PrevValid = (VerifyWnd(WndPrev) != NULL);
+      if (!co_IntSendDeactivateMessages(UserHMGetHandle(WndPrev), hWnd, TRUE))
+      {
+         UserDerefObjectCo(WndPrev);
+         return FALSE;
+      }
+      PrevDestroyed = PrevValid && !VerifyWnd(WndPrev);
+      UserDerefObjectCo(WndPrev);
+      if (PrevDestroyed && ThreadQueue == pti->MessageQueue)
+      {
+         ThreadQueue->spwndActive = NULL;
+         ThreadQueue->spwndFocus = NULL;
+         return FALSE;
+      }
    }
 
    WndPrev = ThreadQueue->spwndActive; // Again keep to save changing active.

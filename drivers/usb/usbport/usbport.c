@@ -1593,6 +1593,7 @@ USBPORT_DpcHandler(IN PDEVICE_OBJECT FdoDevice)
         }
         else
         {
+            InterlockedIncrement(&Endpoint->TimeoutPin);
             InsertTailList(&List, &Endpoint->DispatchLink);
 
             if (Endpoint->WorkerLink.Flink && Endpoint->WorkerLink.Blink)
@@ -1621,6 +1622,7 @@ USBPORT_DpcHandler(IN PDEVICE_OBJECT FdoDevice)
 
         USBPORT_EndpointWorker(Endpoint, TRUE);
         USBPORT_FlushPendingTransfers(Endpoint);
+        InterlockedDecrement(&Endpoint->TimeoutPin);
     }
 
     KeAcquireSpinLockAtDpcLevel(&FdoExtension->EndpointListSpinLock);
@@ -2704,6 +2706,13 @@ USBPORT_SynchronizeControllersStart(IN PDEVICE_OBJECT FdoDevice)
             {
                 IsOn = TRUE;
             }
+        }
+
+        if (!IsOn &&
+            KeQueryInterruptTime() - PendingTimestamp >= USBPORT_COMPANION_WAIT_TIMEOUT)
+        {
+            USB2FdoDevice = NULL;
+            IsOn = TRUE;
         }
 
         if (!(FdoExtension->Flags & USBPORT_FLAG_NO_HACTION))

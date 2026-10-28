@@ -538,6 +538,29 @@ KiCaptureUserLegacyFloatingState(
     RtlCopyMemory(FltSave->FloatRegisters, Area.FloatRegisters, sizeof(Area.FloatRegisters));
 }
 
+#ifdef __clang__
+__attribute__((target("fxsr")))
+#endif
+VOID
+NTAPI
+KiRestoreUserLegacyFloatingState(
+    _In_ PXSAVE_FORMAT FltSave)
+{
+    XSAVE_FORMAT Area;
+
+    _fxsave64(&Area);
+    Area.ControlWord = FltSave->ControlWord;
+    Area.StatusWord = FltSave->StatusWord;
+    Area.TagWord = FltSave->TagWord;
+    Area.ErrorOpcode = FltSave->ErrorOpcode;
+    Area.ErrorOffset = FltSave->ErrorOffset;
+    Area.ErrorSelector = FltSave->ErrorSelector;
+    Area.DataOffset = FltSave->DataOffset;
+    Area.DataSelector = FltSave->DataSelector;
+    RtlCopyMemory(Area.FloatRegisters, FltSave->FloatRegisters, sizeof(Area.FloatRegisters));
+    _fxrstor64(&Area);
+}
+
 ULONG KiMxCsrMask;
 
 #ifdef __clang__
@@ -606,7 +629,7 @@ KeSaveExtendedProcessorState(
 
     if ((XStateSave->Level < DISPATCH_LEVEL) && (Thread->NpxState == 0))
     {
-        Thread->NpxState = SharedUserData->XState.EnabledFeatures;
+        Thread->NpxState = SharedUserData->XState.EnabledFeatures | XSTATE_MASK_LEGACY;
     }
 
     if (KeFeatureBits & KF_XSTATE)

@@ -51,6 +51,7 @@ extern void func_InputMessageSource(void);
 extern void func_InvalidHandles(void);
 extern void func_IsTopLevelWindow(void);
 extern void func_IsServerSideWindow(void);
+extern void func_JobUiWindowAccess(void);
 extern void func_KbdLayout(void);
 extern void func_LargeMessageBuffers(void);
 extern void func_keybd_event(void);
@@ -62,6 +63,7 @@ extern void func_MenuItemData(void);
 extern void func_MessageStateAnalyzer(void);
 extern void func_MinimizedPosition(void);
 extern void func_ModernUser32(void);
+extern void func_NestedActivation(void);
 extern void func_NestedWindowPos(void);
 extern void func_NcPaintRgn(void);
 extern void func_NextDlgItem(void);
@@ -157,6 +159,7 @@ const struct test winetest_testlist[] =
     { "InvalidHandles", func_InvalidHandles },
     { "IsTopLevelWindow", func_IsTopLevelWindow },
     { "IsServerSideWindow", func_IsServerSideWindow },
+    { "JobUiWindowAccess", func_JobUiWindowAccess },
     { "KbdLayout", func_KbdLayout },
     { "LargeMessageBuffers", func_LargeMessageBuffers },
     { "keybd_event", func_keybd_event },
@@ -168,6 +171,7 @@ const struct test winetest_testlist[] =
     { "MessageStateAnalyzer", func_MessageStateAnalyzer },
     { "MinimizedPosition", func_MinimizedPosition },
     { "ModernUser32", func_ModernUser32 },
+    { "NestedActivation", func_NestedActivation },
     { "NestedWindowPos", func_NestedWindowPos },
     { "NcPaintRgn", func_NcPaintRgn },
     { "NextDlgItem", func_NextDlgItem },

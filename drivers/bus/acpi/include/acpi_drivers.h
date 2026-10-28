@@ -119,6 +119,8 @@
 int acpi_button_init (void);
 void acpi_button_exit (void);
 
+int acpi_ged_init(void);
+
 /* --------------------------------------------------------------------------
                                 Embedded Controller
    -------------------------------------------------------------------------- */
@@ -133,6 +135,7 @@ void acpi_button_exit (void);
 #ifdef CONFIG_ACPI_EC
 
 int acpi_ec_ecdt_probe (void);
+int acpi_ec_dsdt_probe (void);
 int acpi_ec_init (void);
 void acpi_ec_exit (void);
 

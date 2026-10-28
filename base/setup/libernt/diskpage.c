@@ -392,6 +392,10 @@ SelectRegion(
     ListView_EnsureVisible(hList, iItem, FALSE);
 }
 
+static UINT
+GetInstallBlocker(
+    _In_opt_ PPARTENTRY PartEntry);
+
 static PPARTENTRY
 FindDefaultInstallRegion(
     _In_ PPARTLIST List)
@@ -417,7 +421,7 @@ FindDefaultInstallRegion(
             PPARTENTRY PartEntry = CONTAINING_RECORD(PartLink, PARTENTRY, ListEntry);
             ULONGLONG Size = GetPartEntrySizeInBytes(PartEntry);
 
-            if (PartEntry->IsPartitioned || PartitionCreateChecks(PartEntry, 0ULL, 0) != NOT_AN_ERROR)
+            if (PartEntry->IsPartitioned || GetInstallBlocker(PartEntry))
                 continue;
 
             if (Size > BestSize)
@@ -499,6 +503,15 @@ DiskHasPartitions(
     return FALSE;
 }
 
+static BOOLEAN
+DiskStyleMatchesFirmware(
+    _In_ PDISKENTRY DiskEntry)
+{
+    if (IsUefiFirmware())
+        return DiskEntry->DiskStyle == PARTITION_STYLE_GPT;
+    return DiskEntry->DiskStyle != PARTITION_STYLE_GPT;
+}
+
 static UINT
 GetInstallBlocker(
     _In_opt_ PPARTENTRY PartEntry)
@@ -511,6 +524,9 @@ GetInstallBlocker(
     {
         return IDS_DISK_TOO_SMALL;
     }
+
+    if (DiskHasPartitions(PartEntry->DiskEntry) && !DiskStyleMatchesFirmware(PartEntry->DiskEntry))
+        return IsUefiFirmware() ? IDS_DISK_MBR_ON_UEFI : IDS_DISK_GPT_ON_BIOS;
 
     if (!PartEntry->IsPartitioned)
         return (PartitionCreateChecks(PartEntry, 0ULL, 0) == NOT_AN_ERROR) ? 0 : IDS_DISK_NO_REGION;
@@ -670,6 +686,35 @@ FindPartitionAt(
 }
 
 static BOOLEAN
+ConvertEmptyDisk(
+    _In_ HWND hwndDlg,
+    _Inout_ PSETUPDATA pSetupData,
+    _Inout_ PPARTENTRY* pRegion)
+{
+    PDISKENTRY DiskEntry = (*pRegion)->DiskEntry;
+    PPARTENTRY FreeRegion = NULL;
+
+    if (DiskStyleMatchesFirmware(DiskEntry) || DiskHasPartitions(DiskEntry))
+        return TRUE;
+
+    ForgetVolumePlans(DiskEntry, NULL, FALSE);
+    if (!EraseDisk(pSetupData->PartitionList, DiskEntry, &FreeRegion) || !FreeRegion)
+    {
+        RedrawDiskList(hwndDlg, pSetupData, NULL);
+        SetupMessage(GetParent(hwndDlg), TD_ERROR_ICON, TDCBF_OK_BUTTON, IDOK,
+                     MAKEINTRESOURCEW(IDS_ERROR_CREATE_PARTITION), NULL);
+        return FALSE;
+    }
+
+    if (DiskEntry->DiskNumber < 64)
+        ErasedDisks |= 1ULL << DiskEntry->DiskNumber;
+
+    RedrawDiskList(hwndDlg, pSetupData, FreeRegion);
+    *pRegion = FreeRegion;
+    return TRUE;
+}
+
+static BOOLEAN
 CreateRegionPartition(
     _In_ HWND hwndDlg,
     _Inout_ PSETUPDATA pSetupData,
@@ -783,6 +828,9 @@ DoNewPartition(
     NEWPART_CTX Ctx;
 
     if (!Region || Region->IsPartitioned)
+        return;
+
+    if (!ConvertEmptyDisk(hwndDlg, pSetupData, &Region))
         return;
 
     MaxBytes = GetPartEntrySizeInBytes(Region);
@@ -1191,6 +1239,8 @@ ApplyInstallSelection(
 
     if (!PartEntry->IsPartitioned)
     {
+        if (!ConvertEmptyDisk(hwndDlg, pSetupData, &PartEntry))
+            return FALSE;
         if (!CreateRegionPartition(hwndDlg, pSetupData, &PartEntry, 0ULL, !pSetupData->bUnattend))
         {
             RedrawDiskList(hwndDlg, pSetupData, PartEntry);
