@@ -1,0 +1,35 @@
+diff --git a/mcs/class/corlib/System/AppDomainSetup.cs b/mcs/class/corlib/System/AppDomainSetup.cs
+index 77001f8c24..9b5873bb3a 100644
+--- a/mcs/class/corlib/System/AppDomainSetup.cs
++++ b/mcs/class/corlib/System/AppDomainSetup.cs
+@@ -97,6 +97,7 @@ public sealed class AppDomainSetup : IAppDomainSetup
+ 		string manager_assembly;
+ 		string manager_type;
+ 		string [] partial_visible_assemblies;
++		string target_framework_name;
+ 
+ 		public AppDomainSetup ()
+ 		{
+@@ -128,6 +129,7 @@ internal AppDomainSetup (AppDomainSetup setup)
+ 			manager_assembly = setup.manager_assembly;
+ 			manager_type = setup.manager_type;
+ 			partial_visible_assemblies = setup.partial_visible_assemblies;
++			target_framework_name = setup.target_framework_name;
+ 		}
+ 
+ 		public AppDomainSetup (ActivationArguments activationArguments)
+@@ -347,8 +349,12 @@ public bool DisallowCodeDownload {
+ 			}
+ 		}
+ 
+-		public string TargetFrameworkName =>
+-			Assembly.GetEntryAssembly()?.GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName;
++		public string TargetFrameworkName {
++			get {
++				return target_framework_name ?? Assembly.GetEntryAssembly()?.GetCustomAttribute<TargetFrameworkAttribute>()?.FrameworkName;
++			}
++			set { target_framework_name = value; }
++		}
+ 
+ 		public ActivationArguments ActivationArguments {
+ 			get {
