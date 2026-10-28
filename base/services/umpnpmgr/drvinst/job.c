@@ -434,10 +434,15 @@ DrvInstSubmitDeviceJob(
     hThread = CreateThread(NULL, 0, AsyncJobThread, Async, 0, NULL);
     if (!hThread)
     {
+        DRVINST_RESULT FailedResult;
+
         Error = GetLastError();
-        SetJobState(JobId, DrvInstJobFailed, NULL);
+        ZeroMemory(&FailedResult, sizeof(FailedResult));
+        FailedResult.Size = sizeof(FailedResult);
+        FailedResult.Win32 = Error ? Error : ERROR_GEN_FAILURE;
+        SetJobState(JobId, DrvInstJobFailed, &FailedResult);
         HeapFree(GetProcessHeap(), 0, Async);
-        return Error;
+        return FailedResult.Win32;
     }
 
     *OutJobId = JobId;

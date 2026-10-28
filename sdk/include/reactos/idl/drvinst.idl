@@ -44,14 +44,14 @@ interface drvinst
         [out] DWORD *pulSubmitTick,
         [out] DWORD *pulEndTick,
         [out, size_is(ulDeviceCch)] WCHAR *pszDeviceInstanceId,
-        [in] DWORD ulDeviceCch);
+        [in, range(0,200)] DWORD ulDeviceCch);
 
     /* The identifiers of the jobs the service remembers, newest first. */
     DWORD
     __stdcall
     DrvInst_EnumJobs(
         [in] handle_t hBinding,
-        [in] DWORD ulMax,
+        [in, range(0,256)] DWORD ulMax,
         [out, size_is(ulMax), length_is(*pulCount)] unsigned hyper *pullJobIds,
         [out] DWORD *pulCount);
 }
