@@ -60,7 +60,7 @@ ExcludeFromSelect=*
 
 [WDM_CMPCI]
 Include=ks.inf,wdmaudio.inf
-Needs=KS.Registration,WDMAUDIO.Registration,mssysfx.CopyFilesAndRegister
+Needs=KS.Registration,WDMAUDIO.Registration
 CopyFiles=CMPCI.CopyList,CPanel.CopyList
 AddReg=WDM_CMPCI.AddReg,Mixer_CMPCI.AddReg
 
