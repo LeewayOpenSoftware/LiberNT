@@ -1910,9 +1910,22 @@ static inline BOOL LISTVIEW_GetItemW(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpL
     return LISTVIEW_GetItemT(infoPtr, lpLVItem, TRUE);
 }
 
+/* With the Explorer item theme the selection state is already shown by the themed fill and
+ * border; an XOR focus rectangle would invert that border, so it is not drawn. */
+static inline BOOL LISTVIEW_ItemThemed(const LISTVIEW_INFO *infoPtr)
+{
+#if __WINE_COMCTL32_VERSION == 6
+    HTHEME theme = GetWindowTheme(infoPtr->hwndSelf);
+    return theme && IsThemePartDefined(theme, LVP_LISTITEM, 0);
+#else
+    return FALSE;
+#endif
+}
+
 /* used to handle collapse main item column case */
 static inline BOOL LISTVIEW_DrawFocusRect(const LISTVIEW_INFO *infoPtr, HDC hdc)
 {
+    if (LISTVIEW_ItemThemed(infoPtr)) return FALSE;
     return (infoPtr->rcFocus.left < infoPtr->rcFocus.right) ?
             DrawFocusRect(hdc, &infoPtr->rcFocus) : FALSE;
 }
@@ -2383,6 +2396,7 @@ static void LISTVIEW_ShowFocusRect(const LISTVIEW_INFO *infoPtr, BOOL fShow)
     TRACE("fShow=%d, nItem=%d\n", fShow, infoPtr->nFocusedItem);
 
     if (infoPtr->nFocusedItem < 0) return;
+    if (LISTVIEW_ItemThemed(infoPtr)) return;
 
     /* we need some gymnastics in ICON mode to handle large items */
     if (infoPtr->uView == LV_VIEW_ICON)
