@@ -430,11 +430,6 @@ private:
     INT ComputerItemFromPoint(POINT point);
     void DrawComputerHeader(HDC hdc, const RECT &rect, UINT id, UINT count);
     void DrawComputerItem(NMLVCUSTOMDRAW *pDraw);
-    void DrawItemStateBackground(HDC hdc, const RECT &rect, BOOL selected, BOOL hot, BOOL accent, UINT dpi);
-    bool UseModernItemStates();
-    BOOL GetItemStateRect(INT item, RECT *rect);
-    LRESULT DrawModernItemState(NMLVCUSTOMDRAW *pDraw);
-    static LRESULT CALLBACK ListViewItemStateProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR idSubclass, DWORD_PTR refData);
     BOOL IsDesktop() const { return m_FolderSettings.fFlags & FWF_DESKTOP; }
 
     inline BOOL IsSpecialFolder(int &csidl) const
@@ -1301,7 +1296,35 @@ void CDefView::DrawComputerItem(NMLVCUSTOMDRAW *pDraw)
     HIGHCONTRASTW highContrast = { sizeof(highContrast) };
     const BOOL isHighContrast = SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(highContrast), &highContrast, 0) &&
                                 (highContrast.dwFlags & HCF_HIGHCONTRASTON);
-    DrawItemStateBackground(pDraw->nmcd.hdc, itemRect, selected, hot, FALSE, dpi);
+    if (selected || hot)
+    {
+        const COLORREF background = ComputerViewBackgroundColor();
+        COLORREF fillColor, borderColor;
+        if (isHighContrast && selected)
+        {
+            fillColor = GetSysColor(COLOR_HIGHLIGHT);
+            borderColor = GetSysColor(COLOR_HIGHLIGHTTEXT);
+        }
+        else
+        {
+            const BOOL darkView = GetRValue(background) + GetGValue(background) + GetBValue(background) < (128 * 3);
+            const INT delta = selected && hot ? 32 : selected ? 24 : 14;
+            const INT direction = darkView ? 1 : -1;
+            fillColor = RGB(max(0, min(255, GetRValue(background) + direction * delta)), max(0, min(255, GetGValue(background) + direction * delta)), max(0, min(255, GetBValue(background) + direction * delta)));
+            borderColor = RGB(max(0, min(255, GetRValue(fillColor) + direction * 16)), max(0, min(255, GetGValue(fillColor) + direction * 16)), max(0, min(255, GetBValue(fillColor) + direction * 16)));
+        }
+
+        HBRUSH fillBrush = CreateSolidBrush(fillColor);
+        HPEN borderPen = CreatePen(PS_SOLID, 1, borderColor);
+        HGDIOBJ oldBrush = SelectObject(pDraw->nmcd.hdc, fillBrush);
+        HGDIOBJ oldPen = SelectObject(pDraw->nmcd.hdc, borderPen);
+        const INT radius = max(4, MulDiv(6, dpi, 96));
+        RoundRect(pDraw->nmcd.hdc, itemRect.left, itemRect.top, itemRect.right, itemRect.bottom, radius, radius);
+        SelectObject(pDraw->nmcd.hdc, oldPen);
+        SelectObject(pDraw->nmcd.hdc, oldBrush);
+        DeleteObject(borderPen);
+        DeleteObject(fillBrush);
+    }
 
     const COMPUTER_TILE *tile = GetComputerTile(pidl, iconSize);
     if (!tile)
@@ -1370,212 +1393,6 @@ void CDefView::DrawComputerItem(NMLVCUSTOMDRAW *pDraw)
 
     if ((pDraw->nmcd.uItemState & CDIS_FOCUS) && (pDraw->nmcd.uItemState & CDIS_SELECTED))
         DrawFocusRect(pDraw->nmcd.hdc, &itemRect);
-}
-
-void CDefView::DrawItemStateBackground(HDC hdc, const RECT &rect, BOOL selected, BOOL hot, BOOL accent, UINT dpi)
-{
-    if (!selected && !hot)
-        return;
-
-    HIGHCONTRASTW highContrast = { sizeof(highContrast) };
-    const BOOL isHighContrast = SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(highContrast), &highContrast, 0) &&
-                                (highContrast.dwFlags & HCF_HIGHCONTRASTON);
-    const COLORREF background = ComputerViewBackgroundColor();
-    COLORREF fillColor, borderColor;
-    if (isHighContrast && selected)
-    {
-        fillColor = GetSysColor(COLOR_HIGHLIGHT);
-        borderColor = GetSysColor(COLOR_HIGHLIGHTTEXT);
-    }
-    else
-    {
-        const BOOL darkView = GetRValue(background) + GetGValue(background) + GetBValue(background) < (128 * 3);
-        const INT direction = darkView ? 1 : -1;
-        if (accent && selected)
-        {
-            const COLORREF highlight = GetSysColor(COLOR_HIGHLIGHT);
-            const INT weight = hot ? 80 : 64;
-            fillColor = RGB(GetRValue(background) + (GetRValue(highlight) - GetRValue(background)) * weight / 255,
-                            GetGValue(background) + (GetGValue(highlight) - GetGValue(background)) * weight / 255,
-                            GetBValue(background) + (GetBValue(highlight) - GetBValue(background)) * weight / 255);
-        }
-        else
-        {
-            const INT delta = selected && hot ? 32 : selected ? 24 : 14;
-            fillColor = RGB(max(0, min(255, GetRValue(background) + direction * delta)), max(0, min(255, GetGValue(background) + direction * delta)), max(0, min(255, GetBValue(background) + direction * delta)));
-        }
-        borderColor = RGB(max(0, min(255, GetRValue(fillColor) + direction * 16)), max(0, min(255, GetGValue(fillColor) + direction * 16)), max(0, min(255, GetBValue(fillColor) + direction * 16)));
-    }
-
-    HBRUSH fillBrush = CreateSolidBrush(fillColor);
-    HPEN borderPen = CreatePen(PS_SOLID, 1, borderColor);
-    HGDIOBJ oldBrush = SelectObject(hdc, fillBrush);
-    HGDIOBJ oldPen = SelectObject(hdc, borderPen);
-    const INT radius = max(4, MulDiv(6, dpi, 96));
-    RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
-    SelectObject(hdc, oldPen);
-    SelectObject(hdc, oldBrush);
-    DeleteObject(borderPen);
-    DeleteObject(fillBrush);
-}
-
-bool CDefView::UseModernItemStates()
-{
-    return m_ListView && !IsComputerTileView() && !(m_FolderSettings.fFlags & FWF_DESKTOP) &&
-           ListView_GetBkColor(m_ListView) != CLR_NONE;
-}
-
-BOOL CDefView::GetItemStateRect(INT item, RECT *rect)
-{
-    UINT code = LVIR_SELECTBOUNDS;
-    if (ListView_GetView(m_ListView) == LV_VIEW_DETAILS &&
-        (ListView_GetExtendedListViewStyle(m_ListView) & LVS_EX_FULLROWSELECT))
-    {
-        code = LVIR_BOUNDS;
-    }
-    return ListView_GetItemRect(m_ListView, item, rect, code);
-}
-
-LRESULT CDefView::DrawModernItemState(NMLVCUSTOMDRAW *pDraw)
-{
-    const INT item = (INT)pDraw->nmcd.dwItemSpec;
-    if (item < 0 || item >= ListView_GetItemCount(m_ListView))
-        return CDRF_DODEFAULT;
-
-    const UINT state = ListView_GetItemState(m_ListView, item, LVIS_SELECTED | LVIS_CUT);
-    const BOOL selected = !!(state & LVIS_SELECTED);
-    const BOOL hot = item == ListView_GetHotItem(m_ListView);
-    if (!selected && !hot)
-        return CDRF_DODEFAULT;
-
-    const UINT dpi = GetDeviceCaps(pDraw->nmcd.hdc, LOGPIXELSX);
-    const BOOL accent = ::GetFocus() == m_ListView;
-    RECT stateRect;
-    if (!GetItemStateRect(item, &stateRect))
-        return CDRF_DODEFAULT;
-
-    if (pDraw->nmcd.dwDrawStage == CDDS_ITEMPREPAINT)
-    {
-        DrawItemStateBackground(pDraw->nmcd.hdc, stateRect, selected, hot, accent, dpi ? dpi : 96);
-        pDraw->nmcd.uItemState &= ~(CDIS_SELECTED | CDIS_HOT);
-        pDraw->clrTextBk = CLR_NONE;
-        pDraw->clrText = ExplorerContentTextColor();
-        return (state & LVIS_CUT) ? CDRF_DODEFAULT : CDRF_NOTIFYPOSTPAINT;
-    }
-
-    RECT iconRect;
-    if (!ListView_GetItemRect(m_ListView, item, &iconRect, LVIR_ICON))
-        return CDRF_DODEFAULT;
-
-    const INT view = ListView_GetView(m_ListView);
-    HIMAGELIST imageList = ListView_GetImageList(m_ListView, view == LV_VIEW_ICON ? LVSIL_NORMAL : LVSIL_SMALL);
-    LVITEMW lvItem = { LVIF_IMAGE | LVIF_STATE, item };
-    lvItem.stateMask = LVIS_OVERLAYMASK;
-    if (!imageList || !ListView_GetItem(m_ListView, &lvItem) || lvItem.iImage < 0)
-        return CDRF_DODEFAULT;
-
-    const INT savedDC = SaveDC(pDraw->nmcd.hdc);
-    IntersectClipRect(pDraw->nmcd.hdc, iconRect.left, iconRect.top, iconRect.right, iconRect.bottom);
-    DrawItemStateBackground(pDraw->nmcd.hdc, stateRect, selected, hot, accent, dpi ? dpi : 96);
-    ImageList_Draw(imageList, lvItem.iImage, pDraw->nmcd.hdc, iconRect.left, iconRect.top,
-                   ILD_TRANSPARENT | (lvItem.state & LVIS_OVERLAYMASK));
-    RestoreDC(pDraw->nmcd.hdc, savedDC);
-    return CDRF_DODEFAULT;
-}
-
-static BOOL IsListViewTrackingHot(HWND hwnd)
-{
-    return !!(ListView_GetExtendedListViewStyle(hwnd) &
-              (LVS_EX_TRACKSELECT | LVS_EX_ONECLICKACTIVATE | LVS_EX_TWOCLICKACTIVATE));
-}
-
-static void SetModernHotItem(HWND hwnd, INT item)
-{
-    const INT oldItem = ListView_GetHotItem(hwnd);
-    if (item == oldItem)
-        return;
-
-    ListView_SetHotItem(hwnd, item);
-    if (oldItem != -1 && oldItem < ListView_GetItemCount(hwnd))
-        ListView_RedrawItems(hwnd, oldItem, oldItem);
-    if (item != -1)
-    {
-        ListView_RedrawItems(hwnd, item, item);
-        if (oldItem == -1)
-        {
-            TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hwnd };
-            TrackMouseEvent(&tme);
-        }
-    }
-}
-
-static INT ModernHotItemFromPoint(HWND hwnd, POINT pt, BOOL buttonsDown)
-{
-    RECT client;
-    if (buttonsDown || ::GetCapture() == hwnd || !GetClientRect(hwnd, &client) || !PtInRect(&client, pt))
-        return -1;
-
-    LVHITTESTINFO hitTest = { pt };
-    const INT item = ListView_HitTest(hwnd, &hitTest);
-    return (hitTest.flags & LVHT_ONITEM) ? item : -1;
-}
-
-static void UpdateModernHotItemFromCursor(HWND hwnd)
-{
-    POINT pt;
-    if (!GetCursorPos(&pt) || !ScreenToClient(hwnd, &pt))
-        return;
-
-    const BOOL buttonsDown = GetKeyState(VK_LBUTTON) < 0 || GetKeyState(VK_RBUTTON) < 0 || GetKeyState(VK_MBUTTON) < 0;
-    ListView_SetHotItem(hwnd, -1);
-    SetModernHotItem(hwnd, ModernHotItemFromPoint(hwnd, pt, buttonsDown));
-}
-
-LRESULT CALLBACK CDefView::ListViewItemStateProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR idSubclass, DWORD_PTR refData)
-{
-    CDefView *pThis = reinterpret_cast<CDefView *>(refData);
-
-    if (uMsg == WM_NCDESTROY)
-    {
-        RemoveWindowSubclass(hwnd, ListViewItemStateProc, idSubclass);
-        return DefSubclassProc(hwnd, uMsg, wParam, lParam);
-    }
-
-    if (!pThis->UseModernItemStates() || IsListViewTrackingHot(hwnd))
-        return DefSubclassProc(hwnd, uMsg, wParam, lParam);
-
-    switch (uMsg)
-    {
-        case WM_MOUSEMOVE:
-        {
-            POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-            SetModernHotItem(hwnd, ModernHotItemFromPoint(hwnd, pt, !!(wParam & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON))));
-            break;
-        }
-        case WM_MOUSELEAVE:
-        case WM_CAPTURECHANGED:
-            SetModernHotItem(hwnd, -1);
-            break;
-        case WM_VSCROLL:
-        case WM_HSCROLL:
-        case WM_MOUSEWHEEL:
-        case LVM_SCROLL:
-        case LVM_ENSUREVISIBLE:
-        case LVM_DELETEITEM:
-        case LVM_DELETEALLITEMS:
-        case LVM_SORTITEMS:
-        case LVM_SORTITEMSEX:
-        case LVM_SETITEMCOUNT:
-        case LVM_ARRANGE:
-        case LVM_SETVIEW:
-        {
-            const LRESULT result = DefSubclassProc(hwnd, uMsg, wParam, lParam);
-            UpdateModernHotItemFromCursor(hwnd);
-            return result;
-        }
-    }
-
-    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
 }
 
 // ##### helperfunctions for communication with ICommDlgBrowser #####
@@ -1845,7 +1662,6 @@ BOOL CDefView::CreateList()
         return FALSE;
 
     m_ListView.SetExtendedListViewStyle(ListExStyle);
-    SetWindowSubclass(m_ListView, ListViewItemStateProc, 0, reinterpret_cast<DWORD_PTR>(this));
 
     /* Enumeration finishes asynchronously, after the desktop can be shown.
      * Make its list view transparent before the first paint instead of
@@ -3888,14 +3704,6 @@ LRESULT CDefView::OnNotify(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandl
                     DrawComputerItem(pDraw);
                     return CDRF_SKIPDEFAULT;
                 }
-            }
-            else if (lpnmh->hwndFrom == m_ListView && UseModernItemStates())
-            {
-                NMLVCUSTOMDRAW *pDraw = (NMLVCUSTOMDRAW *)lpnmh;
-                if (pDraw->nmcd.dwDrawStage == CDDS_PREPAINT)
-                    return CDRF_NOTIFYITEMDRAW;
-                if (pDraw->nmcd.dwDrawStage == CDDS_ITEMPREPAINT || pDraw->nmcd.dwDrawStage == CDDS_ITEMPOSTPAINT)
-                    return DrawModernItemState(pDraw);
             }
             else if (lpnmh->hwndFrom == m_ListView && m_ExplorerMaterialActive)
             {
