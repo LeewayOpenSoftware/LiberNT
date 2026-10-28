@@ -89,6 +89,26 @@ static BOOL option_equal(LPCSTR str1, LPCSTR str2)
     return !lstrcmpA( str1 + 1, str2 );
 }
 
+static BOOL output_dir_exists(LPCSTR outfile)
+{
+    char dir[MAX_PATH];
+    char *basename;
+    DWORD attr;
+
+    if (!GetFullPathNameA( outfile, sizeof(dir), dir, &basename ))
+        return TRUE;
+    if (basename == dir)
+        return TRUE;
+    *basename = 0;
+    attr = GetFileAttributesA( dir );
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
+    {
+        SetLastError( ERROR_PATH_NOT_FOUND );
+        return FALSE;
+    }
+    return TRUE;
+}
+
 int __cdecl main(int argc, char *argv[])
 {
     int ret = 0;
@@ -144,6 +164,12 @@ int __cdecl main(int argc, char *argv[])
     if (!lstrcmpiA( infile, outfile ))
     {
         myprintf( "%s: can't expand file to itself\n", argv[0] );
+        return 1;
+    }
+
+    if (!output_dir_exists( outfile ))
+    {
+        myprintf( "%s: can't open output file %s\n", argv[0], outfile );
         return 1;
     }
 
