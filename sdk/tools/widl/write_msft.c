@@ -80,7 +80,12 @@ typedef struct _msft_typelib_t
     unsigned char *typelib_segment_data[MSFT_SEG_MAX];
     int typelib_segment_block_length[MSFT_SEG_MAX];
 
+#ifdef __REACTOS__
+    int *typelib_typeinfo_offsets;
+    int typelib_typeinfo_offsets_size;
+#else
     int typelib_typeinfo_offsets[0x200]; /* Hope that's enough. */
+#endif
 
     int *typelib_namehash_segment;
     int *typelib_guidhash_segment;
@@ -424,6 +429,14 @@ static int ctl2_alloc_typeinfo(
 
     offset = ctl2_alloc_segment(typelib, MSFT_SEG_TYPEINFO, sizeof(MSFT_TypeInfoBase), 0);
 
+#ifdef __REACTOS__
+    if (typelib->typelib_header.nrtypeinfos >= typelib->typelib_typeinfo_offsets_size)
+    {
+        typelib->typelib_typeinfo_offsets_size = typelib->typelib_typeinfo_offsets_size ? typelib->typelib_typeinfo_offsets_size * 2 : 0x200;
+        typelib->typelib_typeinfo_offsets = xrealloc(typelib->typelib_typeinfo_offsets,
+                                                     typelib->typelib_typeinfo_offsets_size * sizeof(*typelib->typelib_typeinfo_offsets));
+    }
+#endif
     typelib->typelib_typeinfo_offsets[typelib->typelib_header.nrtypeinfos++] = offset;
 
     typeinfo = (void *)(typelib->typelib_segment_data[MSFT_SEG_TYPEINFO] + offset);
@@ -2834,6 +2847,9 @@ int create_msft_typelib(typelib_t *typelib)
             add_entry(msft, stmt);
 
     save_all_changes(msft);
+#ifdef __REACTOS__
+    free(msft->typelib_typeinfo_offsets);
+#endif
     free(msft);
     return 1;
 }
