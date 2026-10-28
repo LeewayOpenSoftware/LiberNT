@@ -46,7 +46,7 @@ ExcludeFromSelect = *
 
 [HdAudModel]
 Include=ks.inf,wdmaudio.inf
-Needs=KS.Registration,WDMAUDIO.Registration,mssysfx.CopyFilesAndRegister
+Needs=KS.Registration,WDMAUDIO.Registration
 CopyFiles = HdAudModel.CopyList
 AddReg    = HdAudModel.AddReg
 AddProperty = HdAudBranding.AddProperty, HdAudModel.AddProperty
