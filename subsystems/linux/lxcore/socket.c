@@ -69,6 +69,7 @@ struct _LX_UNIX_SOCKET
     PLX_INSTANCE Instance;
     PLX_NS NetNs;
     PLX_MOUNT BoundMount;
+    ULONG BoundDev;
     LONG64 BoundId;
     LIST_ENTRY BindLink;
     LONG Error;
@@ -811,7 +812,7 @@ LxUnixLookupBound(
                 break;
             }
         }
-        else if ((Socket->BoundMount == Mount) && (Socket->BoundId == Id))
+        else if ((Socket->BoundMount != NULL) && (Socket->BoundDev == Mount->Dev) && (Socket->BoundId == Id))
         {
             Found = Socket;
             break;
@@ -900,7 +901,7 @@ LxUnixBindAddress(
         {
             PLX_UNIX_SOCKET Other = CONTAINING_RECORD(Entry, LX_UNIX_SOCKET, BindLink);
 
-            if ((Other->BoundMount == Mount) && (Other->BoundId == Id))
+            if ((Other->BoundMount != NULL) && (Other->BoundDev == Mount->Dev) && (Other->BoundId == Id))
             {
                 RemoveEntryList(&Other->BindLink);
                 InitializeListHead(&Other->BindLink);
@@ -912,6 +913,7 @@ LxUnixBindAddress(
     RtlCopyMemory(Socket->Address, Address->Raw, Address->RawLength);
     Socket->AddressLength = Address->RawLength;
     Socket->BoundMount = Mount;
+    Socket->BoundDev = (Mount != NULL) ? Mount->Dev : 0;
     Socket->BoundId = Id;
     Socket->Bound = TRUE;
     LxUnixReference(Socket);
