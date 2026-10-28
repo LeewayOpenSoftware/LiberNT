@@ -1,0 +1,13 @@
+--- a/mono/metadata/cominterop.c
++++ b/mono/metadata/cominterop.c
+@@ -5098,9 +5098,7 @@
+ mono_marshal_safearray_destroy_impl (gpointer safearray, MonoError *error)
+ {
+ #ifdef HOST_WIN32
+-	HRESULT hr = SafeArrayDestroy (safearray);
+-	if (FAILED(hr))
+-		mono_error_set_execution_engine (error, "SafeArrayDestroy failed with hr 0x%x", hr);
++	SafeArrayDestroy (safearray);
+ #endif
+ }
+ 
