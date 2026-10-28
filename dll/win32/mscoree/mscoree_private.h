@@ -82,6 +82,7 @@ struct RuntimeHost
 #ifdef __REACTOS__
     ICLRControl ICLRControl_iface;
     ICLRDomainManager ICLRDomainManager_iface;
+    IHostControl *host_control;
     WCHAR *domain_manager_assembly;
     WCHAR *domain_manager_type;
     BOOL default_domain_started;
@@ -158,6 +159,8 @@ extern HRESULT check_host_config_file(LPCWSTR filename);
 extern HRESULT set_startup_flags(ICLRRuntimeInfo *iface, DWORD flags, BOOL set_config, LPCWSTR host_config_file);
 
 extern void RuntimeHost_NotifyEvent(EClrEvent event, void *data);
+
+extern int (CDECL *mono_domain_get_id)(MonoDomain *domain);
 #endif
 
 typedef enum {

@@ -129,7 +129,7 @@ static void (CDECL *mono_profiler_install)(MonoProfiler *prof, MonoProfileFunc s
 static void (CDECL *mono_profiler_set_runtime_shutdown_begin_callback)(MonoProfilerHandle handle, MonoProfilerRuntimeShutdownBeginCallback cb);
 #ifdef __REACTOS__
 static void (CDECL *mono_profiler_set_domain_unloading_callback)(MonoProfilerHandle handle, MonoProfilerDomainUnloadingCallback cb);
-static int (CDECL *mono_domain_get_id)(MonoDomain *domain);
+int (CDECL *mono_domain_get_id)(MonoDomain *domain);
 #endif
 MonoType* (CDECL *mono_reflection_type_from_name)(char *name, MonoImage *image);
 MonoObject* (CDECL *mono_runtime_invoke)(MonoMethod *method, void *obj, void **params, MonoObject **exc);

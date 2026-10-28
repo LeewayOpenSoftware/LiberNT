@@ -46,6 +46,17 @@ WINE_DEFAULT_DEBUG_CHANNEL( mscoree );
 #include "initguid.h"
 
 DEFINE_GUID(IID__AppDomain, 0x05f696dc,0x2b29,0x3663,0xad,0x8b,0xc4,0x38,0x9c,0xf2,0xa7,0x13);
+#ifdef __REACTOS__
+DEFINE_GUID(IID_IHostMemoryManager, 0x7bc698d1, 0xf9e3, 0x4460, 0x9c, 0xde, 0xd0, 0x42, 0x48, 0xe9, 0xfa, 0x25);
+DEFINE_GUID(IID_IHostTaskManager, 0x997ff24c, 0x43b7, 0x4352, 0x86, 0x67, 0x0d, 0xc0, 0x4f, 0xaf, 0xd3, 0x54);
+DEFINE_GUID(IID_IHostThreadpoolManager, 0x983d50e2, 0xcb15, 0x466b, 0x80, 0xfc, 0x84, 0x5d, 0xc6, 0xe8, 0xc5, 0xfd);
+DEFINE_GUID(IID_IHostIoCompletionManager, 0x8bde9d80, 0xec06, 0x41d6, 0x83, 0xe6, 0x22, 0x58, 0x0e, 0xff, 0xcc, 0x20);
+DEFINE_GUID(IID_IHostSyncManager, 0x234330c7, 0x5f10, 0x4f20, 0x96, 0x15, 0x51, 0x22, 0xda, 0xb7, 0xa0, 0xac);
+DEFINE_GUID(IID_IHostAssemblyManager, 0x613dabd7, 0x62b2, 0x493e, 0x9e, 0x65, 0xc1, 0xe3, 0x2a, 0x1e, 0x0c, 0x5e);
+DEFINE_GUID(IID_IHostGCManager, 0x5d4ec34e, 0xf248, 0x457b, 0xb6, 0x03, 0x25, 0x5f, 0xaa, 0xba, 0x0d, 0x21);
+DEFINE_GUID(IID_IHostSecurityManager, 0x75ad2468, 0xa349, 0x4d02, 0xa7, 0x64, 0x76, 0xa6, 0x8a, 0xee, 0x0c, 0x4f);
+DEFINE_GUID(IID_IHostPolicyManager, 0x7ae49844, 0xb1e3, 0x4683, 0xba, 0x7c, 0x1e, 0x82, 0x12, 0xea, 0x3b, 0x79);
+#endif
 
 struct DomainEntry
 {
@@ -897,8 +908,63 @@ static HRESULT WINAPI CLRRuntimeHost_Stop(ICLRRuntimeHost* iface)
 static HRESULT WINAPI CLRRuntimeHost_SetHostControl(ICLRRuntimeHost* iface,
     IHostControl *pHostControl)
 {
+#ifdef __REACTOS__
+    static const struct
+    {
+        const GUID *iid;
+        const char *name;
+    } host_managers[] =
+    {
+        { &IID_IHostMemoryManager, "memory manager" },
+        { &IID_IHostTaskManager, "task manager" },
+        { &IID_IHostThreadpoolManager, "thread pool manager" },
+        { &IID_IHostIoCompletionManager, "I/O completion manager" },
+        { &IID_IHostSyncManager, "synchronization manager" },
+        { &IID_IHostAssemblyManager, "assembly manager" },
+        { &IID_IHostGCManager, "GC manager" },
+        { &IID_IHostSecurityManager, "security manager" },
+        { &IID_IHostPolicyManager, "policy manager" },
+    };
+    RuntimeHost *This = impl_from_ICLRRuntimeHost( iface );
+    IHostControl *old;
+    IUnknown *manager;
+    unsigned int i;
+    BOOL started;
+
+    TRACE("(%p,%p)\n", iface, pHostControl);
+
+    if (!pHostControl)
+        return E_INVALIDARG;
+
+    EnterCriticalSection(&This->lock);
+    started = This->default_domain_started;
+    LeaveCriticalSection(&This->lock);
+    if (started)
+        return E_ACCESSDENIED;
+
+    for (i = 0; i < ARRAY_SIZE(host_managers); i++)
+    {
+        manager = NULL;
+        if (SUCCEEDED(IHostControl_GetHostManager(pHostControl, host_managers[i].iid, (void **)&manager)) && manager)
+        {
+            FIXME("the host %s is not used\n", host_managers[i].name);
+            IUnknown_Release(manager);
+        }
+    }
+
+    IHostControl_AddRef(pHostControl);
+    EnterCriticalSection(&This->lock);
+    old = This->host_control;
+    This->host_control = pHostControl;
+    LeaveCriticalSection(&This->lock);
+    if (old)
+        IHostControl_Release(old);
+
+    return S_OK;
+#else
     FIXME("(%p,%p)\n", iface, pHostControl);
     return S_OK;
+#endif
 }
 
 static HRESULT WINAPI CLRRuntimeHost_GetCLRControl(ICLRRuntimeHost* iface,
@@ -1362,10 +1428,12 @@ static const struct ICLRControlVtbl CLRControlVtbl =
 static void RuntimeHost_InitializeDomainManager(RuntimeHost *This, MonoDomain *domain)
 {
     char *assemblyA = NULL, *typeA = NULL;
+    IHostControl *host_control;
     MonoDomain *prev_domain;
-    MonoObject *dummy;
+    MonoObject *manager;
     void *attach_cookie;
     void *args[2];
+    IUnknown *unk;
     HRESULT hr;
 
     EnterCriticalSection(&This->lock);
@@ -1388,9 +1456,31 @@ static void RuntimeHost_InitializeDomainManager(RuntimeHost *This, MonoDomain *d
     args[0] = mono_string_new(domain, assemblyA);
     args[1] = mono_string_new(domain, typeA);
     hr = RuntimeHost_Invoke(This, NULL, "System", "AppDomain", "InitializeDomainManager",
-        NULL, args, 2, &dummy);
+        NULL, args, 2, &manager);
     if (FAILED(hr))
         ERR("Could not create the application domain manager %s from %s, hr=%lx\n", typeA, assemblyA, hr);
+
+    if (SUCCEEDED(hr) && manager)
+    {
+        EnterCriticalSection(&This->lock);
+        host_control = This->host_control;
+        if (host_control)
+            IHostControl_AddRef(host_control);
+        LeaveCriticalSection(&This->lock);
+
+        if (host_control)
+        {
+            hr = RuntimeHost_GetIUnknownForObject(This, manager, &unk);
+            if (SUCCEEDED(hr))
+            {
+                hr = IHostControl_SetAppDomainManager(host_control, mono_domain_get_id(domain), unk);
+                if (FAILED(hr))
+                    WARN("The host refused the application domain manager, hr=%lx\n", hr);
+                IUnknown_Release(unk);
+            }
+            IHostControl_Release(host_control);
+        }
+    }
 
     mono_threads_detach_coop(prev_domain, &attach_cookie);
 
@@ -2109,6 +2199,7 @@ HRESULT RuntimeHost_Construct(CLRRuntimeInfo *runtime_version, RuntimeHost** res
 #ifdef __REACTOS__
     This->ICLRControl_iface.lpVtbl = &CLRControlVtbl;
     This->ICLRDomainManager_iface.lpVtbl = &CLRDomainManagerVtbl;
+    This->host_control = NULL;
     This->domain_manager_assembly = NULL;
     This->domain_manager_type = NULL;
     This->default_domain_started = FALSE;
