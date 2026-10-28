@@ -81,12 +81,18 @@ int main(int argc, char **argv)
         res = waveOutWrite(device, &header, sizeof(header));
     if (res == MMSYSERR_NOERROR)
     {
-        while (!(header.dwFlags & WHDR_DONE))
+        DWORD start = GetTickCount();
+        while (!(header.dwFlags & WHDR_DONE) && GetTickCount() - start < 5000)
             Sleep(10);
+        if (!(header.dwFlags & WHDR_DONE))
+        {
+            waveOutReset(device);
+            res = MMSYSERR_ERROR;
+        }
     }
     code = (res == MMSYSERR_NOERROR && (header.dwFlags & WHDR_DONE)) ? 0 : 1;
-    if (res == MMSYSERR_NOERROR)
+    if (header.dwFlags & WHDR_PREPARED)
         waveOutUnprepareHeader(device, &header, sizeof(header));
     waveOutClose(device);
-    return Report(code ? "fail playback" : "pass", code);
+    return Report(code ? (res == MMSYSERR_ERROR ? "fail timeout" : "fail playback") : "pass", code);
 }
