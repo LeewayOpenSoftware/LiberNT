@@ -5086,8 +5086,19 @@ static void LISTVIEW_DrawItemPart(LISTVIEW_INFO *infoPtr, LVITEMW *item, const N
         }
         else
         {
+            RECT rcThemed = *background;
+
+            /* Icon, small icon and list views: one box around the icon and the label together. */
+            if (infoPtr->uView != LV_VIEW_DETAILS && !IsRectEmpty(&rcIcon))
+            {
+                RECT rcClip;
+
+                UnionRect(&rcThemed, &rcIcon, &rcLabel);
+                InflateRect(&rcThemed, 2, 2);
+                if (IntersectRect(&rcClip, &rcThemed, &rcBox)) rcThemed = rcClip;
+            }
             themedBg = SUCCEEDED(DrawThemeBackground(theme, nmlvcd->nmcd.hdc, LVP_LISTITEM,
-                                                     themeState, background, NULL));
+                                                     themeState, &rcThemed, NULL));
         }
     }
     if (!themedBg && nmlvcd->clrTextBk != CLR_NONE)
