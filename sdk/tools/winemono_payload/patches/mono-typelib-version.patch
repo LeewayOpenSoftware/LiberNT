@@ -1,0 +1,12 @@
+diff --git a/mcs/class/corlib/Assembly/AssemblyInfo.cs b/mcs/class/corlib/Assembly/AssemblyInfo.cs
+index e6b130b5ce..41e3329b7b 100644
+--- a/mcs/class/corlib/Assembly/AssemblyInfo.cs
++++ b/mcs/class/corlib/Assembly/AssemblyInfo.cs
+@@ -69,6 +69,7 @@
+ 
+ [assembly: AssemblyFileVersion (Consts.FxFileVersion)]
+ [assembly: ComVisible (false)]
++[assembly: TypeLibVersion (2, 4)]
+ [assembly: CompilationRelaxations (CompilationRelaxations.NoStringInterning)]
+ [assembly: DefaultDependency (LoadHint.Always)]
+ [assembly: StringFreezing]
