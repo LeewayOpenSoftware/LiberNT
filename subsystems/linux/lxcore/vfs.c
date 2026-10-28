@@ -3902,6 +3902,8 @@ LxVfsMkdir(
     _In_ PLX_NODE Node,
     _In_ ULONG Mode)
 {
+    FILE_CASE_SENSITIVE_INFORMATION CaseSensitive;
+    IO_STATUS_BLOCK Iosb;
     HANDLE Handle;
     ULONG Uid, Gid;
     LONG Error;
@@ -3918,11 +3920,13 @@ LxVfsMkdir(
 
     Mode = LX_S_IFDIR | (Mode & ~Process->Umask & 07777);
     LxVfsNewOwner(Process, Node->Path, &Mode, &Uid, &Gid);
-    Error = LxNtOpenHandle(&Node->NtPath, FILE_LIST_DIRECTORY | FILE_WRITE_EA | FILE_READ_EA, FILE_CREATE,
-                           FILE_DIRECTORY_FILE, FILE_ATTRIBUTE_NORMAL, &Handle);
+    Error = LxNtOpenHandle(&Node->NtPath, FILE_LIST_DIRECTORY | FILE_WRITE_EA | FILE_READ_EA | FILE_WRITE_ATTRIBUTES,
+                           FILE_CREATE, FILE_DIRECTORY_FILE, FILE_ATTRIBUTE_NORMAL, &Handle);
     if (Error != 0)
         return Error;
     LxNtWriteLxAttributes(Handle, Mode, Uid, Gid, 0, FALSE);
+    CaseSensitive.Flags = FILE_CS_FLAG_CASE_SENSITIVE_DIR;
+    ZwSetInformationFile(Handle, &Iosb, &CaseSensitive, sizeof(CaseSensitive), FileCaseSensitiveInformation);
     ZwClose(Handle);
     LxVcacheInvalidate();
     LxInotifyEvent(Process, Node->Path, 0x00000100 | 0x40000000, FALSE);
