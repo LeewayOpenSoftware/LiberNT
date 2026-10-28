@@ -427,6 +427,9 @@ LxFileDereference(
         File->Ops->Release(File);
     if (File->PidProcess != NULL)
         LxProcessDereference(File->PidProcess);
+    if (File->MountsNs != NULL)
+        LxNsDereference(File->MountsNs);
+    LxFree(File->MountsRoot);
     LxMemfdDereference(File->Memfd);
     if (File->Handle != NULL)
         ZwClose(File->Handle);
@@ -791,10 +794,13 @@ LxFileReadKernel(
         return LxTmpfsReadKernel(LxTmpfsFileInode(File), Buffer, Length, Offset);
     if (File->Handle == NULL)
     {
-        if ((File->Data == NULL) || (Offset >= File->DataLength))
-            return 0;
-        Total = (ULONG)min(Length, File->DataLength - Offset);
-        RtlCopyMemory(Buffer, File->Data + Offset, Total);
+        KeWaitForSingleObject(&File->Lock, Executive, KernelMode, FALSE, NULL);
+        if ((File->Data != NULL) && (Offset < File->DataLength))
+        {
+            Total = (ULONG)min(Length, File->DataLength - Offset);
+            RtlCopyMemory(Buffer, File->Data + Offset, Total);
+        }
+        KeSetEvent(&File->Lock, IO_NO_INCREMENT, FALSE);
         return Total;
     }
 
@@ -1396,6 +1402,22 @@ LxDataRead(
 
     KeWaitForSingleObject(&File->Lock, Executive, KernelMode, FALSE, NULL);
     Position = (Offset != NULL) ? *Offset : File->Position;
+    if ((Position == 0) && (File->MountsNs != NULL))
+    {
+        if (File->MountsRead)
+        {
+            ULONG InfoLength;
+            PSTR Info = LxMountInfoNs(File->MountsNs, File->MountsRoot, File->MountsFull, &InfoLength);
+
+            if (Info != NULL)
+            {
+                LxFree(File->Data);
+                File->Data = (PUCHAR)Info;
+                File->DataLength = InfoLength;
+            }
+        }
+        File->MountsRead = TRUE;
+    }
     if ((Position < 0) || ((ULONG64)Position >= File->DataLength))
     {
         KeSetEvent(&File->Lock, IO_NO_INCREMENT, FALSE);

@@ -257,6 +257,10 @@ struct _LX_FILE
     PLX_PROCESS PidProcess;
     struct _LX_FILE_ASYNC *Async;
     LONG PathGeneration;
+    PLX_NS MountsNs;
+    PSTR MountsRoot;
+    BOOLEAN MountsFull;
+    BOOLEAN MountsRead;
 };
 
 typedef enum _LX_FS_KIND
@@ -1003,6 +1007,7 @@ LONG LxMountMove(_In_ PLX_NS Ns, _In_ PLX_MOUNT Mount, _In_ PCSTR Target, _In_ B
 LONG LxMountSetGroup(_In_ PLX_MOUNT From, _In_ PLX_MOUNT To);
 VOID LxMountSetFlags(_In_ PLX_MOUNT Mount, _In_ ULONG Set, _In_ ULONG Clear);
 PSTR LxMountInfo(_In_ PLX_PROCESS Process, _In_ BOOLEAN Full, _Out_ PULONG Length);
+PSTR LxMountInfoNs(_In_ PLX_NS Ns, _In_ PCSTR Root, _In_ BOOLEAN Full, _Out_ PULONG Length);
 LONG LxMountStatfs(_In_ PLX_MOUNT Mount, _Out_writes_bytes_(120) PVOID Statfs);
 LONG LxMountNsCopy(_In_ PLX_NS New, _In_ PLX_NS Old);
 VOID LxMountNsRelease(_In_ PLX_NS Ns);

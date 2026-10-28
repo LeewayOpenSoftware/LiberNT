@@ -2324,9 +2324,24 @@ LxMountInfo(
     _In_ BOOLEAN Full,
     _Out_ PULONG Length)
 {
-    PLX_NS Ns = LxProcessNs(Process, LxNsMnt);
+    PSTR Root = LxProcessRoot(Process), Info;
+
+    *Length = 0;
+    if (Root == NULL)
+        return NULL;
+    Info = LxMountInfoNs(LxProcessNs(Process, LxNsMnt), Root, Full, Length);
+    LxFree(Root);
+    return Info;
+}
+
+PSTR
+LxMountInfoNs(
+    _In_ PLX_NS Ns,
+    _In_ PCSTR Root,
+    _In_ BOOLEAN Full,
+    _Out_ PULONG Length)
+{
     PLX_INSTANCE Instance = Ns->Instance;
-    PSTR Root = LxProcessRoot(Process);
     SIZE_T RootLength;
     SIZE_T Size = 16384, Used;
     PLIST_ENTRY Entry;
@@ -2334,17 +2349,12 @@ LxMountInfo(
     BOOLEAN Overflow;
 
     *Length = 0;
-    if (Root == NULL)
-        return NULL;
     RootLength = strlen(Root);
     for (;;)
     {
         Buffer = LxAlloc(Size);
         if (Buffer == NULL)
-        {
-            LxFree(Root);
             return NULL;
-        }
         Used = 0;
         Overflow = FALSE;
 
@@ -2407,7 +2417,6 @@ LxMountInfo(
         Size *= 4;
     }
 
-    LxFree(Root);
     *Length = (ULONG)Used;
     return Buffer;
 }

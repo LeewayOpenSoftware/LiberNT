@@ -5630,6 +5630,22 @@ LxSynthOpen(
             (strncmp(LxPidEntries[Synth.Index].Name, "mount", 5) == 0))
         {
             Events = &LxProcessNs(Process, LxNsMnt)->Mnt.Events;
+            if (LxPidEntries[Synth.Index].Generator != NULL)
+            {
+                PLX_PROCESS Target = LxProcessLookup(Process->Instance, Synth.Pid);
+
+                if (Target != NULL)
+                {
+                    File->MountsRoot = LxProcessRoot(Target);
+                    if (File->MountsRoot != NULL)
+                    {
+                        File->MountsNs = LxProcessNs(Target, LxNsMnt);
+                        LxNsReference(File->MountsNs);
+                        File->MountsFull = (LxPidEntries[Synth.Index].Generator == LxGenPidMountinfo);
+                    }
+                    LxProcessDereference(Target);
+                }
+            }
         }
         if (Events != NULL)
         {
