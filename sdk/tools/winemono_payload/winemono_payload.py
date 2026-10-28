@@ -6,7 +6,8 @@
 #   libernt-wine-mono-<version>-<release>-<arch>.msi  the upstream Wine Mono MSI with the
 #   assemblies rebuilt from patches/ (build_assemblies.sh, docker) and the runtime DLLs rebuilt
 #   from patches/mono-runtime-*.patch (build_runtime.sh, docker) swapped into image.cab, and
-#   the Windows Runtime projection built from winrt/ added next to mscorlib.
+#   the Windows Runtime projection built from winrt/ added next to mscorlib, and the mscorlib type
+#   library exported by tlbgen/ installed and registered like the .NET Framework one.
 # The MSI is rewritten with gcab and msibuild (msitools).
 
 import argparse
@@ -38,6 +39,41 @@ RUNTIMES = {
 }
 ADDITIONS = {
     "Windows.built.dll": ("lib\\mono\\4.5\\Windows.dll", "lib|mono|4.5", "Windows.dll"),
+}
+TYPELIBS = {
+    32: ("Framework\\v4.0.30319\\mscorlib.tlb", "mscorlib-tlb", "mscorlib.tlb"),
+    64: ("Framework64\\v4.0.30319\\mscorlib.tlb", "mscorlib-tlb64", "mscorlib.tlb"),
+}
+MSCORLIB_TYPELIB = "TypeLib\\{BED7F4EA-1A96-11D2-8F08-00A0C9A6186D}\\2.4"
+TABLE_ROWS = {
+    "Directory": [
+        ["NETFX", "WindowsFolder", "netfx|Microsoft.NET"],
+        ["NETFX|Framework", "NETFX", "FRAMEW~1|Framework"],
+        ["NETFX|Framework|v4.0.30319", "NETFX|Framework", "V40303~1|v4.0.30319"],
+        ["NETFX|Framework64", "NETFX", "FRAMEW~2|Framework64"],
+        ["NETFX|Framework64|v4.0.30319", "NETFX|Framework64", "V40303~1|v4.0.30319"],
+    ],
+    "Component": [
+        ["mscorlib-tlb", "{24C30574-2647-50BB-BD6C-DCF531ECA25E}", "NETFX|Framework|v4.0.30319", "0", "", TYPELIBS[32][0]],
+        ["mscorlib-tlb64", "{77435B6F-1AD8-5EA6-B08F-C0781C1E4199}", "NETFX|Framework64|v4.0.30319", "0", "VersionNT64", TYPELIBS[64][0]],
+    ],
+    "FeatureComponents": [
+        ["wine_mono", "mscorlib-tlb"],
+        ["wine_mono", "mscorlib-tlb64"],
+    ],
+    "InstallExecuteSequence": [
+        ["RemoveRegistryValues", "", "650"],
+        ["WriteRegistryValues", "", "900"],
+    ],
+    "Registry": [
+        ["mscorlib.tlb.version", "0", MSCORLIB_TYPELIB, "", "mscorlib.dll", "mscorlib-tlb"],
+        ["mscorlib.tlb.flags", "0", MSCORLIB_TYPELIB + "\\FLAGS", "", "0", "mscorlib-tlb"],
+        ["mscorlib.tlb.win32", "0", MSCORLIB_TYPELIB + "\\0\\win32", "", "[#" + TYPELIBS[32][0] + "]", "mscorlib-tlb"],
+        ["mscorlib.tlb.win64", "0", MSCORLIB_TYPELIB + "\\0\\win64", "", "[#" + TYPELIBS[64][0] + "]", "mscorlib-tlb64"],
+    ],
+}
+NEW_TABLES = {
+    "Registry": ["Registry\tRoot\tKey\tName\tValue\tComponent_", "s72\ti2\tl255\tL255\tL0\ts72", "Registry\tRegistry"],
 }
 
 
@@ -95,6 +131,7 @@ def repack(src, dst, replacements, additions):
         for key, path in replacements.items():
             shutil.copyfile(path, tree.joinpath(*key.split("\\")))
         for key, (_, _, path) in additions.items():
+            tree.joinpath(*key.split("\\")).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, tree.joinpath(*key.split("\\")))
         order += list(additions)
         newcab = work / "new.cab"
@@ -141,6 +178,20 @@ def repack(src, dst, replacements, additions):
             path.write_bytes((eol.join(rows) + eol).encode("utf-8"))
             tables.append(path)
         shutil.copyfile(src, dst)
+        for name, rows in TABLE_ROWS.items():
+            path = work / f"{name}.idt"
+            if name in NEW_TABLES:
+                eol, table = "\r\n", NEW_TABLES[name] + [""]
+            else:
+                eol, table = export_table(src, name, path)
+            while table and table[-1] == "":
+                table.pop()
+            existing = {row.split("\t")[0] for row in table[3:]}
+            clash = [row[0] for row in rows if row[0] in existing and name not in ("FeatureComponents",)]
+            if clash:
+                sys.exit(f"{src}: {name} already has {', '.join(clash)}")
+            path.write_bytes((eol.join(table + ["\t".join(row) for row in rows]) + eol).encode("utf-8"))
+            tables.append(path)
         run("msibuild", dst, *[arg for table in tables for arg in ("-i", table)], "-a", "image.cab", newcab)
 
 
@@ -149,10 +200,13 @@ def main():
     parser.add_argument("work", type=Path, help="work directory (sources, docker build, upstream MSIs)")
     parser.add_argument("out", type=Path, help="output directory")
     parser.add_argument("--release", default="1", help="LiberNT release number of the payload")
+    parser.add_argument("--widl", default=shutil.which("widl"), help="widl of a LiberNT build (host-tools/bin/widl)")
     args = parser.parse_args()
     for tool in ("msiinfo", "msibuild", "gcab", "docker", "git", "7zz"):
         if not shutil.which(tool):
             sys.exit(f"{tool} is required")
+    if not args.widl:
+        sys.exit("widl is required (--widl)")
     args.work.mkdir(parents=True, exist_ok=True)
     args.out.mkdir(parents=True, exist_ok=True)
     upstream = args.work / "upstream"
@@ -169,6 +223,15 @@ def main():
     replacements = {key: build / f"{name}.patched.dll" for name, key in ASSEMBLIES.items()}
     replacements.update({key: runtime / f"libmono-2.0-{arch}.patched.dll" for arch, key in RUNTIMES.items()})
     additions = {key: (component, filename, build / built) for built, (key, component, filename) in ADDITIONS.items()}
+    root = Path(__file__).resolve().parents[3]
+    includes = [f"-I{root / 'sdk' / 'include' / 'psdk'}", f"-I{root / 'sdk' / 'include' / 'reactos'}"]
+    typelib = args.work / "typelib"
+    for bits, (key, component, filename) in TYPELIBS.items():
+        out = typelib / f"win{bits}"
+        out.mkdir(parents=True, exist_ok=True)
+        run(args.widl, f"--win{bits}", "-t", "-o", out / "stdole2.tlb", *includes, root / "dll" / "win32" / "stdole2.tlb" / "std_ole_v2.idl")
+        run(args.widl, f"--win{bits}", "-t", "-o", out / "mscorlib.tlb", *includes, f"-L{out}", build / f"mscorlib{bits}.idl")
+        additions[key] = (component, filename, out / "mscorlib.tlb")
     for arch, msi in msis.items():
         dst = args.out / f"libernt-wine-mono-{VERSION}-{args.release}-{arch}.msi"
         repack(msi, dst, replacements, additions)
