@@ -1911,7 +1911,8 @@ static inline BOOL LISTVIEW_GetItemW(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpL
 }
 
 /* With the Explorer item theme the selection state is already shown by the themed fill and
- * border; an XOR focus rectangle would invert that border, so it is not drawn. */
+ * border; an XOR focus rectangle would invert that border, so it is replaced by
+ * LISTVIEW_DrawThemedFocus (a solid 1px border, only for a focused item that is not selected). */
 static inline BOOL LISTVIEW_ItemThemed(const LISTVIEW_INFO *infoPtr)
 {
 #if __WINE_COMCTL32_VERSION == 6
@@ -1922,10 +1923,38 @@ static inline BOOL LISTVIEW_ItemThemed(const LISTVIEW_INFO *infoPtr)
 #endif
 }
 
+static void LISTVIEW_DrawThemedFocus(const LISTVIEW_INFO *infoPtr, HDC hdc, const RECT *rc)
+{
+#if __WINE_COMCTL32_VERSION == 6
+    COLORREF color;
+    HPEN hPen, hOldPen;
+    HGDIOBJ hOldBrush;
+
+    if (!infoPtr->bFocus || infoPtr->nFocusedItem < 0 || IsRectEmpty(rc)) return;
+    if (SendMessageW(infoPtr->hwndSelf, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS) return;
+    if (LISTVIEW_GetItemState(infoPtr, infoPtr->nFocusedItem, LVIS_SELECTED)) return;
+    if (FAILED(GetThemeColor(GetWindowTheme(infoPtr->hwndSelf), LVP_LISTITEM, LISS_HOT,
+                             TMT_BORDERCOLOR, &color)))
+        color = GetSysColor(COLOR_HIGHLIGHT);
+
+    hPen = CreatePen(PS_SOLID, 1, color);
+    hOldPen = SelectObject(hdc, hPen);
+    hOldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    Rectangle(hdc, rc->left, rc->top, rc->right, rc->bottom);
+    SelectObject(hdc, hOldBrush);
+    SelectObject(hdc, hOldPen);
+    DeleteObject(hPen);
+#endif
+}
+
 /* used to handle collapse main item column case */
 static inline BOOL LISTVIEW_DrawFocusRect(const LISTVIEW_INFO *infoPtr, HDC hdc)
 {
-    if (LISTVIEW_ItemThemed(infoPtr)) return FALSE;
+    if (LISTVIEW_ItemThemed(infoPtr))
+    {
+        LISTVIEW_DrawThemedFocus(infoPtr, hdc, &infoPtr->rcFocus);
+        return FALSE;
+    }
     return (infoPtr->rcFocus.left < infoPtr->rcFocus.right) ?
             DrawFocusRect(hdc, &infoPtr->rcFocus) : FALSE;
 }
@@ -2396,7 +2425,11 @@ static void LISTVIEW_ShowFocusRect(const LISTVIEW_INFO *infoPtr, BOOL fShow)
     TRACE("fShow=%d, nItem=%d\n", fShow, infoPtr->nFocusedItem);
 
     if (infoPtr->nFocusedItem < 0) return;
-    if (LISTVIEW_ItemThemed(infoPtr)) return;
+    if (LISTVIEW_ItemThemed(infoPtr))
+    {
+        LISTVIEW_InvalidateItem(infoPtr, infoPtr->nFocusedItem);
+        return;
+    }
 
     /* we need some gymnastics in ICON mode to handle large items */
     if (infoPtr->uView == LV_VIEW_ICON)
@@ -5156,6 +5189,9 @@ static void LISTVIEW_DrawItemPart(LISTVIEW_INFO *infoPtr, LVITEMW *item, const N
         rcLabel.bottom--;
 
     DrawTextW(nmlvcd->nmcd.hdc, item->pszText, -1, &rcLabel, format);
+
+    if (focus && infoPtr->uView == LV_VIEW_DETAILS && !item->iSubItem && LISTVIEW_ItemThemed(infoPtr))
+        LISTVIEW_DrawThemedFocus(infoPtr, nmlvcd->nmcd.hdc, focus);
 }
 
 /***
