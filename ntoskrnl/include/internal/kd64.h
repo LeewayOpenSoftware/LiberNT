@@ -315,6 +315,12 @@ KdpPrompt(
     _In_ PKEXCEPTION_FRAME ExceptionFrame
 );
 
+NTSTATUS
+NTAPI
+KdPullRemoteFile(
+    _In_ PUNICODE_STRING FileName
+);
+
 VOID
 NTAPI
 KdpSymbol(
