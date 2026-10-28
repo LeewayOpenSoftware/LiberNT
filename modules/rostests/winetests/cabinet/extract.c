@@ -713,6 +713,60 @@ static void test_Extract(void)
     ok(RemoveDirectoryA("dest"), "Expected dest to exist\n");
 }
 
+static const unsigned char lzx_cab[] =
+{
+    0x4d,0x53,0x43,0x46,0x00,0x00,0x00,0x00,0x72,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x2c,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x03,0x01,0x01,0x00,0x01,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x46,0x00,0x00,0x00,0x01,0x00,0x03,0x15,0x10,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x5b,0x5d,0xc1,0xb9,0x20,0x00,0x66,0x69,0x6c,0x65,
+    0x31,0x2e,0x74,0x78,0x74,0x00,0x03,0xc9,0xe3,0xbe,0x24,0x00,0x10,0x00,0x5b,0x80,
+    0x80,0x8d,0x00,0x30,0x00,0x01,0x01,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x00,
+    0x00,0x00,0x4c,0x5a,0x58,0x20,0x74,0x65,0x73,0x74,0x20,0x66,0x69,0x6c,0x65,0x20,
+    0x31,0x0a
+};
+
+static void write_file_bytes(const CHAR *name, const unsigned char *data, DWORD size)
+{
+    HANDLE file;
+    DWORD written;
+
+    file = CreateFileA(name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "Failure to open file %s\n", name);
+    WriteFile(file, data, size, &written, NULL);
+    ok(written == size, "Expected to write %lu bytes, got %lu\n", size, written);
+    CloseHandle(file);
+}
+
+static void test_ExtractLzx(void)
+{
+    SESSION session;
+    HRESULT res;
+    struct FILELIST *node;
+
+    write_file_bytes("lzx.cab", lzx_cab, sizeof(lzx_cab));
+    CreateDirectoryA("dest", NULL);
+
+    ZeroMemory(&session, sizeof(SESSION));
+    lstrcpyA(session.Destination, "dest");
+    session.Operation = EXTRACT_FILLFILELIST | EXTRACT_EXTRACTFILES;
+    res = pExtract(&session, "lzx.cab");
+    node = session.FileList;
+    ok(res == S_OK, "Expected S_OK, got %ld\n", res);
+    ok(session.FileSize == 16, "Expected 16, got %d\n", session.FileSize);
+    ok(session.Error.erfOper == FDIERROR_NONE,
+       "Expected FDIERROR_NONE, got %d\n", session.Error.erfOper);
+    ok(session.FileCount == 1, "Expected 1, got %d\n", session.FileCount);
+    ok(!lstrcmpA(session.CurrentFile, "dest\\file1.txt"),
+       "Expected dest\\file1.txt, got %s\n", session.CurrentFile);
+    ok(getFileSize("dest\\file1.txt") == 16, "Expected dest\\file1.txt to be 16 bytes\n");
+    ok(check_list(&node, "file1.txt", FALSE), "list entry wrong\n");
+    free_file_list(&session);
+
+    DeleteFileA("dest\\file1.txt");
+    ok(RemoveDirectoryA("dest"), "Expected dest to exist\n");
+    DeleteFileA("lzx.cab");
+}
+
 START_TEST(extract)
 {
     init_function_pointers();
@@ -720,6 +774,7 @@ START_TEST(extract)
     create_cab_file();
 
     test_Extract();
+    test_ExtractLzx();
 
     delete_test_files();
 }
