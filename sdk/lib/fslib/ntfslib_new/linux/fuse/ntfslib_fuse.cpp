@@ -3006,7 +3006,9 @@ AddFilesFromList(NtfsFuseState* State,
         if (Length == 0)
             continue;
 
-        Separator = strchr(Line, '=');
+        Separator = strstr(Line, "=/");
+        if (!Separator)
+            Separator = strchr(Line, '=');
         if (!Separator)
         {
             fprintf(stderr,
