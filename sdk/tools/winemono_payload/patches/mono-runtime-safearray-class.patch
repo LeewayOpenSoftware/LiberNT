@@ -1,0 +1,21 @@
+--- a/mono/metadata/marshal.c
++++ b/mono/metadata/marshal.c
+@@ -3428,6 +3428,18 @@
+ 			spec->native == MONO_NATIVE_INTERFACE)) ||
+ 			(t->type == MONO_TYPE_CLASS && mono_cominterop_is_interface(t->data.klass)))
+ 			return mono_cominterop_emit_marshal_com_interface (m, argnum, t, spec, conv_arg, conv_arg_type, action);
++		if (spec && (spec->native == MONO_NATIVE_SAFEARRAY) &&
++			t->type == MONO_TYPE_CLASS && t->data.klass == mono_defaults.array_class) {
++			switch (action) {
++			case MARSHAL_ACTION_CONV_OUT:
++			case MARSHAL_ACTION_CONV_IN:
++			case MARSHAL_ACTION_PUSH:
++			case MARSHAL_ACTION_MANAGED_CONV_IN:
++			case MARSHAL_ACTION_MANAGED_CONV_OUT:
++			case MARSHAL_ACTION_MANAGED_INIT_OUT:
++				return mono_cominterop_emit_marshal_safearray (m, argnum, t, spec, conv_arg, conv_arg_type, action);
++			}
++		}
+ 		if (spec && (spec->native == MONO_NATIVE_SAFEARRAY) && 
+ 			(spec->data.safearray_data.elem_type == MONO_VARIANT_VARIANT) && 
+ 			((action == MARSHAL_ACTION_CONV_OUT) || (action == MARSHAL_ACTION_CONV_IN) || (action == MARSHAL_ACTION_PUSH)))
