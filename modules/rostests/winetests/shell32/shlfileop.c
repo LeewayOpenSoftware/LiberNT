@@ -2861,6 +2861,9 @@ static void test_file_operation(void)
     ok(hr == E_INVALIDARG, "got %#lx.\n", hr);
 
     GetTempPathW(ARRAY_SIZE(dirpath), dirpath);
+#ifdef __REACTOS__
+    GetLongPathNameW(dirpath, dirpath, ARRAY_SIZE(dirpath));
+#endif
     PathCombineW(tmpfile, dirpath, L"testfile1");
     createTestFileW(tmpfile);
 

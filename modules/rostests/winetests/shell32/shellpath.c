@@ -2407,7 +2407,14 @@ static void test_knownFolders(void)
                         if (SUCCEEDED(hr))
                         {
                             bRes = SHGetPathFromIDListW(pidl, resolved);
+#ifdef __REACTOS__
+                            WCHAR sExampleLongPath[MAX_PATH];
+                            if (!GetLongPathNameW(sExamplePath, sExampleLongPath, ARRAY_SIZE(sExampleLongPath)))
+                                lstrcpyW(sExampleLongPath, sExamplePath);
+                            ok(bRes && !lstrcmpiW(resolved, sExampleLongPath), "unexpected path %s\n", wine_dbgstr_w(resolved));
+#else
                             ok(bRes && !lstrcmpiW(resolved, sExamplePath), "unexpected path %s\n", wine_dbgstr_w(resolved));
+#endif
                             CoTaskMemFree(pidl);
                         }
                         hr = IKnownFolderManager_RegisterFolder(mgr, &subFolderId, &kfDefinition);

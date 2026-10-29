@@ -6042,6 +6042,9 @@ static void test_copy_paste(void)
 
     GetCurrentDirectoryW(ARRAY_SIZE(cwd), cwd);
     GetTempPathW(ARRAY_SIZE(temp_path), temp_path);
+#ifdef __REACTOS__
+    GetLongPathNameW(temp_path, temp_path, ARRAY_SIZE(temp_path));
+#endif
     SetCurrentDirectoryW(temp_path);
 
     ret = CreateDirectoryW(L"testcopy_src", NULL);
