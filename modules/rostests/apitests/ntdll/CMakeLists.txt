@@ -135,6 +135,7 @@ list(APPEND SOURCE
     RtlDeleteAce.c
     RtlDetermineDosPathNameType.c
     RtlWnfAndSqm.c
+    ProcessPoolQuota.c
     RtlCheckPortableOperatingSystem.c
     RtlDoesFileExists.c
     RtlDosApplyFileIsolationRedirection_Ustr.c

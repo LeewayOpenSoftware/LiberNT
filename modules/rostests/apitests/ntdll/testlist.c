@@ -174,6 +174,7 @@ extern void func_UserModeException(void);
 #endif
 
 extern void func_RtlWnfAndSqm(void);
+extern void func_ProcessPoolQuota(void);
 extern void func_RtlCheckPortableOperatingSystem(void);
 
 const struct test winetest_testlist[] =
@@ -356,5 +357,6 @@ const struct test winetest_testlist[] =
 
     { "RtlWnfAndSqm", func_RtlWnfAndSqm },
     { "RtlCheckPortableOperatingSystem", func_RtlCheckPortableOperatingSystem },
+    { "ProcessPoolQuota",               func_ProcessPoolQuota },
     { 0, 0 }
 };
