@@ -72,6 +72,8 @@ RtlUnwindEx(
     _In_ PCONTEXT ContextRecord,
     _In_opt_ struct _UNWIND_HISTORY_TABLE *HistoryTable);
 
+#define ARM64_UNWIND_FLAG_REFERENCE 0x3UL
+
 typedef struct _ARM64_RT_FUNCTION
 {
     DWORD BeginAddress;
@@ -642,6 +644,9 @@ RtlVirtualUnwind(
 
     Context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
 
+    if (Func != NULL && Func->Flag == ARM64_UNWIND_FLAG_REFERENCE)
+        Func = (PARM64_RT_FUNCTION)(ULONG_PTR)(ImageBase + (Func->UnwindData & ~ARM64_UNWIND_FLAG_REFERENCE));
+
     if (Func == NULL)
     {
         if (ControlPc == Context->Lr)
@@ -1031,24 +1036,26 @@ RtlLookupFunctionEntry(
     while (IndexHigh > IndexLow)
     {
         IndexMid = (IndexLow + IndexHigh) / 2;
-        FunctionEntry = &FunctionTable[IndexMid];
-
-        if (ControlRva < FunctionEntry->BeginAddress)
-        {
+        if (ControlRva < FunctionTable[IndexMid].BeginAddress)
             IndexHigh = IndexMid;
-            continue;
-        }
-
-        FunctionLength = RtlpArm64FunctionLength((ULONG_PTR)*ImageBase,
-                                                 FunctionEntry);
-        if (ControlRva >= (FunctionEntry->BeginAddress + FunctionLength))
-        {
+        else
             IndexLow = IndexMid + 1;
-            continue;
-        }
-
-        return FunctionEntry;
     }
+
+    if (IndexLow == 0)
+        return NULL;
+
+    FunctionEntry = &FunctionTable[IndexLow - 1];
+    if ((FunctionEntry->UnwindData & ARM64_UNWIND_FLAG_MASK) == ARM64_UNWIND_FLAG_REFERENCE)
+    {
+        if (IndexLow == TableLength || ControlRva < FunctionTable[IndexLow].BeginAddress)
+            return FunctionEntry;
+        return NULL;
+    }
+
+    FunctionLength = RtlpArm64FunctionLength((ULONG_PTR)*ImageBase, FunctionEntry);
+    if (ControlRva < (FunctionEntry->BeginAddress + FunctionLength))
+        return FunctionEntry;
 
     return NULL;
 }
