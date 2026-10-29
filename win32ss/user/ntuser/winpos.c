@@ -2673,7 +2673,8 @@ co_WinPosBatchChanged(PWINPOS_ENTRY Entry)
    }
 
    if ( WinPos.flags & SWP_FRAMECHANGED  || WinPos.flags & SWP_STATECHANGED ||
-      !(WinPos.flags & SWP_NOCLIENTSIZE) || !(WinPos.flags & SWP_NOCLIENTMOVE) )
+      !(WinPos.flags & SWP_NOCLIENTSIZE) || !(WinPos.flags & SWP_NOCLIENTMOVE) ||
+      (WinPos.flags & (SWP_NOMOVE | SWP_NOSIZE)) != (SWP_NOMOVE | SWP_NOSIZE) )
    {
       PWND pWnd = ValidateHwndNoErr(WinPos.hwnd);
       if (pWnd)
