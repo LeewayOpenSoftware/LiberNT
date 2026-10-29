@@ -3042,7 +3042,7 @@ PWND MENU_IsMenuActive(VOID)
 void MENU_EndMenu( PWND pwnd )
 {
     PMENU menu = NULL;
-    menu = UserGetObject(gHandleTable, top_popup_hmenu, TYPE_MENU);
+    menu = UserGetObjectNoErr(gHandleTable, top_popup_hmenu, TYPE_MENU);
     if ( menu && ( UserHMGetHandle(pwnd) == menu->hWnd || pwnd == menu->spwndNotify ) )
     {
        if (fInsideMenuLoop && top_popup)
