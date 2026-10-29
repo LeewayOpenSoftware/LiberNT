@@ -3937,6 +3937,11 @@ static INT FASTCALL MENU_ExecFocusedItem(MTRACKER *pmt, PMENU Menu, UINT Flags)
               else
               {
                   DWORD dwStyle = ((Menu->fFlags & MNS_STYLE_MASK) | ( pmt->TopMenu ? (pmt->TopMenu->fFlags & MNS_STYLE_MASK) : 0) );
+                  PWND pwndMenu = (Menu->fFlags & MNF_POPUP) ? ValidateHwndNoErr(Menu->hWnd) : NULL;
+
+                  if (pwndMenu)
+                      IntNotifyWinEvent(EVENT_OBJECT_INVOKED, pwndMenu, OBJID_MENU,
+                                        (dwStyle & MNS_NOTIFYBYPOS) ? Menu->iItem : Item->wID, 0);
 
                   if (dwStyle & MNS_NOTIFYBYPOS)
                       UserPostMessage(UserHMGetHandle(pmt->OwnerWnd), WM_MENUCOMMAND, Menu->iItem, (LPARAM)UserHMGetHandle(Menu));
