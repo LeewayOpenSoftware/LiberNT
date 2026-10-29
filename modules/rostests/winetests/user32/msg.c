@@ -22164,9 +22164,9 @@ static void check_minimized_activation(HWND hwnd, BOOL active)
         if (sequence[i].message == WM_NCACTIVATE)
         {
             ++ncactivate;
-            ok(sequence[i].wParam == (active ? expected : 0),
+            ok(sequence[i].wParam == expected,
                "Minimized WM_NCACTIVATE: expected %#Ix, got %#Ix\n",
-               active ? expected : 0, sequence[i].wParam);
+               expected, sequence[i].wParam);
         }
     }
     LeaveCriticalSection(&sequence_cs);
