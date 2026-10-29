@@ -1240,7 +1240,8 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
     }
 
     /* Call WH_KEYBOARD_LL hook */
-    if (co_CallLowLevelKeyboardHook(wVk, wScanCode, dwFlags, bInjected, dwTime, dwExtraInfo, wSimpleVk, bIsSimpleDown))
+    if (co_CallLowLevelKeyboardHook((wVk == VK_SHIFT || wVk == VK_CONTROL || wVk == VK_MENU) ? IntFixVk(wVk, bExt) : wVk,
+                                    wScanCode, dwFlags, bInjected, dwTime, dwExtraInfo, wSimpleVk, bIsSimpleDown))
     {
         ERR("Kbd msg dropped by WH_KEYBOARD_LL hook\n");
         bPostMsg = FALSE;
