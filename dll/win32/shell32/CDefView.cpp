@@ -5468,12 +5468,28 @@ AddIconScaled(HIMAGELIST dest, HIMAGELIST srcList, HIMAGELIST fallback, INT inde
 HIMAGELIST CDefView::CreateSizedViewImageList(INT cx)
 {
     HIMAGELIST bigList, smallList, srcList, newList;
-    INT count, i;
+    INT srcCx = 0, srcCy = 0, count, i;
 
     Shell_GetImageLists(&bigList, &smallList);
-    srcList = SIC_GetImageList(SHIL_EXTRALARGE);
+    srcList = SIC_GetImageList(SHIL_JUMBO);
+    if (srcList && (!ImageList_GetIconSize(srcList, &srcCx, &srcCy) || srcCx < 256))
+    {
+        srcList = NULL;
+        srcCx = 0;
+    }
     if (!srcList)
+    {
+        srcList = SIC_GetImageList(SHIL_EXTRALARGE);
+        srcCx = 0;
+        if (!srcList || !ImageList_GetIconSize(srcList, &srcCx, &srcCy))
+            srcList = NULL;
+    }
+    if (!srcList)
+    {
         srcList = bigList;
+        srcCx = 0;
+        ImageList_GetIconSize(bigList, &srcCx, &srcCy);
+    }
     count = ImageList_GetImageCount(smallList);
     newList = ImageList_Create(cx, cx, ILC_COLOR32 | ILC_MASK, max(count, 1), 0x20);
     if (!newList)
@@ -5494,13 +5510,14 @@ HIMAGELIST CDefView::CreateSizedViewImageList(INT cx)
 void CDefView::SyncViewImageList()
 {
     HIMAGELIST smallList, bigList, srcList;
+    INT srcCx = 0, srcCy = 0;
     INT have, need, i;
 
     if (!m_himlView || !m_himlViewOwned)
         return;
     Shell_GetImageLists(&bigList, &smallList);
-    srcList = SIC_GetImageList(SHIL_EXTRALARGE);
-    if (!srcList)
+    srcList = SIC_GetImageList(SHIL_JUMBO);
+    if (!srcList || !ImageList_GetIconSize(srcList, &srcCx, &srcCy) || srcCx < 256)
         srcList = bigList;
     need = ImageList_GetImageCount(smallList);
     have = ImageList_GetImageCount(m_himlView);
