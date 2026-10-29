@@ -120,6 +120,12 @@ LxVectorIo(
     File = LxCallFile(Call, 0);
     if (File == NULL)
         return -LX_EBADF;
+    if (Write && (File->Ops->WriteVector != NULL))
+    {
+        Result = LxFileWriteVector(File, Call->Args[1], (ULONG)Count, Offset);
+        LxFileDereference(File);
+        return Result;
+    }
 
     for (Index = 0; Index < Count; Index++)
     {

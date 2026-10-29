@@ -3953,22 +3953,6 @@ LX_SYSCALL(LxSysGetcpu)
     return Result;
 }
 
-LX_SYSCALL(LxSysSyslog)
-{
-    switch ((ULONG)Call->Args[0])
-    {
-        case 10:
-            return 65536;
-        case 9:
-        case 2:
-        case 3:
-        case 4:
-            return 0;
-        default:
-            return 0;
-    }
-}
-
 LX_SYSCALL(LxSysIoprioGet)
 {
     UNREFERENCED_PARAMETER(Call);

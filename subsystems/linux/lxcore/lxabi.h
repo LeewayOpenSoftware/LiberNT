@@ -183,6 +183,7 @@
 #define LX_SEEK_SET         0
 #define LX_SEEK_CUR         1
 #define LX_SEEK_END         2
+#define LX_SEEK_DATA        3
 
 #define LX_S_IFMT           0170000
 #define LX_S_ISUID          0004000
@@ -782,6 +783,7 @@ typedef struct _LX_MSGINFO
 #define LX_CAP_MKNOD            27
 #define LX_CAP_SETFCAP          31
 #define LX_CAP_MAC_OVERRIDE     32
+#define LX_CAP_SYSLOG           34
 #define LX_CAP_BPF              39
 #define LX_CAP_CHECKPOINT_RESTORE 40
 #define LX_CAP_LAST_CAP         40

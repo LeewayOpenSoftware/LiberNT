@@ -3639,12 +3639,9 @@ LxVfsOpenTmpfs(
                 Error = LxBpfDeviceCheck(Process, Type == LX_S_IFBLK, (ULONG)(Device >> 32), (ULONG)Device, Access);
                 if (Error != 0)
                     break;
-                File = LxDeviceOpen(Process, Device, Flags, Node->Path);
-                if (File == NULL)
-                {
-                    Error = -LX_ENXIO;
+                Error = LxDeviceOpen(Process, Device, Flags, Node->Path, &File);
+                if (Error != 0)
                     break;
-                }
                 File->Mount = Node->Mount;
                 File->Ino = LxTmpfsInodeId(Inode);
                 LxTmpfsInodeDereference(Inode);
@@ -3776,9 +3773,9 @@ LxVfsOpenNode(
                         if (Error != 0)
                             return Error;
                     }
-                    File = LxDeviceOpen(Process, Device, Flags, Node->Path);
-                    if (File == NULL)
-                        return -LX_ENXIO;
+                    Error = LxDeviceOpen(Process, Device, Flags, Node->Path, &File);
+                    if (Error != 0)
+                        return Error;
                     File->Mount = Node->Mount;
                     if (Internal.IndexNumber.QuadPart != 0)
                         File->Ino = (ULONG64)Internal.IndexNumber.QuadPart;

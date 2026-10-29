@@ -761,6 +761,39 @@ LxFileWrite(
     return Result;
 }
 
+LONG64
+LxFileWriteVector(
+    _In_ PLX_FILE File,
+    _In_ ULONG64 Vectors,
+    _In_ ULONG Count,
+    _Inout_opt_ PLONG64 Offset)
+{
+    PLX_IOVEC Copy;
+    BOOLEAN Data = FALSE;
+    ULONG Index;
+    LONG64 Result;
+
+    if ((File->Flags & LX_O_PATH) || ((File->Flags & LX_O_ACCMODE) == LX_O_RDONLY))
+        return -LX_EBADF;
+    if (Count == 0)
+        return 0;
+    Copy = LxAlloc(sizeof(LX_IOVEC) * Count);
+    if (Copy == NULL)
+        return -LX_ENOMEM;
+    Result = LxCopyFromUser(Copy, Vectors, sizeof(LX_IOVEC) * Count);
+    for (Index = 0; (Result == 0) && (Index < Count); Index++)
+    {
+        if ((LONG64)Copy[Index].Length < 0)
+            Result = -LX_EINVAL;
+        else if (Copy[Index].Length != 0)
+            Data = TRUE;
+    }
+    if ((Result == 0) && Data)
+        Result = File->Ops->WriteVector(File, Copy, Count, Offset);
+    LxFree(Copy);
+    return Result;
+}
+
 LONG
 LxFileStat(
     _In_ PLX_FILE File,
@@ -1576,8 +1609,7 @@ typedef enum _LX_DEVICE_KIND
     LxDeviceNull,
     LxDeviceZero,
     LxDeviceFull,
-    LxDeviceRandom,
-    LxDeviceKmsg
+    LxDeviceRandom
 } LX_DEVICE_KIND;
 
 static
@@ -1633,18 +1665,6 @@ LxDeviceWrite(
         case LxDeviceFull:
             return -LX_ENOSPC;
 
-        case LxDeviceKmsg:
-        {
-            CHAR Data[512];
-            ULONG Count = (ULONG)min(Length, sizeof(Data) - 1);
-
-            if (LxCopyFromUser(Data, Buffer, Count) != 0)
-                return -LX_EFAULT;
-            Data[Count] = '\0';
-            DbgPrint("%s%s", Data, ((Count != 0) && (Data[Count - 1] == '\n')) ? "" : "\n");
-            return (LONG64)Length;
-        }
-
         default:
             return (LONG64)Length;
     }
@@ -1663,7 +1683,6 @@ LxDeviceSeek(
     return 0;
 }
 
-static
 LONG
 LxDeviceStat(
     _In_ PLX_FILE File,
@@ -1679,26 +1698,14 @@ LxDeviceStat(
     return 0;
 }
 
-static
-ULONG
-LxDevicePoll(
-    _In_ PLX_FILE File,
-    _In_opt_ PLX_POLL_ENTRY Entry)
-{
-    UNREFERENCED_PARAMETER(Entry);
-
-    if ((LX_DEVICE_KIND)(ULONG_PTR)File->Object == LxDeviceKmsg)
-        return 0;
-    return LX_POLLIN | LX_POLLOUT | LX_POLLRDNORM | LX_POLLWRNORM;
-}
-
 static const LX_FILE_OPS LxDeviceOps =
 {
-    LxDeviceRead, LxDeviceWrite, NULL, LxDevicePoll, LxDeviceStat, LxDeviceSeek, NULL, NULL, NULL
+    LxDeviceRead, LxDeviceWrite, NULL, NULL, LxDeviceStat, LxDeviceSeek, NULL, NULL, NULL
 };
 
+static
 PLX_FILE
-LxDeviceOpen(
+LxDeviceOpenFile(
     _In_ PLX_PROCESS Process,
     _In_ ULONG64 Device,
     _In_ ULONG Flags,
@@ -1719,7 +1726,6 @@ LxDeviceOpen(
             case 7: Kind = LxDeviceFull; break;
             case 8:
             case 9: Kind = LxDeviceRandom; break;
-            case 11: Kind = LxDeviceKmsg; break;
             default: return NULL;
         }
     }
@@ -1783,4 +1789,28 @@ LxDeviceOpen(
     File->Rdev = (Major << 8) | Minor;
     File->Path = LxStrDup(Path);
     return File;
+}
+
+LONG
+LxDeviceOpen(
+    _In_ PLX_PROCESS Process,
+    _In_ ULONG64 Device,
+    _In_ ULONG Flags,
+    _In_ PCSTR Path,
+    _Out_ PLX_FILE *Result)
+{
+    LONG Error;
+
+    if (Device == ((1ULL << 32) | 11))
+    {
+        Error = LxKmsgOpen(Process, Flags, Result);
+        if (Error == 0)
+        {
+            (*Result)->Rdev = (1 << 8) | 11;
+            (*Result)->Path = LxStrDup(Path);
+        }
+        return Error;
+    }
+    *Result = LxDeviceOpenFile(Process, Device, Flags, Path);
+    return (*Result != NULL) ? 0 : -LX_ENXIO;
 }

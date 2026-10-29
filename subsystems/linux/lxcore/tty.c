@@ -712,6 +712,27 @@ LxTtyRead(
     return Result;
 }
 
+VOID
+LxTtyKernelWrite(
+    _In_ PLX_TTY Tty,
+    _In_reads_(Length) PCSTR Text,
+    _In_ ULONG Length)
+{
+    ULONG Used = 0;
+
+    LxTtyLock(Tty);
+    if (!Tty->Hangup)
+    {
+        while ((Used < Length) && LxTtyOutputByte(Tty, (UCHAR)Text[Used]))
+            Used++;
+        if (Used != 0)
+            KeSetEvent(&Tty->OutputReady, IO_NO_INCREMENT, FALSE);
+    }
+    LxTtyUnlock(Tty);
+    if (Used != 0)
+        LxPollWake(&Tty->MasterPoll, LX_POLLIN | LX_POLLRDNORM);
+}
+
 LONG64
 LxTtyWrite(
     _In_ PLX_TTY Tty,

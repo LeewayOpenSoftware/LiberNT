@@ -14,6 +14,7 @@ list(APPEND SOURCE
     kconfig.c
     lxwin.c
     inet.c
+    klog.c
     netlink.c
     mm.c
     mqueue.c

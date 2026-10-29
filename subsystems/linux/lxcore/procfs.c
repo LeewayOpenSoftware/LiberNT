@@ -2724,6 +2724,163 @@ static volatile LONG64 LxTainted;
 
 static
 VOID
+LxGenDmesgRestrict(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    UNREFERENCED_PARAMETER(Self);
+    UNREFERENCED_PARAMETER(Synth);
+    LxTextPrintf(Text, "%ld\n", LxKlogDmesgRestrictValue());
+}
+
+static
+LONG
+LxWriteDmesgRestrict(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    PLX_THREAD Current = LxCurrentThread();
+    ULONG Value;
+    LONG Error;
+
+    UNREFERENCED_PARAMETER(File);
+    if (Current == NULL)
+        return -LX_ESRCH;
+    if (!LxCapable(Current->Process, LX_CAP_SYS_ADMIN))
+        return -LX_EPERM;
+    if (Length == 0)
+        return 0;
+    Error = LxParseWrittenNumber(Data, Length, &Value);
+    if ((Error == 0) && (Value > 1))
+        Error = -LX_EINVAL;
+    if (Error == 0)
+        LxKlogSetDmesgRestrict((LONG)Value);
+    return Error;
+}
+
+static
+VOID
+LxGenPrintk(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    LONG Values[4];
+
+    UNREFERENCED_PARAMETER(Self);
+    UNREFERENCED_PARAMETER(Synth);
+    LxKlogGetPrintk(Values);
+    LxTextPrintf(Text, "%ld\t%ld\t%ld\t%ld\n", Values[0], Values[1], Values[2], Values[3]);
+}
+
+static
+LONG
+LxWritePrintk(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    UNREFERENCED_PARAMETER(File);
+    if (Length == 0)
+        return 0;
+    return LxKlogWritePrintk(Data, Length);
+}
+
+static
+LONG
+LxWriteRatelimitValue(
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length,
+    _Inout_ PLONG Target)
+{
+    ULONG Value;
+    LONG Error;
+
+    if (Length == 0)
+        return 0;
+    Error = LxParseWrittenNumber(Data, Length, &Value);
+    if ((Error == 0) && (Value > MAXLONG))
+        Error = -LX_EINVAL;
+    if (Error == 0)
+        InterlockedExchange(Target, (LONG)Value);
+    return Error;
+}
+
+static
+VOID
+LxGenPrintkRatelimit(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    UNREFERENCED_PARAMETER(Self);
+    UNREFERENCED_PARAMETER(Synth);
+    LxTextPrintf(Text, "%ld\n", LxPrintkRatelimitSeconds);
+}
+
+static
+LONG
+LxWritePrintkRatelimit(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    UNREFERENCED_PARAMETER(File);
+    return LxWriteRatelimitValue(Data, Length, &LxPrintkRatelimitSeconds);
+}
+
+static
+VOID
+LxGenPrintkRatelimitBurst(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    UNREFERENCED_PARAMETER(Self);
+    UNREFERENCED_PARAMETER(Synth);
+    LxTextPrintf(Text, "%ld\n", LxPrintkRatelimitBurst);
+}
+
+static
+LONG
+LxWritePrintkRatelimitBurst(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    UNREFERENCED_PARAMETER(File);
+    return LxWriteRatelimitValue(Data, Length, &LxPrintkRatelimitBurst);
+}
+
+static
+VOID
+LxGenPrintkDevkmsg(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    UNREFERENCED_PARAMETER(Self);
+    UNREFERENCED_PARAMETER(Synth);
+    LxTextPrintf(Text, "%s\n", LxKlogDevkmsgName());
+}
+
+static
+LONG
+LxWritePrintkDevkmsg(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    UNREFERENCED_PARAMETER(File);
+    if (Length == 0)
+        return 0;
+    return LxKlogSetDevkmsg(Data, Length);
+}
+
+static
+VOID
 LxGenTainted(
     _In_ PLX_PROCESS Self,
     _In_ PLX_SYNTH Synth,
@@ -2895,7 +3052,7 @@ static const LX_TABLE_ENTRY LxProcSysTable[] =
     { "kernel/cap_last_cap", 0444, "40\n", NULL, NULL },
     { "kernel/core_pattern", 0644, NULL, LxGenCorePattern, LxWriteCorePattern },
     { "kernel/core_pipe_limit", 0644, "0\n", NULL, LxWriteAccept },
-    { "kernel/dmesg_restrict", 0644, "0\n", NULL, LxWriteAccept },
+    { "kernel/dmesg_restrict", 0644, NULL, LxGenDmesgRestrict, LxWriteDmesgRestrict },
     { "kernel/domainname", 0644, NULL, LxGenDomainname, LxWriteDomainname },
     { "kernel/hostname", 0644, NULL, LxGenHostname, LxWriteHostname },
     { "kernel/kptr_restrict", 0644, "1\n", NULL, LxWriteAccept },
@@ -2907,7 +3064,10 @@ static const LX_TABLE_ENTRY LxProcSysTable[] =
     { "kernel/overflowuid", 0644, NULL, LxGenOverflowUid, LxWriteOverflowUid },
     { "kernel/panic", 0644, "0\n", NULL, LxWriteAccept },
     { "kernel/pid_max", 0644, "4194304\n", NULL, LxWriteAccept },
-    { "kernel/printk", 0644, "4\t4\t1\t7\n", NULL, LxWriteAccept },
+    { "kernel/printk", 0644, NULL, LxGenPrintk, LxWritePrintk },
+    { "kernel/printk_devkmsg", 0644, NULL, LxGenPrintkDevkmsg, LxWritePrintkDevkmsg },
+    { "kernel/printk_ratelimit", 0644, NULL, LxGenPrintkRatelimit, LxWritePrintkRatelimit },
+    { "kernel/printk_ratelimit_burst", 0644, NULL, LxGenPrintkRatelimitBurst, LxWritePrintkRatelimitBurst },
     { "kernel/random/boot_id", 0444, NULL, LxGenBootId, NULL },
     { "kernel/random/entropy_avail", 0444, "256\n", NULL, NULL },
     { "kernel/random/poolsize", 0444, "256\n", NULL, NULL },

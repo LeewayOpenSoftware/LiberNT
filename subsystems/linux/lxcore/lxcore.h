@@ -74,6 +74,12 @@ typedef enum _LX_NET_SYSCTL
 } LX_NET_SYSCTL;
 
 typedef struct _LX_FILE LX_FILE, *PLX_FILE;
+typedef struct _LX_RATELIMIT
+{
+    LONG64 Begin;
+    LONG Printed;
+    LONG Missed;
+} LX_RATELIMIT, *PLX_RATELIMIT;
 typedef struct _LX_PROCESS LX_PROCESS, *PLX_PROCESS;
 typedef struct _LX_THREAD LX_THREAD, *PLX_THREAD;
 typedef struct _LX_SECCOMP_FILTER LX_SECCOMP_FILTER, *PLX_SECCOMP_FILTER;
@@ -181,6 +187,8 @@ typedef struct _LX_FILE_OPS
     LONG64 (*Getdents)(_In_ PLX_FILE File, _In_ ULONG64 Buffer, _In_ ULONG Length);
     LONG (*Truncate)(_In_ PLX_FILE File, _In_ LONG64 Length);
     VOID (*Release)(_In_ PLX_FILE File);
+    LONG64 (*WriteVector)(_In_ PLX_FILE File, _In_reads_(Count) PLX_IOVEC Vectors, _In_ ULONG Count,
+                          _Inout_opt_ PLONG64 Offset);
 } LX_FILE_OPS, *PLX_FILE_OPS;
 
 #define LX_TTY_BUFFER 4096
@@ -882,6 +890,7 @@ LONG64 LxFdClose(_In_ PLX_PROCESS Process, _In_ LONG Fd);
 VOID LxFdCloseOnExec(_In_ PLX_PROCESS Process);
 LONG64 LxFileRead(_In_ PLX_FILE File, _In_ ULONG64 Buffer, _In_ ULONG64 Length, _Inout_opt_ PLONG64 Offset);
 LONG64 LxFileWrite(_In_ PLX_FILE File, _In_ ULONG64 Buffer, _In_ ULONG64 Length, _Inout_opt_ PLONG64 Offset);
+LONG64 LxFileWriteVector(_In_ PLX_FILE File, _In_ ULONG64 Vectors, _In_ ULONG Count, _Inout_opt_ PLONG64 Offset);
 LONG64 LxFileReadKernel(_In_ PLX_FILE File, _Out_writes_bytes_(Length) PVOID Buffer, _In_ ULONG Length, _In_ ULONG64 Offset);
 LONG LxMemfdCheckWrite(_In_ PLX_FILE File, _In_ LONG64 Position, _In_ ULONG64 Length);
 LONG LxMemfdCheckSize(_In_ PLX_FILE File, _In_ LONG64 Size);
@@ -1119,7 +1128,21 @@ LONG LxXattrOpenNode(_In_ PLX_NODE Node, _In_ BOOLEAN Write, _Out_ PHANDLE Handl
 LONG LxXattrRead(_In_ HANDLE Handle, _Out_writes_bytes_to_(Capacity, *Length) PUCHAR Buffer, _In_ ULONG Capacity, _Out_ PULONG Length);
 LONG LxXattrWrite(_In_ HANDLE Handle, _In_reads_bytes_(Length) PUCHAR Blob, _In_ ULONG Length);
 LONG LxXattrOpenFile(_In_ PLX_FILE File, _In_ BOOLEAN Write, _Out_ PHANDLE Handle, _Out_ PBOOLEAN Close);
-PLX_FILE LxDeviceOpen(_In_ PLX_PROCESS Process, _In_ ULONG64 Device, _In_ ULONG Flags, _In_ PCSTR Path);
+LONG LxDeviceOpen(_In_ PLX_PROCESS Process, _In_ ULONG64 Device, _In_ ULONG Flags, _In_ PCSTR Path, _Out_ PLX_FILE *Result);
+LONG LxDeviceStat(_In_ PLX_FILE File, _Out_ PLX_STAT Stat);
+VOID LxKlogInitialize(VOID);
+VOID LxKlogWrite(_In_ ULONG Priority, _In_reads_(Length) PCSTR Text, _In_ ULONG Length);
+VOID LxKlogPrintf(_In_ ULONG Priority, _In_z_ _Printf_format_string_ PCSTR Format, ...);
+BOOLEAN LxRatelimit(_Inout_ PLX_RATELIMIT Limit, _In_ LONG IntervalSeconds, _In_ LONG Burst, _Out_opt_ PLONG Missed);
+LONG LxKmsgOpen(_In_ PLX_PROCESS Process, _In_ ULONG Flags, _Out_ PLX_FILE *Result);
+VOID LxKlogGetPrintk(_Out_writes_(4) PLONG Values);
+LONG LxKlogWritePrintk(_In_reads_bytes_(Length) PCSTR Data, _In_ ULONG Length);
+LONG LxKlogDmesgRestrictValue(VOID);
+VOID LxKlogSetDmesgRestrict(_In_ LONG Value);
+PCSTR LxKlogDevkmsgName(VOID);
+LONG LxKlogSetDevkmsg(_In_reads_bytes_(Length) PCSTR Data, _In_ ULONG Length);
+extern LONG LxPrintkRatelimitSeconds;
+extern LONG LxPrintkRatelimitBurst;
 
 LONG LxSynthQuery(_In_ PLX_PROCESS Process, _In_ PLX_MOUNT Mount, _In_ PCSTR Relative, _Out_ PULONG Type, _Out_opt_ PSTR *LinkTarget);
 LONG LxSynthOpen(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node, _In_ ULONG Flags, _Out_ PLX_FILE *File);
@@ -1190,6 +1213,7 @@ VOID LxTtyReference(_In_ PLX_TTY Tty);
 VOID LxTtyDereference(_In_ PLX_TTY Tty);
 LONG64 LxTtyRead(_In_ PLX_TTY Tty, _In_ ULONG64 Buffer, _In_ ULONG64 Length, _In_ BOOLEAN NonBlocking);
 LONG64 LxTtyWrite(_In_ PLX_TTY Tty, _In_ ULONG64 Buffer, _In_ ULONG64 Length, _In_ BOOLEAN NonBlocking);
+VOID LxTtyKernelWrite(_In_ PLX_TTY Tty, _In_reads_(Length) PCSTR Text, _In_ ULONG Length);
 LONG64 LxTtyIoctl(_In_ PLX_PROCESS Process, _In_ PLX_TTY Tty, _In_ ULONG Request, _In_ ULONG64 Argument);
 BOOLEAN LxTtyReadable(_In_ PLX_TTY Tty);
 PLX_FILE LxTtyOpen(_In_ PLX_TTY Tty, _In_ ULONG Flags);
