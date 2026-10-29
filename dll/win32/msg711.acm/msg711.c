@@ -124,6 +124,24 @@ static	DWORD	G711_GetFormatIndex(const WAVEFORMATEX *wfx)
     return 0xFFFFFFFF;
 }
 
+#ifdef __REACTOS__
+static BOOL G711_IsStreamFormat(const WAVEFORMATEX *wfx)
+{
+    WAVEFORMATEX known = *wfx;
+    int i;
+
+    if (!wfx->nSamplesPerSec)
+        return FALSE;
+    for (i = 0; i < ARRAY_SIZE(ALaw_Formats); i++)
+    {
+        known.nSamplesPerSec = ALaw_Formats[i].rate;
+        if (G711_GetFormatIndex(&known) != 0xFFFFFFFF)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+#endif
 /***********************************************************************
  *           R16
  *
@@ -862,9 +880,14 @@ static	LRESULT	G711_StreamOpen(PACMDRVSTREAMINSTANCE adsi)
 
     assert(!(adsi->fdwOpen & ACM_STREAMOPENF_ASYNC));
 
+#ifdef __REACTOS__
+    if (!G711_IsStreamFormat(adsi->pwfxSrc) || !G711_IsStreamFormat(adsi->pwfxDst))
+	return ACMERR_NOTPOSSIBLE;
+#else
     if (G711_GetFormatIndex(adsi->pwfxSrc) == 0xFFFFFFFF ||
 	G711_GetFormatIndex(adsi->pwfxDst) == 0xFFFFFFFF)
 	return ACMERR_NOTPOSSIBLE;
+#endif
 
     aad = HeapAlloc(GetProcessHeap(), 0, sizeof(AcmG711Data));
     if (aad == 0) return MMSYSERR_NOMEM;
