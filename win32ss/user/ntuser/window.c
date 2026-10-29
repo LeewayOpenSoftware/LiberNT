@@ -676,7 +676,10 @@ LRESULT co_UserFreeWindow(PWND Window,
          if ((Child = IntGetWindowObject(*ChildHandle)))
          {
             if (!IntWndBelongsToThread(Child, ThreadData))
+            {
+               IntSetStyle(Child, 0, WS_VISIBLE);
                IntUnlinkWindow(Child);
+            }
             else
                co_UserFreeWindow(Child, ProcessData, ThreadData, SendMessages);
 
@@ -1433,7 +1436,8 @@ co_UserSetParent(HWND hWndChild, HWND hWndNewParent)
       return NULL;
    }
 
-   if (Wnd->state2 & WNDS2_INDESTROY)
+   if ((Wnd->state2 & WNDS2_INDESTROY) ||
+       (Wnd->spwndParent && (Wnd->spwndParent->state & WNDS_DESTROYED)))
    {
       EngSetLastError(ERROR_INVALID_PARAMETER);
       return NULL;

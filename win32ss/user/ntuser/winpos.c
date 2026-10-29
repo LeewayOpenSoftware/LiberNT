@@ -4073,6 +4073,8 @@ Exit:
   return 0; // Always NULL?
 }
 
+static BOOL UserSetWindowPos(HWND, HWND, int, int, int, int, UINT, BOOL);
+
 /*
  * @implemented
  */
@@ -4085,9 +4087,9 @@ NtUserMoveWindow(
    int nHeight,
    BOOL bRepaint)
 {
-   return NtUserSetWindowPos(hWnd, 0, X, Y, nWidth, nHeight,
-                             (bRepaint ? SWP_NOZORDER | SWP_NOACTIVATE :
-                              SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW));
+   return UserSetWindowPos(hWnd, 0, X, Y, nWidth, nHeight,
+                           (bRepaint ? SWP_NOZORDER | SWP_NOACTIVATE :
+                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW), TRUE);
 }
 
 /*
@@ -4110,18 +4112,16 @@ NtUserRealChildWindowFromPoint(HWND Parent,
    return pwndParent ? UserHMGetHandle(pwndParent) : NULL;
 }
 
-/*
- * @implemented
- */
-BOOL APIENTRY
-NtUserSetWindowPos(
+static BOOL
+UserSetWindowPos(
    HWND hWnd,
    HWND hWndInsertAfter,
    int X,
    int Y,
    int cx,
    int cy,
-   UINT uFlags)
+   UINT uFlags,
+   BOOL bMoveWindow)
 {
    PWND Window, pWndIA;
    BOOL ret = FALSE;
@@ -4178,7 +4178,8 @@ NtUserSetWindowPos(
       else if (cy > 32767) cy = 32767;
    }
 
-   if ((Window->state2 & WNDS2_INDESTROY) && !(uFlags & SWP_NOZORDER))
+   if (((Window->state2 & WNDS2_INDESTROY) && !(uFlags & SWP_NOZORDER)) ||
+       (!bMoveWindow && Window->spwndParent && (Window->spwndParent->state & WNDS_DESTROYED)))
    {
       EngSetLastError(ERROR_INVALID_PARAMETER);
       ret = FALSE;
@@ -4199,6 +4200,22 @@ Exit:
    TRACE("Leave NtUserSetWindowPos, ret=%i\n", ret);
    UserLeave();
    return ret;
+}
+
+/*
+ * @implemented
+ */
+BOOL APIENTRY
+NtUserSetWindowPos(
+   HWND hWnd,
+   HWND hWndInsertAfter,
+   int X,
+   int Y,
+   int cx,
+   int cy,
+   UINT uFlags)
+{
+   return UserSetWindowPos(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags, FALSE);
 }
 
 /*
@@ -4452,7 +4469,8 @@ NtUserShowWindow(HWND hWnd, LONG nCmdShow)
       goto Exit; // Return FALSE
    }
 
-   if ( nCmdShow > SW_MAX || Window->state2 & WNDS2_INDESTROY)
+   if ( nCmdShow > SW_MAX || Window->state2 & WNDS2_INDESTROY ||
+        (Window->spwndParent && (Window->spwndParent->state & WNDS_DESTROYED)))
    {
       EngSetLastError(ERROR_INVALID_PARAMETER);
       goto Exit; // Return FALSE
