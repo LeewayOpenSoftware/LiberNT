@@ -485,12 +485,28 @@ static	LRESULT	ADPCM_FormatDetails(PACMFORMATDETAILSW afd, DWORD dwQuery)
 	    break;
 	case WAVE_FORMAT_ADPCM:
 	    if (afd->dwFormatIndex >= ARRAY_SIZE(ADPCM_Formats)) return ACMERR_NOTPOSSIBLE;
+#ifdef __REACTOS__
+            {
+                DWORD buffer[(sizeof(ADPCMWAVEFORMAT) + (7 - 1) * sizeof(ADPCMCOEFSET) + sizeof(DWORD) - 1) / sizeof(DWORD)];
+                ADPCMWAVEFORMAT *adpcm = (ADPCMWAVEFORMAT *)buffer;
+
+                memset(buffer, 0, sizeof(buffer));
+                adpcm->wfx.wFormatTag = WAVE_FORMAT_ADPCM;
+                adpcm->wfx.nChannels = ADPCM_Formats[afd->dwFormatIndex].nChannels;
+                adpcm->wfx.nSamplesPerSec = ADPCM_Formats[afd->dwFormatIndex].rate;
+                adpcm->wfx.wBitsPerSample = ADPCM_Formats[afd->dwFormatIndex].nBits;
+                init_wfx_adpcm(adpcm);
+                memcpy(afd->pwfx, adpcm,
+                       min(afd->cbwfx, sizeof(ADPCMWAVEFORMAT) + (7 - 1) * sizeof(ADPCMCOEFSET)));
+            }
+#else
             if (afd->cbwfx < sizeof(ADPCMWAVEFORMAT) + (7 - 1) * sizeof(ADPCMCOEFSET))
                 return ACMERR_NOTPOSSIBLE;
 	    afd->pwfx->nChannels = ADPCM_Formats[afd->dwFormatIndex].nChannels;
 	    afd->pwfx->nSamplesPerSec = ADPCM_Formats[afd->dwFormatIndex].rate;
 	    afd->pwfx->wBitsPerSample = ADPCM_Formats[afd->dwFormatIndex].nBits;
             init_wfx_adpcm((ADPCMWAVEFORMAT*)afd->pwfx);
+#endif
 	    break;
 	default:
             WARN("Unsupported tag %08lx\n", afd->dwFormatTag);
