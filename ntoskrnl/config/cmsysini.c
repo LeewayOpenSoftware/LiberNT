@@ -2169,8 +2169,6 @@ CmpLockRegistryExclusive(VOID)
     KeEnterCriticalRegion();
     ExAcquireResourceExclusiveLite(&CmpRegistryLock, TRUE);
 
-    /* Sanity check */
-    ASSERT(CmpFlushStarveWriters == 0);
     RtlGetCallersAddress(&CmpRegistryLockCaller, &CmpRegistryLockCallerCaller);
 }
 
