@@ -1200,7 +1200,7 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
     PTHREADINFO pti;
     BOOL bExt = (dwFlags & KEYEVENTF_EXTENDEDKEY) ? TRUE : FALSE;
     BOOL bIsDown = (dwFlags & KEYEVENTF_KEYUP) ? FALSE : TRUE;
-    BOOL bPacket = (dwFlags & KEYEVENTF_UNICODE) ? TRUE : FALSE;
+    BOOL bPacket = ((dwFlags & KEYEVENTF_UNICODE) && wVk == VK_PACKET) ? TRUE : FALSE;
     BOOL bWasSimpleDown = FALSE, bPostMsg = TRUE, bIsSimpleDown;
     MSG Msg;
     static BOOL bMenuDownRecently = FALSE;
@@ -1296,7 +1296,7 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
             Msg.message = WM_KEYUP;
     }
 
-    if (!bPacket)
+    if (!(dwFlags & KEYEVENTF_UNICODE))
         RawInputProcessKeyboard(wScanCode, wSimpleVk, dwFlags, Msg.message, dwExtraInfo, bInjected, dwTime);
 
     /* Update async state of not simplified vk here.
@@ -1462,9 +1462,8 @@ UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
     wScanCode = pKbdInput->wScan;
     dwFlags = pKbdInput->dwFlags;
 
-    if ((dwFlags & KEYEVENTF_UNICODE) && pKbdInput->wVk != 0 && pKbdInput->wVk != VK_PACKET)
+    if ((dwFlags & KEYEVENTF_UNICODE) && pKbdInput->wVk != 0)
     {
-        dwFlags &= ~KEYEVENTF_UNICODE;
         wScanCode &= 0xFF;
         wVk = pKbdInput->wVk & 0xFF;
     }
@@ -1483,6 +1482,8 @@ UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
             wVk = IntVscToVk(wScanCode | (bExt ? 0xE000 : 0), pKbdTbl);
             if (!wVk) /* use 0xFF if vsc is invalid */
                 wVk = 0xFF;
+            else if ((wVk & KBDNUMPAD) && IS_KEY_LOCKED(gafAsyncKeyState, VK_NUMLOCK))
+                wVk = IntTranslateNumpadKey(wVk & 0xFF);
         }
         else
         {
