@@ -362,7 +362,6 @@ BOOL FASTCALL ActivateOtherWindowMin(PWND Wnd)
  *
  * Check if we can activate the specified window.
  */
-static
 BOOL FASTCALL can_activate_window( PWND Wnd OPTIONAL)
 {
     LONG style;
