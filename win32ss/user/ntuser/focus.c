@@ -669,8 +669,8 @@ co_IntSendActivateMessages(PWND WindowPrev, PWND Window, BOOL MouseActivate, BOO
 
       co_IntSendMessage( UserHMGetHandle(Window),
                          WM_NCACTIVATE,
-                         Window == (gpqForeground ? gpqForeground->spwndActive : NULL) ?
-                         MAKEWPARAM(WA_ACTIVE, (Window->style & WS_MINIMIZE) ? 0x20 : 0) : 0,
+                         MAKEWPARAM(Window == (gpqForeground ? gpqForeground->spwndActive : NULL) ? WA_ACTIVE : WA_INACTIVE,
+                                    (Window->style & WS_MINIMIZE) ? 0x20 : 0),
                          (LPARAM)hWndPrev);
 
       co_IntSendMessage( UserHMGetHandle(Window),
