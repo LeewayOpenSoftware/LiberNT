@@ -3788,6 +3788,7 @@ static const LX_TABLE_ENTRY LxSysTable[] =
     { "devices/system/cpu/online", 0444, NULL, LxGenCpuOnline, NULL },
     { "devices/system/cpu/possible", 0444, NULL, LxGenCpuOnline, NULL },
     { "devices/system/cpu/present", 0444, NULL, LxGenCpuOnline, NULL },
+    /* TODO: devices/system/cpu/vulnerabilities needs the mitigation state of the NT kernel. */
     { "devices/virtual", 0755 | LX_S_IFDIR, NULL, NULL, NULL },
     LX_DMI_ENTRIES("devices/virtual/dmi/id"),
     { "firmware", 0755 | LX_S_IFDIR, NULL, NULL, NULL },

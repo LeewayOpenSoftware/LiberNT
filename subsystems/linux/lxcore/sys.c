@@ -4172,6 +4172,7 @@ LX_SYSCALL(LxSysIoprioGet)
     return (2 << 13) | 4;
 }
 
+/* TODO: key management (CONFIG_KEYS) is not implemented; add_key, request_key and keyctl fail as on kernels built without it. */
 LX_SYSCALL(LxSysKeyctl)
 {
     UNREFERENCED_PARAMETER(Call);
