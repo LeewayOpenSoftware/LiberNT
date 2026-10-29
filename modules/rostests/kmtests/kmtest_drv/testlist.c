@@ -109,7 +109,7 @@ KMT_TESTFUNC Test_PsUnEstablishWin32Callouts;
 KMT_TESTFUNC Test_PsWddmFault;
 KMT_TESTFUNC Test_PsWddmWindow;
 KMT_TESTFUNC Test_RtlStringSupportKM;
-#ifdef _M_ARM64
+#ifdef KMT_WIN11_TESTS
 KMT_TESTFUNC Test_Win11NewKM;
 KMT_TESTFUNC Test_MmWin11KM;
 KMT_TESTFUNC Test_MmMdlWin11KM;
@@ -651,7 +651,7 @@ const KMT_TEST TestList[] =
     { "RtlRegistryKM",                      Test_RtlRegistry },
     { "RtlTimeKM",                          Test_RtlTimeKM },
     { "RtlStringSupportKM",                 Test_RtlStringSupportKM },
-#ifdef _M_ARM64
+#ifdef KMT_WIN11_TESTS
     { "Win11NewKM",                         Test_Win11NewKM },
     { "MmWin11KM",                          Test_MmWin11KM },
     { "MmMdlWin11KM",                       Test_MmMdlWin11KM },

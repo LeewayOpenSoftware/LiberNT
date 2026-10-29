@@ -373,16 +373,21 @@ if(ARCH STREQUAL "arm64")
         kmArm64/RtlArm64UnwindLayout.c
         kmArm64/KeArm64SubNodeSched.c
         kmArm64/KeArm64Smt.c
-        kmArm64/KeArm64Numa.c
+        kmArm64/KeArm64Numa.c)
+endif()
+
+if(ARCH STREQUAL "arm64" OR ARCH STREQUAL "riscv64")
+    list(APPEND KMTEST_DRV_SOURCE
         rtl/Win11NewKM.c
         ntos_mm/MmWin11KM.c
         ntos_mm/MmMdlWin11KM.c
         ntos_mm/MmPoolWin11KM.c
         ntos_mm/MmSectionWin11KM.c
         ntos_mm/MmPteWin11KM.c)
+    set(KMTEST_WIN11_TESTS TRUE)
 endif()
 
-if(ARCH STREQUAL "amd64" OR ARCH STREQUAL "arm64")
+if(ARCH_64BIT)
     spec2def(ext-ms-win-ntos-ksr-l1-1-5.dll ntos_ex/ksr.spec ADD_IMPORTLIB)
     set(KMTEST_KSR_APISET TRUE)
 endif()
@@ -430,6 +435,9 @@ endif()
 if(KMTEST_KSR_APISET)
     add_importlibs(kmtest_drv ext-ms-win-ntos-ksr-l1-1-5)
     target_compile_definitions(kmtest_drv PRIVATE KMT_KSR_APISET)
+endif()
+if(KMTEST_WIN11_TESTS)
+    target_compile_definitions(kmtest_drv PRIVATE KMT_WIN11_TESTS)
 endif()
 if(KMT_DESTRUCTIVE_BUGCHECK_TESTS)
     target_compile_definitions(kmtest_drv PRIVATE
