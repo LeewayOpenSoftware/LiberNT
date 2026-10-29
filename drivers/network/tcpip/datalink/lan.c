@@ -661,18 +661,16 @@ BOOLEAN ReadIpConfiguration(PIP_INTERFACE Interface)
         }
 
         /* Read the InterfaceMetric value */
-        Interface->Metric = 0;
         Status = ZwQueryValueKey(ParameterHandle,
                                  &InterfaceMetric,
                                  KeyValuePartialInformation,
                                  KeyValueInfo,
                                  KeyValueInfoLength,
                                  &Unused);
-        if (NT_SUCCESS(Status) && KeyValueInfo->DataLength == sizeof(ULONG))
+        if (NT_SUCCESS(Status) && KeyValueInfo->DataLength == sizeof(ULONG) && *(PULONG)KeyValueInfo->Data)
         {
-            Interface->Metric = (UINT)*(PULONG)KeyValueInfo->Data;
-            if (Interface->Metric > 9999)
-                Interface->Metric = 9999;
+            Interface->ManualMetric = TRUE;
+            Interface->InterfaceMetric = min(*(PULONG)KeyValueInfo->Data, 9999);
         }
 
         /* Read the EnableDHCP entry */
@@ -723,7 +721,7 @@ BOOLEAN ReadIpConfiguration(PIP_INTERFACE Interface)
                 if (ParseIpConfigurationAddress((PCWSTR)GatewayInfo->Data, &RouterValue) && RouterValue != 0)
                 {
                     AddrInitIPv4(&Router, RouterValue);
-                    RouterCreateRoute(&DefaultMask, &DefaultMask, &Router, Interface);
+                    RouterCreateRoute(&DefaultMask, &DefaultMask, &Router, Interface, 0);
                 }
                 ExFreePoolWithTag(GatewayInfo, KEY_VALUE_TAG);
             }

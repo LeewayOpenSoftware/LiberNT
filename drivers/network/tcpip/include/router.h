@@ -45,7 +45,8 @@ PFIB_ENTRY RouterCreateRoute(
     PIP_ADDRESS NetworkAddress,
     PIP_ADDRESS Netmask,
     PIP_ADDRESS RouterAddress,
-    PIP_INTERFACE Interface);
+    PIP_INTERFACE Interface,
+    UINT Metric);
 
 NTSTATUS RouterStartup(
     VOID);
@@ -59,6 +60,5 @@ UINT CountFIBs(PIP_INTERFACE IF);
 
 UINT CopyFIBs( PIP_INTERFACE IF, PFIB_ENTRY Target, UINT Capacity );
 
-UINT ProcessAutoMetric(PIP_INTERFACE Interface);
 
 /* EOF */

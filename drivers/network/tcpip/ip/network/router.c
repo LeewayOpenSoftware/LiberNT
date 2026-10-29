@@ -21,33 +21,6 @@ LIST_ENTRY FIBListHead;
 KSPIN_LOCK FIBLock;
 
 UINT
-ProcessAutoMetric(
-    _In_ PIP_INTERFACE Interface)
-{
-    if (Interface == Loopback)
-        return 1;
-
-    if (Interface->Metric != 0)
-        return Interface->Metric;
-
-    /* Auto metric */
-    if (Interface->Speed > 2000000000)
-        return 5;
-    else if (Interface->Speed > 200000000)
-        return 10;
-    else if (Interface->Speed > 80000000)
-        return 20;
-    else if (Interface->Speed > 20000000)
-        return 25;
-    else if (Interface->Speed > 4000000)
-        return 30;
-    else if (Interface->Speed > 500000)
-        return 40;
-    else
-        return 50;
-}
-
-UINT
 IPAutomaticMetric(
     _In_ PIP_INTERFACE Interface)
 {
@@ -629,7 +602,8 @@ PFIB_ENTRY RouterCreateRoute(
     PIP_ADDRESS NetworkAddress,
     PIP_ADDRESS Netmask,
     PIP_ADDRESS RouterAddress,
-    PIP_INTERFACE Interface)
+    PIP_INTERFACE Interface,
+    UINT Metric)
 /*
  * FUNCTION: Creates a route with IPv4 addresses as parameters
  * ARGUMENTS:
@@ -681,7 +655,7 @@ PFIB_ENTRY RouterCreateRoute(
         return NULL;
     }
 
-    FIBE = RouterAddRoute(NetworkAddress, Netmask, NCE, ProcessAutoMetric(Interface));
+    FIBE = RouterAddRoute(NetworkAddress, Netmask, NCE, Metric);
     NBDereferenceNeighbor(NCE);
     return FIBE;
 }
