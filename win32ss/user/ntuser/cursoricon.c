@@ -1005,7 +1005,7 @@ UserClipCursor(
     {
         if (prcl->right < prcl->left || prcl->bottom < prcl->top)
         {
-            EngSetLastError(ERROR_INVALID_PARAMETER);
+            EngSetLastError(ERROR_ACCESS_DENIED);
             return FALSE;
         }
 
