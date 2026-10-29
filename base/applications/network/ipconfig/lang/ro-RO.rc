@@ -41,6 +41,17 @@ BEGIN
     IDS_SECONDARYWINSSERVER "\tServer WINS secundar. . . . . . . : %hs\n"
     IDS_LEASEOBTAINED       "\tAtribuire obținută. . . . . . . . : %s\n"
     IDS_LEASEEXPIRES        "\tAtribuire expiră. . . . . . . . . : %s\n"
+    IDS_IPV6ADDRESS         "\tIPv6 Address. . . . . . . . . . . : %hs"
+    IDS_TEMPIPV6ADDRESS     "\tTemporary IPv6 Address. . . . . . : %hs"
+    IDS_LINKLOCALIPV6ADDRESS "\tLink-local IPv6 Address . . . . . : %hs"
+    IDS_DHCPV6IAID          "\tDHCPv6 IAID . . . . . . . . . . . : %lu\n"
+    IDS_DHCPV6DUID          "\tDHCPv6 Client DUID. . . . . . . . : %hs\n"
+    IDS_ADDRPREFERRED       "(Preferred) \n"
+    IDS_ADDRTENTATIVE       "(Tentative) \n"
+    IDS_ADDRDEPRECATED      "(Deprecated) \n"
+    IDS_ADDRDUPLICATE       "(Duplicate) \n"
+    IDS_ADDREND             "\n"
+    IDS_CONNDNSSUFFIXLIST   "\tConnection-specific DNS Suffix Search List :\n"
 END
 
 STRINGTABLE

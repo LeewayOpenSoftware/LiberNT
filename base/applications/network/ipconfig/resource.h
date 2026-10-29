@@ -32,6 +32,17 @@
 #define IDS_SECONDARYWINSSERVER 129
 #define IDS_LEASEOBTAINED       130
 #define IDS_LEASEEXPIRES        131
+#define IDS_IPV6ADDRESS         132
+#define IDS_TEMPIPV6ADDRESS     133
+#define IDS_LINKLOCALIPV6ADDRESS 134
+#define IDS_DHCPV6IAID          135
+#define IDS_DHCPV6DUID          136
+#define IDS_ADDRPREFERRED       137
+#define IDS_ADDRTENTATIVE       138
+#define IDS_ADDRDEPRECATED      139
+#define IDS_ADDRDUPLICATE       140
+#define IDS_ADDREND             141
+#define IDS_CONNDNSSUFFIXLIST   142
 
 
 /* adapter types */
