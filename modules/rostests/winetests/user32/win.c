@@ -6599,7 +6599,7 @@ static void test_csparentdc(void)
    flush_events( TRUE );
 #ifdef __REACTOS__
     /* The parentdc_ok macro breaks if/else staements without braces */
-    if (GetNTVersion() >= _WIN32_WINNT_WIN8) {
+    if (GetNTVersion() >= _WIN32_WINNT_WIN8 && GetNTVersion() < _WIN32_WINNT_WIN10) {
         parentdc_ok(test1_win8, test_answer);
     }
     else {
@@ -6615,7 +6615,7 @@ static void test_csparentdc(void)
    flush_events( TRUE );
 #ifdef __REACTOS__
     /* The parentdc_ok macro breaks if/else staements without braces */
-    if (GetNTVersion() >= _WIN32_WINNT_WIN8) {
+    if (GetNTVersion() >= _WIN32_WINNT_WIN8 && GetNTVersion() < _WIN32_WINNT_WIN10) {
         parentdc_ok(test2_win8, test_answer);
     }
     else {
@@ -6631,7 +6631,7 @@ static void test_csparentdc(void)
    flush_events( TRUE );
 #ifdef __REACTOS__
     /* The parentdc_ok macro breaks if/else staements without braces */
-    if (GetNTVersion() >= _WIN32_WINNT_WIN8) {
+    if (GetNTVersion() >= _WIN32_WINNT_WIN8 && GetNTVersion() < _WIN32_WINNT_WIN10) {
         parentdc_ok(test3_win8, test_answer);
     }
     else {
@@ -6647,7 +6647,7 @@ static void test_csparentdc(void)
    flush_events( TRUE );
 #ifdef __REACTOS__
     /* The parentdc_ok macro breaks if/else staements without braces */
-    if (GetNTVersion() >= _WIN32_WINNT_WIN8) {
+    if (GetNTVersion() >= _WIN32_WINNT_WIN8 && GetNTVersion() < _WIN32_WINNT_WIN10) {
         parentdc_ok(test4_win8, test_answer);
     }
     else {
@@ -6663,7 +6663,7 @@ static void test_csparentdc(void)
    flush_events( TRUE );
 #ifdef __REACTOS__
     /* The parentdc_ok macro breaks if/else staements without braces */
-    if (GetNTVersion() >= _WIN32_WINNT_WIN8) {
+    if (GetNTVersion() >= _WIN32_WINNT_WIN8 && GetNTVersion() < _WIN32_WINNT_WIN10) {
         parentdc_ok(test5_win8, test_answer);
     }
     else {
@@ -6685,7 +6685,7 @@ static void test_csparentdc(void)
    flush_events( TRUE );
 #ifdef __REACTOS__
     /* The parentdc_ok macro breaks if/else staements without braces */
-    if (GetNTVersion() >= _WIN32_WINNT_WIN8) {
+    if (GetNTVersion() >= _WIN32_WINNT_WIN8 && GetNTVersion() < _WIN32_WINNT_WIN10) {
         parentdc_ok(test7_win8, test_answer);
     }
     else {

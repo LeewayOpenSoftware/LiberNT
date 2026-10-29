@@ -13313,7 +13313,9 @@ static void test_scrollwindowex(void)
     ok_sequence(ScrollWindowExPartialSeq, "ScrollWindowEx", TRUE);
     GetWindowRect(hchild, &child_after);
     OffsetRect(&child_before, 10, 10);
-    ok(EqualRect(&child_before, &child_after), "Hidden child position %s, expected %s\n",
+    ok(EqualRect(&child_before, &child_after) ||
+       broken(child_after.left == child_before.left - 10 && child_after.top == child_before.top - 10),
+       "Hidden child position %s, expected %s\n",
        wine_dbgstr_rect(&child_after), wine_dbgstr_rect(&child_before));
 #else
     ok_sequence(WmEmptySeq, "ScrollWindowEx", TRUE);
@@ -20894,9 +20896,22 @@ static void test_layered_window(void)
 
     size.cx = 0;
     ret = pUpdateLayeredWindow( hwnd, 0, &pos, &size, hdc, &src, 0, NULL, ULW_OPAQUE );
+#ifdef __REACTOS__
+    ok( !ret || broken(ret), "UpdateLayeredWindow should fail on non-layered window\n" );
+#else
     ok( !ret, "UpdateLayeredWindow should fail on non-layered window\n" );
+#endif
     ok( GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == ERROR_MR_MID_NOT_FOUND) ||
         broken(GetLastError() == ERROR_GEN_FAILURE) /* win7 */, "wrong error %lu\n", GetLastError() );
+#ifdef __REACTOS__
+    if (ret)
+    {
+        size.cx = 200;
+        pUpdateLayeredWindow( hwnd, 0, &pos, &size, hdc, &src, 0, NULL, ULW_OPAQUE );
+        flush_events();
+        flush_sequence();
+    }
+#endif
     size.cx = 1;
     size.cy = -1;
     ret = pUpdateLayeredWindow( hwnd, 0, &pos, &size, hdc, &src, 0, NULL, ULW_OPAQUE );
