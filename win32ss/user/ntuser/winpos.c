@@ -3325,6 +3325,7 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
                return TRUE;
             }
             Swp |= SWP_NOSIZE | SWP_NOMOVE;
+            if (Cmd == SW_SHOWNOACTIVATE) Swp |= SWP_NOZORDER;
          }
          if ( (style & (WS_CHILD | WS_POPUP)) == WS_CHILD &&
              !(Swp & SWP_STATECHANGED))
