@@ -69,15 +69,6 @@ REGISTER_SYSCLASS DefaultServerClasses[] =
     FNID_DESKTOP,
     ICLS_DESKTOP
   },
-  { ((PWSTR)WC_SWITCH),
-    CS_VREDRAW|CS_HREDRAW|CS_SAVEBITS,
-    NULL, // Use User32 procs
-    sizeof(LONG_PTR), // See user32_apitest GetClassInfo, 0: Pointer to ALTTABINFO
-    (HICON)OCR_NORMAL,
-    NULL,
-    FNID_SWITCH,
-    ICLS_SWITCH
-  },
   { ((PWSTR)WC_MENU),
     CS_DBLCLKS|CS_SAVEBITS|CS_DROPSHADOW,
     NULL, // Use User32 procs
