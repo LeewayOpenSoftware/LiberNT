@@ -1,0 +1,16 @@
+--- a/mcs/class/corlib/Mono.Interop/ComInteropProxy.cs
++++ b/mcs/class/corlib/Mono.Interop/ComInteropProxy.cs
+@@ -99,8 +99,11 @@
+ 			ComInteropProxy obj = null;
+ 			FindProxy (ppv, ref obj);
+ 			if (obj == null) {
+-				Marshal.Release (ppv);
+-				return new ComInteropProxy (ppv);
++				try {
++					return new ComInteropProxy (ppv);
++				} finally {
++					Marshal.Release (ppv);
++				}
+ 			}
+ 			else {
+ 				Marshal.Release (ppv);
