@@ -61,6 +61,16 @@ CcNtDereferenceMap(
 {
     BOOLEAN Destroy = FALSE;
     KIRQL OldIrql;
+    LONG Count = CC_ATOMIC_READ32(&NtMap->ReferenceCount);
+
+    while (Count > 1)
+    {
+        LONG Previous = InterlockedCompareExchange(&NtMap->ReferenceCount, Count - 1, Count);
+
+        if (Previous == Count)
+            return;
+        Count = Previous;
+    }
 
     CC_LOCK_ACQUIRE(&CcNtMapListLock, &OldIrql);
     if (CC_ATOMIC_ADD32(&NtMap->ReferenceCount, -1) == 1 && NtMap->Map.OpenCount == 0 &&
@@ -92,29 +102,38 @@ CcNtExpireClosedMaps(VOID)
 {
     ULONG Remaining = 128;
 
-    while (Remaining-- != 0)
+    while (Remaining != 0)
     {
-        PCC_NT_MAP Found = NULL;
-        PLIST_ENTRY Entry;
+        PCC_NT_MAP Expired[16];
+        ULONG Batch = min(Remaining, RTL_NUMBER_OF(Expired));
+        ULONG Found = 0;
+        ULONG Index;
+        PLIST_ENTRY Entry, Next;
         KIRQL OldIrql;
 
         CC_LOCK_ACQUIRE(&CcNtMapListLock, &OldIrql);
-        for (Entry = CcNtMapList.Flink; Entry != &CcNtMapList; Entry = Entry->Flink)
+        for (Entry = CcNtMapList.Flink;
+             (CcNtClosedMapCount != 0) && (Entry != &CcNtMapList) && (Found < Batch);
+             Entry = Next)
         {
             PCC_NT_MAP NtMap = CONTAINING_RECORD(Entry, CC_NT_MAP, Link);
 
+            Next = Entry->Flink;
             if (NtMap->Closing && NtMap->ReferenceCount == 0 && NtMap->Map.OpenCount == 0 &&
                 CC_ATOMIC_READ64(&NtMap->Map.DirtyPages) == 0)
             {
                 CcNtUnlinkMap(NtMap);
-                Found = NtMap;
-                break;
+                Expired[Found++] = NtMap;
             }
         }
         CC_LOCK_RELEASE(&CcNtMapListLock, OldIrql);
-        if (Found == NULL)
+
+        for (Index = 0; Index < Found; Index++)
+            CcNtDestroyMap(Expired[Index]);
+
+        if (Found < Batch)
             break;
-        CcNtDestroyMap(Found);
+        Remaining -= Found;
     }
 }
 

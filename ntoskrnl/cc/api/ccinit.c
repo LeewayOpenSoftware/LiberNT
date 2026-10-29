@@ -19,6 +19,12 @@ typedef struct _CC_NT_DEFERRED_WRITE
     ULONG BytesToWrite;
 } CC_NT_DEFERRED_WRITE, *PCC_NT_DEFERRED_WRITE;
 
+typedef struct _CC_NT_LAZY_WAITER
+{
+    LIST_ENTRY Link;
+    KEVENT Event;
+} CC_NT_LAZY_WAITER, *PCC_NT_LAZY_WAITER;
+
 CC_CACHE CcNtCache;
 
 BOOLEAN CcPfEnablePrefetcher;
@@ -40,10 +46,11 @@ ULONG CcFastReadResourceMiss;
 ULONG CcFastReadWait;
 
 static KEVENT CcNtLazyWriterEvent;
-static KEVENT CcNtLazyPassEvent;
 static KEVENT CcNtLazyWriteGate;
 static LIST_ENTRY CcNtDeferredWrites;
 static KSPIN_LOCK CcNtDeferredLock;
+static LIST_ENTRY CcNtLazyWaiters;
+static KSPIN_LOCK CcNtLazyWaitLock;
 static BOOLEAN CcNtReady;
 
 NTSTATUS
@@ -215,8 +222,8 @@ CcRosFlushDirtyPages(
         if (NtMap == NULL)
             break;
 
-        KeWaitForSingleObject(&CcNtLazyWriteGate, Executive, KernelMode, FALSE, NULL);
         KeEnterCriticalRegion();
+        KeWaitForSingleObject(&CcNtLazyWriteGate, Executive, KernelMode, FALSE, NULL);
         if (NtMap->Callbacks.AcquireForLazyWrite == NULL ||
             NtMap->Callbacks.AcquireForLazyWrite(NtMap->LazyWriteContext, Wait))
         {
@@ -225,8 +232,8 @@ CcRosFlushDirtyPages(
             if (NtMap->Callbacks.ReleaseFromLazyWrite != NULL)
                 NtMap->Callbacks.ReleaseFromLazyWrite(NtMap->LazyWriteContext);
         }
-        KeLeaveCriticalRegion();
         KeSetEvent(&CcNtLazyWriteGate, IO_NO_INCREMENT, FALSE);
+        KeLeaveCriticalRegion();
 
         if (CalledFromLazy && Flushed != 0)
         {
@@ -246,6 +253,33 @@ CcRosFlushDirtyPages(
 
 static
 VOID
+CcNtTakeLazyWaiters(
+    _Out_ PLIST_ENTRY Waiters)
+{
+    KIRQL OldIrql;
+
+    InitializeListHead(Waiters);
+    KeAcquireSpinLock(&CcNtLazyWaitLock, &OldIrql);
+    while (!IsListEmpty(&CcNtLazyWaiters))
+        InsertTailList(Waiters, RemoveHeadList(&CcNtLazyWaiters));
+    KeReleaseSpinLock(&CcNtLazyWaitLock, OldIrql);
+}
+
+static
+VOID
+CcNtReleaseLazyWaiters(
+    _Inout_ PLIST_ENTRY Waiters)
+{
+    while (!IsListEmpty(Waiters))
+    {
+        PCC_NT_LAZY_WAITER Waiter = CONTAINING_RECORD(RemoveHeadList(Waiters), CC_NT_LAZY_WAITER, Link);
+
+        KeSetEvent(&Waiter->Event, IO_NO_INCREMENT, FALSE);
+    }
+}
+
+static
+VOID
 NTAPI
 CcNtLazyWriter(
     _In_ PVOID Context)
@@ -257,17 +291,19 @@ CcNtLazyWriter(
 
     for (;;)
     {
+        LIST_ENTRY Waiters;
         ULONG Target;
 
         KeWaitForSingleObject(&CcNtLazyWriterEvent, Executive, KernelMode, FALSE, &Period);
 
+        CcNtTakeLazyWaiters(&Waiters);
         Target = CcDirtyLazyTarget(&CcNtCache);
         if (Target != 0)
             CcRosFlushDirtyPages(Target, NULL, TRUE, TRUE);
 
         CcNtExpireClosedMaps();
         CcNtProcessDeferredWrites();
-        KePulseEvent(&CcNtLazyPassEvent, IO_NO_INCREMENT, FALSE);
+        CcNtReleaseLazyWaiters(&Waiters);
     }
 }
 
@@ -275,8 +311,19 @@ NTSTATUS
 NTAPI
 CcWaitForCurrentLazyWriterActivity(VOID)
 {
+    CC_NT_LAZY_WAITER Waiter;
+    KIRQL OldIrql;
+
+    if (!CcNtReady)
+        return STATUS_SUCCESS;
+
+    KeInitializeEvent(&Waiter.Event, NotificationEvent, FALSE);
+    KeAcquireSpinLock(&CcNtLazyWaitLock, &OldIrql);
+    InsertTailList(&CcNtLazyWaiters, &Waiter.Link);
+    KeReleaseSpinLock(&CcNtLazyWaitLock, OldIrql);
+
     CcNtKickLazyWriter();
-    return KeWaitForSingleObject(&CcNtLazyPassEvent, Executive, KernelMode, FALSE, NULL);
+    return KeWaitForSingleObject(&Waiter.Event, Executive, KernelMode, FALSE, NULL);
 }
 
 CODE_SEG("INIT")
@@ -306,8 +353,9 @@ CcInitializeCacheManager(VOID)
     InitializeListHead(&CcNtMapList);
     InitializeListHead(&CcNtDeferredWrites);
     KeInitializeSpinLock(&CcNtDeferredLock);
+    InitializeListHead(&CcNtLazyWaiters);
+    KeInitializeSpinLock(&CcNtLazyWaitLock);
     KeInitializeEvent(&CcNtLazyWriterEvent, SynchronizationEvent, FALSE);
-    KeInitializeEvent(&CcNtLazyPassEvent, NotificationEvent, FALSE);
     KeInitializeEvent(&CcNtLazyWriteGate, SynchronizationEvent, TRUE);
 
     InitializeObjectAttributes(&ObjectAttributes, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);

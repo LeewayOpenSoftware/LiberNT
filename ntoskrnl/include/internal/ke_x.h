@@ -1412,21 +1412,16 @@ KiDecrementQueueCurrentCount(IN PKQUEUE Queue)
     return InterlockedDecrement((volatile LONG *)&Queue->CurrentCount);
 }
 
-//
-// Undoes KiActivateWaiterQueue's active-count decrement when a wait on
-// another object is abandoned before being published, so the queue does
-// not over-admit workers.
-//
 FORCEINLINE
 VOID
-KiUndoActivateWaiterQueue(IN PKTHREAD Thread)
+KxActivateWaiterQueue(IN PKTHREAD Thread)
 {
     PKQUEUE Queue = Thread->Queue;
 
     if (Queue)
     {
         KiAcquireDispatcherObject(&Queue->Header);
-        KiIncrementQueueCurrentCount(Queue);
+        KiActivateWaiterQueue(Queue);
         KiReleaseDispatcherObject(&Queue->Header);
     }
 }

@@ -123,6 +123,7 @@ KMT_TESTFUNC Test_ExSequencedList;
 KMT_TESTFUNC Test_ExSingleList;
 KMT_TESTFUNC Test_ExTimer;
 KMT_TESTFUNC Test_ExUuid;
+KMT_TESTFUNC Test_CcLazyWriter;
 KMT_TESTFUNC Test_FsRtlDissect;
 KMT_TESTFUNC Test_FsRtlExpression;
 KMT_TESTFUNC Test_FsRtlLegal;
@@ -424,6 +425,7 @@ const KMT_TEST TestList[] =
     { "ExSingleList",                       Test_ExSingleList },
     { "ExTimer",                            Test_ExTimer },
     { "ExUuid",                             Test_ExUuid },
+    { "CcLazyWriter",                       Test_CcLazyWriter },
     /* This deliberately exercises failure reporting and is not a parity test. */
     { "-Example",                           Test_Example },
     { "FsRtlDissect",                       Test_FsRtlDissect },

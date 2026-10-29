@@ -85,6 +85,7 @@ list(APPEND SOURCE
     ProcessPowerThrottling.c
     TunnelCache.c
     UEFIFirmware.c
+    WaitForMultipleObjects.c
     WerRegisterFile.c
     WideCharToMultiByte.c
     Wow64GetThreadContext.c
