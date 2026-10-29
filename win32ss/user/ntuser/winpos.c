@@ -1218,15 +1218,10 @@ co_WinPosDoNCCALCSize(PWND Window, PWINDOWPOS WinPos, RECTL* WindowRect, RECTL* 
 
       wvrFlags |= co_IntSendMessage(UserHMGetHandle(Window), WM_NCCALCSIZE, TRUE, (LPARAM)&params);
 
-      /* If the application send back garbage, ignore it */
-      if (params.rgrc[0].left <= params.rgrc[0].right &&
-          params.rgrc[0].top <= params.rgrc[0].bottom)
+      *ClientRect = params.rgrc[0]; // First rectangle contains the coordinates of the new client rectangle resulting from the move or resize
+      if ((Window->style & WS_CHILD) && Parent)
       {
-         *ClientRect = params.rgrc[0]; // First rectangle contains the coordinates of the new client rectangle resulting from the move or resize
-         if ((Window->style & WS_CHILD) && Parent)
-         {
-            RECTL_vOffsetRect(ClientRect, Parent->rcClient.left, Parent->rcClient.top);
-         }
+         RECTL_vOffsetRect(ClientRect, Parent->rcClient.left, Parent->rcClient.top);
       }
 
       if (ClientRect->left != Window->rcClient.left ||
