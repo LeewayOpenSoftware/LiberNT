@@ -199,3 +199,32 @@ DrvInstWait(
         Sleep(250);
     }
 }
+
+DWORD
+WINAPI
+DrvInstRollback(
+    _In_ PCWSTR DeviceInstanceId)
+{
+    RPC_BINDING_HANDLE Binding;
+    DWORD Error;
+
+    if (!DeviceInstanceId)
+        return ERROR_INVALID_PARAMETER;
+
+    Error = BindToService(&Binding);
+    if (Error != ERROR_SUCCESS)
+        return Error;
+
+    RpcTryExcept
+    {
+        Error = DrvInst_Rollback(Binding, DeviceInstanceId);
+    }
+    RpcExcept(EXCEPTION_EXECUTE_HANDLER)
+    {
+        Error = RpcExceptionCode();
+    }
+    RpcEndExcept;
+
+    RpcBindingFree(&Binding);
+    return Error;
+}

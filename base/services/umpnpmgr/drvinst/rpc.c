@@ -147,3 +147,29 @@ DrvInst_EnumJobs(
     HeapFree(GetProcessHeap(), 0, Jobs);
     return ERROR_SUCCESS;
 }
+
+
+DWORD
+__stdcall
+DrvInst_Rollback(
+    _In_ handle_t hBinding,
+    _In_ LPCWSTR pszDeviceInstanceId)
+{
+    DWORD Error;
+
+    if (!IsCallerAdministrator(hBinding))
+        return ERROR_ACCESS_DENIED;
+
+    if (!pszDeviceInstanceId || !pszDeviceInstanceId[0] ||
+        lstrlenW(pszDeviceInstanceId) >= DRVINST_DEVICE_ID_CCH)
+        return ERROR_INVALID_PARAMETER;
+
+    /* Never roll back in the middle of an install job for any device. */
+    Error = DrvInstAcquireInstallLock(60000);
+    if (Error != ERROR_SUCCESS)
+        return Error;
+    Error = DrvInstRollbackDevice(pszDeviceInstanceId);
+    DrvInstReleaseInstallLock();
+
+    return Error;
+}

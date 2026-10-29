@@ -54,4 +54,12 @@ interface drvinst
         [in, range(0,256)] DWORD ulMax,
         [out, size_is(ulMax), length_is(*pulCount)] unsigned hyper *pullJobIds,
         [out] DWORD *pulCount);
+
+    /* Restore a device to the state saved before its last install job.
+     * Needs an administrator. */
+    DWORD
+    __stdcall
+    DrvInst_Rollback(
+        [in] handle_t hBinding,
+        [in, string, ref] LPCWSTR pszDeviceInstanceId);
 }

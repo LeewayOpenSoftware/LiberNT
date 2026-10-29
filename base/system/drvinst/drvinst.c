@@ -93,6 +93,7 @@ StateName(
         case DrvInstJobFailed: return L"failed";
         case DrvInstJobTimedOut: return L"timed out";
         case DrvInstJobCanceled: return L"canceled";
+        case DrvInstJobRolledBack: return L"rolled back";
     }
     return L"unknown";
 }
@@ -170,7 +171,19 @@ ClientMain(
         return (int)(Error ? Error : Job.Result.Win32);
     }
 
-    wprintf(L"usage: drvinst /list | /job <id> | /submit <device instance id>\n");
+    if (!lstrcmpiW(argv[1], L"/rollback") && argc > 2)
+    {
+        Error = DrvInstRollback(argv[2]);
+        if (Error != ERROR_SUCCESS)
+        {
+            wprintf(L"Cannot roll back (error %lu)\n", Error);
+            return (int)Error;
+        }
+        wprintf(L"Rolled back %ls\n", argv[2]);
+        return 0;
+    }
+
+    wprintf(L"usage: drvinst /list | /job <id> | /submit <device instance id> | /rollback <device instance id>\n");
     return ERROR_INVALID_PARAMETER;
 }
 
@@ -188,7 +201,8 @@ wmain(
 
     /* Started by a person: talk to the service instead of installing */
     if (argc > 1 && (!lstrcmpiW(argv[1], L"/list") || !lstrcmpiW(argv[1], L"/job") ||
-                     !lstrcmpiW(argv[1], L"/submit") || !lstrcmpiW(argv[1], L"/?")))
+                     !lstrcmpiW(argv[1], L"/submit") || !lstrcmpiW(argv[1], L"/rollback") ||
+                     !lstrcmpiW(argv[1], L"/?")))
     {
         return ClientMain(argc, argv);
     }

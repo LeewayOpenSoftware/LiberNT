@@ -122,6 +122,10 @@ VOID
 DrvInstInitialize(VOID);
 
 BOOL
+IsValidDeviceInstanceId(
+    _In_ PCWSTR DeviceInstanceId);
+
+BOOL
 DrvInstUseWorker(VOID);
 
 BOOL
@@ -147,6 +151,33 @@ ULONG
 DrvInstpEnumJobs(
     _Out_writes_to_(Max, return) PDRVINST_JOB_INFO Info,
     _In_ ULONG Max);
+
+
+/* drvinst/rollback.c */
+
+VOID
+DrvInstRollbackInitialize(VOID);
+
+DWORD
+DrvInstSnapshotDevice(
+    _In_ PCWSTR DeviceInstanceId,
+    _Out_opt_ PULONG OutSeq);
+
+DWORD
+DrvInstRollbackDevice(
+    _In_ PCWSTR DeviceInstanceId);
+
+DWORD
+DrvInstRollbackDeviceToSeq(
+    _In_ PCWSTR DeviceInstanceId,
+    _In_ ULONG Seq);
+
+DWORD
+DrvInstAcquireInstallLock(
+    _In_ DWORD TimeoutMs);
+
+VOID
+DrvInstReleaseInstallLock(VOID);
 
 
 /* rpcserver.c */
