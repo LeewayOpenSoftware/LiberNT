@@ -1150,6 +1150,7 @@ LxGenPidStatus(
     PLX_PROCESS Process = LxProcessLookup(Self->Instance, Synth->Pid);
     PLX_NS ProcNs;
     ULONG64 Ignored = 0, Caught = 0, Blocked = 0, Affinity = LxSchedActiveMask();
+    ULONG SeccompMode = 0, SeccompFilters = 0;
     PLIST_ENTRY Entry;
     CHAR Comm[16], List[256];
     LONG Signal;
@@ -1175,6 +1176,8 @@ LxGenPidStatus(
         {
             Blocked = Thread->SigMask;
             Affinity &= Thread->Affinity;
+            SeccompMode = Thread->SeccompMode;
+            SeccompFilters = LxSeccompFilterCount(Thread);
             break;
         }
     }
@@ -1263,12 +1266,13 @@ LxGenPidStatus(
     LxTextPrintf(Text,
                  "SigPnd:\t%016llx\nShdPnd:\t%016llx\nSigBlk:\t%016llx\nSigIgn:\t%016llx\nSigCgt:\t%016llx\n"
                  "CapInh:\t%016llx\nCapPrm:\t%016llx\nCapEff:\t%016llx\nCapBnd:\t%016llx\nCapAmb:\t%016llx\n"
-                 "NoNewPrivs:\t%u\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\n"
+                 "NoNewPrivs:\t%u\nSeccomp:\t%lu\nSeccomp_filters:\t%lu\nSpeculation_Store_Bypass:\tthread vulnerable\n"
                  "SpeculationIndirectBranch:\tunknown\nCpus_allowed:\t%llx\nCpus_allowed_list:\t%s\n"
                  "Mems_allowed:\t1\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t0\nnonvoluntary_ctxt_switches:\t0\n",
                  0ULL, (ULONG64)Process->Pending, Blocked, Ignored, Caught, Process->CapInheritable,
                  Process->CapPermitted, Process->CapEffective,
-                 Process->CapBounding, Process->CapAmbient, Process->NoNewPrivs ? 1U : 0U, Affinity, List);
+                 Process->CapBounding, Process->CapAmbient, Process->NoNewPrivs ? 1U : 0U, SeccompMode, SeccompFilters,
+                 Affinity, List);
     LxProcessDereference(Process);
 }
 

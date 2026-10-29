@@ -75,6 +75,7 @@ typedef enum _LX_NET_SYSCTL
 typedef struct _LX_FILE LX_FILE, *PLX_FILE;
 typedef struct _LX_PROCESS LX_PROCESS, *PLX_PROCESS;
 typedef struct _LX_THREAD LX_THREAD, *PLX_THREAD;
+typedef struct _LX_SECCOMP_FILTER LX_SECCOMP_FILTER, *PLX_SECCOMP_FILTER;
 typedef struct _LX_INSTANCE LX_INSTANCE, *PLX_INSTANCE;
 typedef struct _LX_MOUNT LX_MOUNT, *PLX_MOUNT;
 typedef struct _LX_CGROUP LX_CGROUP, *PLX_CGROUP;
@@ -689,6 +690,8 @@ struct _LX_THREAD
     ULONG64 VforkTls;
     LONG64 VforkPid;
     BOOLEAN VforkExited;
+    volatile UCHAR SeccompMode;
+    PLX_SECCOMP_FILTER Seccomp;
 };
 
 typedef struct _LX_CALL
@@ -1321,6 +1324,11 @@ BOOLEAN LxWinHostIoctl(_In_ PFILE_OBJECT FileObject, _Inout_ PIRP Irp, _In_ PIO_
 LONG LxSignalFromException(_In_ NTSTATUS ExceptionCode, _Out_ PLONG Code);
 VOID LxSignalSend(_In_ PLX_PROCESS Target, _In_opt_ PLX_THREAD TargetThread, _In_ LONG Signal, _In_opt_ PLX_SIGINFO Info);
 VOID LxSignalCheckPending(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame);
+VOID LxSeccompInherit(_Inout_ PLX_THREAD Thread, _In_ PLX_THREAD Parent);
+VOID LxSeccompRelease(_Inout_ PLX_THREAD Thread);
+ULONG LxSeccompFilterCount(_In_ PLX_THREAD Thread);
+BOOLEAN LxSeccompCheck(_Inout_ PLX_CALL Call, _Out_ PLONG64 Result);
+LONG64 LxSeccompPrctl(_Inout_ PLX_CALL Call, _In_ BOOLEAN Set, _In_ ULONG64 Mode, _In_ ULONG64 Program);
 BOOLEAN LxSignalDeliverFault(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame, _In_ LONG Signal, _In_ PLX_SIGINFO Info);
 VOID LxThreadAttach(_In_ PLX_THREAD Thread);
 BOOLEAN LxThreadDetach(_In_ PLX_THREAD Thread);

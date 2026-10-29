@@ -22,6 +22,7 @@ list(APPEND SOURCE
     poll.c
     process.c
     procfs.c
+    seccomp.c
     signal.c
     socket.c
     sys.c

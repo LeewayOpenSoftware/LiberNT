@@ -580,6 +580,7 @@ LxThreadFree(
     if (Thread->SignalRetry != NULL)
         ExDeleteTimer(Thread->SignalRetry, TRUE, TRUE, NULL);
     LxNsThreadRelease(Thread);
+    LxSeccompRelease(Thread);
     LxCgroupTaskRemove(Process);
     LxProcessDereference(Process);
     LxFree(Thread);

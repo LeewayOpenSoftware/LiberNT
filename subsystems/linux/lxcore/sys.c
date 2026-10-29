@@ -84,7 +84,10 @@ LxSysCall(
 {
     PLX_SYSCALL_ENTRY Entry = LxArchSyscallEntry(Call->Number);
     ULONG Trace = Call->Process->Trace;
-    LONG64 Start;
+    LONG64 Start, Verdict;
+
+    if ((Call->Thread->SeccompMode != 0) && !LxSeccompCheck(Call, &Verdict))
+        return Verdict;
 
     if ((Entry != NULL) && (Entry->Handler != NULL))
     {
@@ -2230,6 +2233,7 @@ LxCreateThread(
         return Error;
     }
     LxNsThreadInherit(Thread, Call->Thread);
+    LxSeccompInherit(Thread, Call->Thread);
     Tid = LxTidNr(Call->Process, Thread);
     Thread->Tls = (Request->Flags & LX_CLONE_SETTLS) ? Request->Tls : LxArchGetThreadPointer(Call->TrapFrame);
     Thread->SigMask = Call->Thread->SigMask;
@@ -2352,6 +2356,7 @@ LxForkProcess(
     Thread->Tls = (Request->Flags & LX_CLONE_SETTLS) ? Request->Tls : LxArchGetThreadPointer(Call->TrapFrame);
     Thread->SigMask = Call->Thread->SigMask;
     LxSchedInherit(Thread, Call->Thread);
+    LxSeccompInherit(Thread, Call->Thread);
     if ((Request->Flags & (LX_CLONE_VM | LX_CLONE_VFORK)) != LX_CLONE_VM)
         Thread->AltStack = Call->Thread->AltStack;
     RtlCopyMemory(Thread->Comm, Call->Thread->Comm, sizeof(Thread->Comm));
@@ -3665,7 +3670,7 @@ LX_SYSCALL(LxSysPrctl)
 
         case LX_PR_GET_SECCOMP:
         case LX_PR_SET_SECCOMP:
-            return -LX_EINVAL;
+            return LxSeccompPrctl(Call, Option == LX_PR_SET_SECCOMP, Arg, Call->Args[2]);
 
         case LX_PR_SET_MM:
             return LxPrctlSetMm(Process, (ULONG)Arg, Call->Args[2], Call->Args[3], Call->Args[4]);

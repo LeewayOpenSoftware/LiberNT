@@ -246,7 +246,7 @@ static LX_SYSCALL_ENTRY LxGenericSyscalls[] =
     LX_ENTRY(274, LxSysSchedSetattr, "sched_setattr"),
     LX_ENTRY(275, LxSysSchedGetattr, "sched_getattr"),
     LX_ENTRY(276, LxSysRenameat2, "renameat2"),
-    LX_ENTRY(277, NULL, "seccomp"),
+    LX_ENTRY(277, LxSysSeccomp, "seccomp"),
     LX_ENTRY(278, LxSysGetrandom, "getrandom"),
     LX_ENTRY(279, LxSysMemfdCreate, "memfd_create"),
     LX_ENTRY(280, LxSysBpf, "bpf"),
