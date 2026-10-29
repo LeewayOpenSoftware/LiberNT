@@ -96,6 +96,28 @@ IntTopLevelWindowFromPoint(INT x, INT y)
     return pwndDesktop;
 }
 
+static VOID FASTCALL
+MsqRemoveSkippedHardwareMessage(PTHREADINFO pti)
+{
+    PUSER_MESSAGE_QUEUE MessageQueue = pti->MessageQueue;
+    PLIST_ENTRY Entry;
+    PUSER_MESSAGE Message;
+    DWORD QS_Flags;
+
+    for (Entry = MessageQueue->HardwareMessagesListHead.Flink;
+         Entry != &MessageQueue->HardwareMessagesListHead;
+         Entry = Entry->Flink)
+    {
+        Message = CONTAINING_RECORD(Entry, USER_MESSAGE, ListEntry);
+        if ((ULONG_PTR)Message != MessageQueue->idSysPeek)
+            continue;
+        QS_Flags = Message->QS_Flags;
+        MsqDestroyMessage(Message);
+        ClearMsgBitsMask(pti, QS_Flags);
+        return;
+    }
+}
+
 static PWND FASTCALL
 IntInputWindowFromPoint(PWND pWnd, INT x, INT y)
 {
@@ -1896,6 +1918,7 @@ BOOL co_IntProcessMouseMessage(MSG* msg, BOOL* RemoveMessages, BOOL* NotForUs, L
         hook.hwnd         = msg->hwnd;
         hook.wHitTestCode = hittest;
         hook.dwExtraInfo  = ExtraInfo;
+        MsqRemoveSkippedHardwareMessage(pti);
         co_HOOK_CallHooks( WH_CBT, HCBT_CLICKSKIPPED, message, (LPARAM)&hook );
 
         ERR("WH_MOUSE dropped mouse message!\n");
@@ -2072,6 +2095,7 @@ BOOL co_IntProcessKeyboardMessage(MSG* Msg, BOOL* RemoveMessages)
                            Msg->lParam))
     {
         /* skip this message */
+        MsqRemoveSkippedHardwareMessage(pti);
         co_HOOK_CallHooks( WH_CBT,
                            HCBT_KEYSKIPPED,
                            LOWORD(Msg->wParam),
