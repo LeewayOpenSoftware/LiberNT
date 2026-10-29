@@ -800,6 +800,7 @@ NtUserSendInput(
 {
     PTHREADINFO pti;
     UINT uRet = 0;
+    UINT i;
 
     TRACE("Enter NtUserSendInput\n");
     UserEnterExclusive();
@@ -829,6 +830,24 @@ NtUserSendInput(
         goto cleanup;
     }
 
+    for (i = 0; i < nInputs; i++)
+    {
+        DWORD Type;
+        NTSTATUS Status;
+
+        Status = MmCopyFromCaller(&Type, &pInput[i].type, sizeof(Type));
+        if (!NT_SUCCESS(Status))
+        {
+            SetLastNtError(Status);
+            goto cleanup;
+        }
+        if (Type == INPUT_HARDWARE)
+        {
+            EngSetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+            goto cleanup;
+        }
+    }
+
     while (nInputs--)
     {
         INPUT SafeInput;
@@ -851,11 +870,8 @@ NtUserSendInput(
                 if (UserSendKeyboardInput(&SafeInput.ki, TRUE))
                     uRet++;
                 break;
-            case INPUT_HARDWARE:
-                FIXME("INPUT_HARDWARE not supported!\n");
-                break;
             default:
-                ERR("SendInput(): Invalid input type: 0x%x\n", SafeInput.type);
+                uRet++;
                 break;
         }
     }
