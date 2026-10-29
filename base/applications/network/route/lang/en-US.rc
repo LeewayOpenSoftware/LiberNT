@@ -63,4 +63,9 @@ Examples:\n\
     IDS_ROUTES_HEADER "Network Destination        Netmask          Gateway        Interface  Metric\n"
     IDS_PERSISTENT_HEADER "Network Destination        Netmask          Gateway    Metric\n"
     IDS_NONE "  None\n"
+    IDS_IPV6_ROUTE_TABLE "\nIPv6 Route Table\n"
+    IDS_ROUTES6_HEADER " If Metric Network Destination      Gateway\n"
+    IDS_ROUTES6_ENTRY "%3lu %6lu %-24s %s\n"
+    IDS_ROUTES6_LONG_ENTRY "%3lu %6lu %s\n                                    %s\n"
+    IDS_ONLINK "On-link"
 END

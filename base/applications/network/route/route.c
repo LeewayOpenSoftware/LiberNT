@@ -22,17 +22,24 @@
 #include <winsock2.h>
 #include <iphlpapi.h>
 #include <ws2tcpip.h>
+#include <netioapi.h>
 #include <ip2string.h>
 
 #include <conutils.h>
 
 #include "resource.h"
 
+#ifndef NT_SUCCESS
+#define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
+#endif
+
 #define IPBUF 17
 #define IN_ADDR_OF(x) *((struct in_addr *)&(x))
 
 #define DELETE_FLAG       0x1
 #define PERSISTENT_FLAG   0x2
+#define IPV4_ONLY_FLAG    0x4
+#define IPV6_ONLY_FLAG    0x8
 
 static
 BOOL
@@ -347,7 +354,8 @@ CompareAdapters(
 static
 DWORD
 PrintActiveRoutes(
-    _In_ PWSTR DestinationPattern)
+    _In_ PWSTR DestinationPattern,
+    _In_ BOOL ShowIpv4)
 {
     PMIB_IPFORWARDTABLE IpForwardTable = NULL;
     PIP_ADAPTER_ADDRESSES pAdapterAddresses = NULL, Ptr, *pAdapterSortArray = NULL;
@@ -436,6 +444,9 @@ PrintActiveRoutes(
         }
         ConResPrintf(StdOut, IDS_SEPARATOR);
 
+        if (!ShowIpv4)
+            goto Error;
+
         ConResPrintf(StdOut, IDS_IPV4_ROUTE_TABLE);
         ConResPrintf(StdOut, IDS_SEPARATOR);
         ConResPrintf(StdOut, IDS_ACTIVE_ROUTES);
@@ -446,6 +457,8 @@ PrintActiveRoutes(
             mbstowcs(Netmask, inet_ntoa(IN_ADDR_OF(IpForwardTable->table[i].dwForwardMask)), IPBUF);
             mbstowcs(Gateway, inet_ntoa(IN_ADDR_OF(IpForwardTable->table[i].dwForwardNextHop)), IPBUF);
             GetFirstIPv4AddressFromIndex(Interface, pAdapterAddresses, IpForwardTable->table[i].dwForwardIfIndex);
+            if (!wcscmp(Gateway, Interface))
+                K32LoadStringW(GetModuleHandleW(NULL), IDS_ONLINK, Gateway, ARRAYSIZE(Gateway));
 
             if (MatchWildcard(Destination, DestinationPattern))
             {
@@ -491,6 +504,220 @@ Error:
 }
 
 static
+VOID
+FormatIpv6Prefix(
+    _Out_writes_(Count) PWSTR Buffer,
+    _In_ SIZE_T Count,
+    _In_ const IN6_ADDR *Address,
+    _In_ UINT8 PrefixLength)
+{
+    WCHAR Text[INET6_ADDRSTRLEN];
+
+    RtlIpv6AddressToStringW(Address, Text);
+    _snwprintf(Buffer, Count, L"%s/%u", Text, PrefixLength);
+    Buffer[Count - 1] = UNICODE_NULL;
+}
+
+static
+DWORD
+PrintActiveRoutes6(
+    _In_ PWSTR DestinationPattern)
+{
+    PMIB_IPFORWARD_TABLE2 Table = NULL;
+    WCHAR Destination[64], Gateway[INET6_ADDRSTRLEN], OnLink[32];
+    BOOL EntriesFound = FALSE;
+    DWORD Error;
+    ULONG i;
+
+    Error = GetIpForwardTable2(AF_INET6, &Table);
+    if (Error != NO_ERROR)
+    {
+        ConResPrintf(StdErr, IDS_ROUTE_ENUM_ERROR);
+        return Error;
+    }
+
+    K32LoadStringW(GetModuleHandleW(NULL), IDS_ONLINK, OnLink, ARRAYSIZE(OnLink));
+    ConResPrintf(StdOut, IDS_IPV6_ROUTE_TABLE);
+    ConResPrintf(StdOut, IDS_SEPARATOR);
+    ConResPrintf(StdOut, IDS_ACTIVE_ROUTES);
+
+    for (i = 0; i < Table->NumEntries; i++)
+    {
+        PMIB_IPFORWARD_ROW2 Row = &Table->Table[i];
+        MIB_IPINTERFACE_ROW Interface;
+        ULONG Metric = Row->Metric;
+
+        FormatIpv6Prefix(Destination, ARRAYSIZE(Destination), &Row->DestinationPrefix.Prefix.Ipv6.sin6_addr,
+                         Row->DestinationPrefix.PrefixLength);
+        if (!MatchWildcard(Destination, DestinationPattern))
+            continue;
+
+        InitializeIpInterfaceEntry(&Interface);
+        Interface.Family = AF_INET6;
+        Interface.InterfaceIndex = Row->InterfaceIndex;
+        if (GetIpInterfaceEntry(&Interface) == NO_ERROR)
+            Metric += Interface.Metric;
+
+        if (IN6_IS_ADDR_UNSPECIFIED(&Row->NextHop.Ipv6.sin6_addr))
+            wcscpy(Gateway, OnLink);
+        else
+            RtlIpv6AddressToStringW(&Row->NextHop.Ipv6.sin6_addr, Gateway);
+
+        if (EntriesFound == FALSE)
+            ConResPrintf(StdOut, IDS_ROUTES6_HEADER);
+        ConResPrintf(StdOut, wcslen(Destination) > 24 ? IDS_ROUTES6_LONG_ENTRY : IDS_ROUTES6_ENTRY,
+                     Row->InterfaceIndex, Metric, Destination, Gateway);
+        EntriesFound = TRUE;
+    }
+
+    if (EntriesFound == FALSE)
+        ConResPrintf(StdOut, IDS_NONE);
+    ConResPrintf(StdOut, IDS_SEPARATOR);
+    ConResPrintf(StdOut, IDS_PERSISTENT_ROUTES);
+    ConResPrintf(StdOut, IDS_NONE);
+
+    FreeMibTable(Table);
+    return NO_ERROR;
+}
+
+static
+BOOL
+ParseIpv6Prefix(
+    _In_ PCWSTR String,
+    _Out_ PIN6_ADDR Address,
+    _Out_ PUINT8 PrefixLength)
+{
+    WCHAR Copy[64];
+    PWSTR Slash;
+    PCWSTR Terminator;
+    ULONG Length = 128;
+
+    if (wcslen(String) >= ARRAYSIZE(Copy))
+        return FALSE;
+    wcscpy(Copy, String);
+    Slash = wcschr(Copy, L'/');
+    if (Slash)
+    {
+        *Slash++ = UNICODE_NULL;
+        Length = wcstoul(Slash, NULL, 10);
+        if (Length > 128)
+            return FALSE;
+    }
+    if (!NT_SUCCESS(RtlIpv6StringToAddressW(Copy, &Terminator, Address)) || *Terminator)
+        return FALSE;
+    *PrefixLength = (UINT8)Length;
+    return TRUE;
+}
+
+static
+int
+AddRoute6(
+    _In_ int argc,
+    _In_ WCHAR **argv,
+    _In_ int start,
+    _In_ int flags)
+{
+    MIB_IPFORWARD_ROW2 Row;
+    PCWSTR Terminator;
+    DWORD Error;
+    int i;
+
+    if (flags & PERSISTENT_FLAG)
+    {
+        ConResPrintf(StdErr, IDS_ROUTE_ADD_ERROR);
+        return 2;
+    }
+
+    InitializeIpForwardEntry(&Row);
+    Row.DestinationPrefix.Prefix.Ipv6.sin6_family = AF_INET6;
+    if (!ParseIpv6Prefix(argv[start], &Row.DestinationPrefix.Prefix.Ipv6.sin6_addr, &Row.DestinationPrefix.PrefixLength))
+        return 1;
+    Row.NextHop.Ipv6.sin6_family = AF_INET6;
+
+    for (i = start + 1; i < argc; i++)
+    {
+        if (!_wcsicmp(argv[i], L"metric") && i + 1 < argc)
+            Row.Metric = wcstoul(argv[++i], NULL, 10);
+        else if (!_wcsicmp(argv[i], L"if") && i + 1 < argc)
+            Row.InterfaceIndex = wcstoul(argv[++i], NULL, 10);
+        else if (!NT_SUCCESS(RtlIpv6StringToAddressW(argv[i], &Terminator, &Row.NextHop.Ipv6.sin6_addr)) || *Terminator)
+            return 1;
+    }
+
+    if (!Row.InterfaceIndex)
+    {
+        SOCKADDR_IN6 Target = Row.NextHop.Ipv6;
+
+        if (IN6_IS_ADDR_UNSPECIFIED(&Target.sin6_addr) || IN6_IS_ADDR_LINKLOCAL(&Target.sin6_addr) ||
+            GetBestInterfaceEx((PSOCKADDR)&Target, &Row.InterfaceIndex) != NO_ERROR)
+        {
+            ConResPrintf(StdErr, IDS_ROUTE_ADD_ERROR);
+            return 2;
+        }
+    }
+
+    Error = CreateIpForwardEntry2(&Row);
+    if (Error != NO_ERROR)
+    {
+        ConResPrintf(StdErr, IDS_ROUTE_ADD_ERROR);
+        return 2;
+    }
+    return 0;
+}
+
+static
+int
+DeleteRoutes6(
+    _In_ int argc,
+    _In_ WCHAR **argv,
+    _In_ int start)
+{
+    PMIB_IPFORWARD_TABLE2 Table = NULL;
+    IN6_ADDR Prefix, Gateway;
+    UINT8 PrefixLength;
+    PCWSTR Terminator;
+    BOOL HaveGateway = FALSE, Deleted = FALSE;
+    DWORD Error = NO_ERROR;
+    ULONG i;
+
+    if (!ParseIpv6Prefix(argv[start], &Prefix, &PrefixLength))
+        return 1;
+    if (argc > start + 1)
+    {
+        if (!NT_SUCCESS(RtlIpv6StringToAddressW(argv[start + 1], &Terminator, &Gateway)) || *Terminator)
+            return 1;
+        HaveGateway = TRUE;
+    }
+
+    if (GetIpForwardTable2(AF_INET6, &Table) != NO_ERROR)
+    {
+        ConResPrintf(StdErr, IDS_ROUTE_DEL_ERROR);
+        return 2;
+    }
+    for (i = 0; i < Table->NumEntries; i++)
+    {
+        PMIB_IPFORWARD_ROW2 Row = &Table->Table[i];
+
+        if (Row->DestinationPrefix.PrefixLength != PrefixLength ||
+            memcmp(&Row->DestinationPrefix.Prefix.Ipv6.sin6_addr, &Prefix, sizeof(Prefix)) ||
+            (HaveGateway && memcmp(&Row->NextHop.Ipv6.sin6_addr, &Gateway, sizeof(Gateway))))
+            continue;
+        Error = DeleteIpForwardEntry2(Row);
+        if (Error != NO_ERROR)
+            break;
+        Deleted = TRUE;
+    }
+    FreeMibTable(Table);
+
+    if (Error != NO_ERROR || !Deleted)
+    {
+        ConResPrintf(StdErr, IDS_ROUTE_DEL_ERROR);
+        return 2;
+    }
+    return 0;
+}
+
+static
 int
 PrintRoutes(
     _In_ int argc,
@@ -499,18 +726,28 @@ PrintRoutes(
     _In_ int flags)
 {
     PWSTR DestinationPattern = NULL;
+    BOOL ShowIpv4 = !(flags & IPV6_ONLY_FLAG), ShowIpv6 = !(flags & IPV4_ONLY_FLAG);
     DWORD Error;
 
-    while (argc > start && (argv[start][0] == L'-' || argv[start][0] == L'/') && !_wcsicmp(&argv[start][1], L"4"))
+    while (argc > start && (argv[start][0] == L'-' || argv[start][0] == L'/') &&
+           (!_wcsicmp(&argv[start][1], L"4") || !_wcsicmp(&argv[start][1], L"6")))
+    {
+        if (!_wcsicmp(&argv[start][1], L"4"))
+            ShowIpv6 = FALSE;
+        else
+            ShowIpv4 = FALSE;
         start++;
+    }
 
     if (argc > start)
         ParseCmdLine(argc, argv, start, 
                      &DestinationPattern, NULL, NULL, NULL);
 
-    Error = PrintActiveRoutes(DestinationPattern);
-    if (Error == ERROR_SUCCESS)
+    Error = PrintActiveRoutes(DestinationPattern, ShowIpv4);
+    if (Error == ERROR_SUCCESS && ShowIpv4)
         Error = PrintPersistentRoutes(DestinationPattern);
+    if (Error == ERROR_SUCCESS && ShowIpv6)
+        Error = PrintActiveRoutes6(DestinationPattern);
 
     return (Error == ERROR_SUCCESS) ? 0 : 2;
 }
@@ -551,6 +788,13 @@ ConvertAddCmdLine(
                 return FALSE;
             RowToAdd->dwForwardMetric1 = _wtoi(argv[i]);
         }
+        else if (!_wcsicmp(argv[i], L"if"))
+        {
+            i++;
+            if (i >= argc)
+                return FALSE;
+            RowToAdd->dwForwardIfIndex = wcstoul(argv[i], NULL, 0);
+        }
         else
         {
             wcstombs(addr, argv[i], 16);
@@ -563,6 +807,10 @@ ConvertAddCmdLine(
         RowToAdd->dwForwardMetric1 = 1;
     else if (RowToAdd->dwForwardMetric1 > 9999)
         RowToAdd->dwForwardMetric1 = 9999;
+
+    if (!RowToAdd->dwForwardIfIndex &&
+        GetBestInterface(RowToAdd->dwForwardNextHop, &RowToAdd->dwForwardIfIndex) != NO_ERROR)
+        return FALSE;
 
     return TRUE;
 }
@@ -662,6 +910,9 @@ AddRoute(
 {
     MIB_IPFORWARDROW RowToAdd = { 0 };
     DWORD Error;
+
+    if (argc > start && wcschr(argv[start], L':'))
+        return AddRoute6(argc, argv, start, flags);
 
     if ((argc <= start) || !ConvertAddCmdLine(&RowToAdd, argc, argv, start))
         return 1;
@@ -797,6 +1048,9 @@ DeleteRoutes(
     PWSTR DestinationPattern = NULL;
     DWORD Error;
 
+    if (argc > start && wcschr(argv[start], L':'))
+        return DeleteRoutes6(argc, argv, start);
+
     if ((argc <= start) ||
         !ParseCmdLine(argc, argv, start, 
                       &DestinationPattern, NULL, NULL, NULL))
@@ -842,7 +1096,11 @@ wmain(
             }
             else if (!_wcsicmp(&argv[i][1], L"4"))
             {
-                continue;
+                flags |= IPV4_ONLY_FLAG;
+            }
+            else if (!_wcsicmp(&argv[i][1], L"6"))
+            {
+                flags |= IPV6_ONLY_FLAG;
             }
             else
             {
