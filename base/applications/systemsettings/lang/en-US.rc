@@ -772,4 +772,5 @@ BEGIN
     IDS_DRIVER_NEED_REBOOT "restart required"
     IDS_DRIVERS_HISTORY "Driver install history"
     IDS_DRIVER_SERVICE_UNAVAILABLE "The driver install service is unavailable."
+    IDS_DRIVER_STATUS_ROLLBACK_PROBLEM "Rolled back, but the device still reports a problem (code %lu)"
 END

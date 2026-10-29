@@ -772,4 +772,5 @@ BEGIN
     IDS_DRIVER_NEED_REBOOT "requiere reinicio"
     IDS_DRIVERS_HISTORY "Historial de instalación de controladores"
     IDS_DRIVER_SERVICE_UNAVAILABLE "El servicio de instalación de controladores no está disponible."
+    IDS_DRIVER_STATUS_ROLLBACK_PROBLEM "Revertido, pero el dispositivo aún reporta un problema (código %lu)"
 END

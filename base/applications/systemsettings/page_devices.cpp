@@ -520,6 +520,8 @@ struct DrvJobEntry
     bool Finished = false;
 };
 
+/* newdev.dll is cached for the process lifetime; it is never freed while a
+ * submitted job can still be running in the service. */
 static HMODULE g_drvInstModule;
 static bool g_drvInstTried;
 static PFN_DRVINST_SUBMIT g_drvInstSubmit;
@@ -555,12 +557,14 @@ PollDriverJobs(void)
     {
         DrvJobEntry &entry = pair.second;
         DRVINST_JOB_INFO info;
+        DWORD err;
 
         if (entry.Finished)
             continue;
         ZeroMemory(&info, sizeof(info));
         info.Size = sizeof(info);
-        if (g_drvInstGetJob(entry.Id, &info) == ERROR_SUCCESS)
+        err = g_drvInstGetJob(entry.Id, &info);
+        if (err == ERROR_SUCCESS)
         {
             entry.State = info.State;
             entry.Win32 = info.Result.Win32;
@@ -574,7 +578,7 @@ PollDriverJobs(void)
         else
         {
             entry.State = 3;
-            entry.Win32 = GetLastError();
+            entry.Win32 = err;
             entry.Finished = true;
         }
     }
@@ -587,6 +591,7 @@ AutoSearchDriver(const std::wstring &id)
     auto existing = g_driverJobs.find(id);
     DRVINST_JOB_ID job = 0;
     DrvJobEntry entry;
+    DWORD err;
 
     if (!DrvInstAvailable())
         return;
@@ -598,10 +603,11 @@ AutoSearchDriver(const std::wstring &id)
     entry.Problem = 0;
     entry.Flags = 0;
     entry.Finished = false;
-    if (g_drvInstSubmit(id.c_str(), DRVINST_F_SILENT, &job) != ERROR_SUCCESS)
+    err = g_drvInstSubmit(id.c_str(), DRVINST_F_SILENT, &job);
+    if (err != ERROR_SUCCESS)
     {
         entry.State = 3;
-        entry.Win32 = GetLastError();
+        entry.Win32 = err;
         entry.Finished = true;
     }
     else
@@ -621,7 +627,12 @@ JobStatusText(const DrvJobEntry &entry)
         case 0: text = Str(IDS_DRIVER_STATUS_QUEUED); break;
         case 1: text = Str(IDS_DRIVER_STATUS_INSTALLING); break;
         case 2: text = Str(IDS_DRIVER_STATUS_SUCCEEDED); break;
-        case 3: text = Printf(Str(IDS_DRIVER_STATUS_FAILED).c_str(), entry.Win32); break;
+        case 3:
+            if (entry.Flags & DRVINST_RF_ROLLEDBACK)
+                text = Printf(Str(IDS_DRIVER_STATUS_ROLLBACK_PROBLEM).c_str(), entry.Problem);
+            else
+                text = Printf(Str(IDS_DRIVER_STATUS_FAILED).c_str(), entry.Win32);
+            break;
         case 4: text = Str(IDS_DRIVER_STATUS_TIMED_OUT); break;
         case 5: text = Str(IDS_DRIVER_STATUS_CANCELED); break;
         case DRVINST_JOB_STATE_ROLLED_BACK:
@@ -747,7 +758,7 @@ BuildDrivers(PageBuilder &page)
     SetupDiDestroyDeviceInfoList(set);
     BuildDriverJobHistory(page);
     if (active)
-        page.Host->SetTimerRefresh(500);
+        page.Host->SetTimerRefresh(1500);
 }
 
 void
