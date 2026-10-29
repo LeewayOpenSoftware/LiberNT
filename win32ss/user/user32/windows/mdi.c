@@ -735,7 +735,11 @@ static LONG MDI_ChildActivate( HWND client, HWND child )
     clientInfo->hwndActiveChild = child;
     if (child)
     {
+#ifdef __REACTOS__
+        if (IsZoomed(prevActiveWnd) && (GetWindowLongW(child, GWL_STYLE) & WS_MAXIMIZEBOX))
+#else
         if (IsZoomed(prevActiveWnd))
+#endif
             ShowWindow(child, SW_MAXIMIZE);
         SetWindowPos(child, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
@@ -1770,10 +1774,14 @@ LRESULT WINAPI DefMDIChildProcW( HWND hwnd, UINT message,
 
         if (wParam == SIZE_MINIMIZED)
         {
+#ifdef __REACTOS__
+            SendMessageW(hwnd, WM_CHILDACTIVATE, 0, 0);
+#else
             HWND switchTo = MDI_GetWindow(ci, hwnd, TRUE, WS_MINIMIZE);
 
             if (!switchTo) switchTo = hwnd;
             SendMessageW(switchTo, WM_CHILDACTIVATE, 0, 0);
+#endif
         }
 
         MDI_PostUpdate(client, ci, SB_BOTH+1);
