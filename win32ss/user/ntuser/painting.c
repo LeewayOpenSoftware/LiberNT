@@ -1319,7 +1319,7 @@ IntFlashWindowEx(PWND pWnd, PFLASHWINFO pfwi)
 {
    DWORD_PTR FlashState;
    UINT uCount = pfwi->uCount;
-   BOOL Activate = FALSE, Ret = FALSE;
+   BOOL Activate = FALSE, Ret = FALSE, bHavePrev = FALSE, bPrevActive = FALSE;
 
    ASSERT(pfwi);
 
@@ -1344,6 +1344,8 @@ IntFlashWindowEx(PWND pWnd, PFLASHWINFO pfwi)
          }
          else
          {
+             bHavePrev = TRUE;
+             bPrevActive = !!(FlashState & FLASHW_ACTIVE);
              // Clean out the trash! Fix SeaMonkey crash after restart.
              FlashState = 0;
          }
@@ -1359,7 +1361,7 @@ IntFlashWindowEx(PWND pWnd, PFLASHWINFO pfwi)
       }
 
       // Set previous window state.
-      Ret = !!(FlashState & FLASHW_ACTIVE);
+      Ret = bHavePrev ? bPrevActive : !!(FlashState & FLASHW_ACTIVE);
 
       if ( (pfwi->dwFlags & FLASHW_TIMERNOFG) == FLASHW_TIMERNOFG &&
            gpqForeground == pWnd->head.pti->MessageQueue )
