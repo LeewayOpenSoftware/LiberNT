@@ -69,6 +69,7 @@ list(APPEND SOURCE
     NcPaintRgn.c
     NextDlgItem.c
     NonClientPaint.c
+    OwnerDestroy.c
     PhysicalPoint.c
     PhysicalToLogicalPoint.c
     LogicalToPhysicalPoint.c

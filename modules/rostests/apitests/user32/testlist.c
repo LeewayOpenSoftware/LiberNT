@@ -69,6 +69,7 @@ extern void func_NestedWindowPos(void);
 extern void func_NcPaintRgn(void);
 extern void func_NextDlgItem(void);
 extern void func_NonClientPaint(void);
+extern void func_OwnerDestroy(void);
 extern void func_PhysicalPoint(void);
 extern void func_PhysicalToLogicalPoint(void);
 extern void func_LogicalToPhysicalPoint(void);
@@ -178,6 +179,7 @@ const struct test winetest_testlist[] =
     { "NcPaintRgn", func_NcPaintRgn },
     { "NextDlgItem", func_NextDlgItem },
     { "NonClientPaint", func_NonClientPaint },
+    { "OwnerDestroy", func_OwnerDestroy },
     { "PhysicalPoint", func_PhysicalPoint },
     { "PhysicalToLogicalPoint", func_PhysicalToLogicalPoint },
     { "LogicalToPhysicalPoint", func_LogicalToPhysicalPoint },
