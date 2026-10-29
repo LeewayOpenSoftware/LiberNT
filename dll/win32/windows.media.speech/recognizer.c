@@ -189,6 +189,7 @@ struct session
     CRITICAL_SECTION cs;
 #ifdef __REACTOS__
     LONG async_id;
+    BOOLEAN capture_unavailable;
 #endif
 };
 
@@ -355,8 +356,13 @@ static ULONG WINAPI session_Release( ISpeechContinuousRecognitionSession *iface 
         typed_event_handlers_clear(&impl->completed_handlers);
         typed_event_handlers_clear(&impl->result_handlers);
 
+#ifdef __REACTOS__
+        if (impl->capture_client) IAudioCaptureClient_Release(impl->capture_client);
+        if (impl->audio_client) IAudioClient_Release(impl->audio_client);
+#else
         IAudioCaptureClient_Release(impl->capture_client);
         IAudioClient_Release(impl->audio_client);
+#endif
 
         impl->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&impl->cs);
@@ -424,6 +430,13 @@ static HRESULT WINAPI session_StartAsync( ISpeechContinuousRecognitionSession *i
     {
         hr = COR_E_INVALIDOPERATION;
     }
+#ifdef __REACTOS__
+    else if (impl->capture_unavailable)
+    {
+        impl->worker_running = TRUE;
+        impl->recognizer_state = SpeechRecognizerState_Capturing;
+    }
+#endif
     else if (!(impl->worker_thread = CreateThread(NULL, 0, session_worker_thread_cb, impl, 0, NULL)))
     {
         hr = HRESULT_FROM_WIN32(GetLastError());
@@ -475,6 +488,16 @@ static HRESULT WINAPI session_StopAsync( ISpeechContinuousRecognitionSession *if
         return hr;
 
     EnterCriticalSection(&impl->cs);
+#ifdef __REACTOS__
+    thread = NULL;
+    if (impl->worker_running && impl->capture_unavailable)
+    {
+        impl->worker_running = FALSE;
+        impl->worker_paused = FALSE;
+        impl->recognizer_state = SpeechRecognizerState_Idle;
+    }
+    else
+#endif
     if (impl->worker_running && impl->worker_thread)
     {
         thread = impl->worker_thread;
@@ -488,6 +511,11 @@ static HRESULT WINAPI session_StopAsync( ISpeechContinuousRecognitionSession *if
         hr = COR_E_INVALIDOPERATION;
     }
     LeaveCriticalSection(&impl->cs);
+
+#ifdef __REACTOS__
+    if (SUCCEEDED(hr) && !thread)
+        return hr;
+#endif
 
     if (SUCCEEDED(hr))
     {
@@ -520,6 +548,14 @@ static HRESULT session_pause_async( IUnknown *invoker, IUnknown *param, PROPVARI
     return S_OK;
 }
 
+#ifdef __REACTOS__
+static HRESULT session_pause_aborted_async( IUnknown *invoker, IUnknown *param, PROPVARIANT *result, BOOL called_async )
+{
+    if (!called_async) return STATUS_PENDING;
+    return E_ABORT;
+}
+#endif
+
 static HRESULT WINAPI session_PauseAsync( ISpeechContinuousRecognitionSession *iface, IAsyncAction **action )
 {
     struct session *impl = impl_from_ISpeechContinuousRecognitionSession(iface);
@@ -530,6 +566,22 @@ static HRESULT WINAPI session_PauseAsync( ISpeechContinuousRecognitionSession *i
     *action = NULL;
 
 #ifdef __REACTOS__
+    EnterCriticalSection(&impl->cs);
+    if (!impl->worker_running)
+    {
+        LeaveCriticalSection(&impl->cs);
+        return COR_E_INVALIDOPERATION;
+    }
+    if (impl->capture_unavailable)
+    {
+        impl->worker_running = FALSE;
+        impl->worker_paused = FALSE;
+        impl->recognizer_state = SpeechRecognizerState_Idle;
+        LeaveCriticalSection(&impl->cs);
+        return async_action_create(NULL, session_pause_aborted_async, InterlockedIncrement(&impl->async_id), action);
+    }
+    LeaveCriticalSection(&impl->cs);
+
     if (FAILED(hr = async_action_create(NULL, session_pause_async, InterlockedIncrement(&impl->async_id), action)))
 #else
     if (FAILED(hr = async_action_create(NULL, session_pause_async, action)))
@@ -1177,8 +1229,22 @@ static HRESULT WINAPI recognizer_factory_Create( ISpeechRecognizerFactory *iface
     if (FAILED(hr = vector_inspectable_create(&constraints_iids, (IVector_IInspectable**)&session->constraints)))
         goto error;
 
+#ifdef __REACTOS__
+    if ((hr = recognizer_factory_create_audio_capture(session)) == HRESULT_FROM_WIN32(ERROR_NOT_FOUND))
+    {
+        TRACE("no audio capture endpoint, hr %#lx.\n", hr);
+        if (session->capture_client) IAudioCaptureClient_Release(session->capture_client);
+        if (session->audio_client) IAudioClient_Release(session->audio_client);
+        session->capture_client = NULL;
+        session->audio_client = NULL;
+        session->capture_unavailable = TRUE;
+    }
+    else if (FAILED(hr))
+        goto error;
+#else
     if (FAILED(hr = recognizer_factory_create_audio_capture(session)))
         goto error;
+#endif
 
     InitializeCriticalSectionEx(&session->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
     session->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": recognition_session.cs");
