@@ -203,7 +203,9 @@ co_IntSendDeactivateMessages(HWND hWndPrev, HWND hWnd, BOOL Clear)
    {
       UserRefObjectCo(WndPrev, &RefPrev);
 
-      if (co_IntSendMessage(hWndPrev, WM_NCACTIVATE, FALSE, lParam))
+      if (co_IntSendMessage(hWndPrev, WM_NCACTIVATE,
+                            MAKEWPARAM(FALSE, (hWnd && (WndPrev->style & WS_MINIMIZE)) ? 0x20 : 0),
+                            lParam))
       {
          USER_REFERENCE_ENTRY Ref;
          PWND Wnd = hWnd ? ValidateHwndNoErr(hWnd) : NULL;
