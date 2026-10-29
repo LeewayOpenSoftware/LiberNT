@@ -1486,12 +1486,16 @@ NTSTATUS NTAPI KdpWriteCrashDump(VOID)
 
     if (!KdpCrashDumpState.Initialized)
     {
-        /* TODO: the unsaved tail of lastboot.log is lost when no crash dump target is armed */
         Status = KdpCrashDumpInitializationStatus;
         if (NT_SUCCESS(Status))
             Status = STATUS_DEVICE_NOT_READY;
         KdpDisplayCrashDumpInitializationFailure(Status);
         KdpCaptureEarlyCrashDiagnostics();
+        BootLogStatus = KdpWriteBootLogAtCrash(NULL, NULL);
+        if (NT_SUCCESS(BootLogStatus))
+            InbvDisplayString("\r\nCrash log saved to lastboot.log on the boot volume.\r\n");
+        else if (BootLogStatus != STATUS_NOT_FOUND)
+            DbgPrint("KD: Boot log tail write failed with status 0x%08lx.\n", BootLogStatus);
         return Status;
     }
 
@@ -1774,6 +1778,8 @@ VOID NTAPI KdpPublishCrashDumpArtifacts(VOID)
 
 NTSTATUS NTAPI KdpWriteCrashDump(VOID)
 {
+    if (NT_SUCCESS(KdpWriteBootLogAtCrash(NULL, NULL)))
+        InbvDisplayString("\r\nCrash log saved to lastboot.log on the boot volume.\r\n");
     return STATUS_NOT_SUPPORTED;
 }
 

@@ -37,6 +37,8 @@ static LARGE_INTEGER KdpBootLogPartitionOffset;
 static ULONG KdpBootLogClusterSize;
 static ULONG KdpBootLogSectorSize;
 static PUCHAR KdpBootLogCrashBuffer;
+static ROS_STORAGE_DUMP_INTERFACE KdpBootLogStorage;
+static BOOLEAN KdpBootLogStorageReady;
 static KEVENT KdpBootLogWake;
 static KEVENT KdpBootLogStopped;
 static volatile BOOLEAN KdpBootLogStopping;
@@ -259,6 +261,30 @@ static NTSTATUS KdpBootLogQueryDevice(VOID)
     KdpBootLogSectorSize = SizeInfo.BytesPerSector;
     KdpBootLogClusterSize = SizeInfo.BytesPerSector * SizeInfo.SectorsPerAllocationUnit;
     KdpBootLogDevice = Device;
+
+    RtlZeroMemory(&KdpBootLogStorage, sizeof(KdpBootLogStorage));
+    KdpBootLogStorage.BytesPerSector = KdpBootLogSectorSize;
+    KeClearEvent(&Event);
+    Irp = IoBuildDeviceIoControlRequest(IOCTL_REACTOS_STORAGE_GET_DUMP_INTERFACE, Device, &KdpBootLogStorage, sizeof(KdpBootLogStorage), &KdpBootLogStorage, sizeof(KdpBootLogStorage), FALSE, &Event, &IoStatus);
+    if (Irp == NULL)
+        return STATUS_SUCCESS;
+    Status = IoCallDriver(Device, Irp);
+    if (Status == STATUS_PENDING)
+    {
+        KeWaitForSingleObject(&Event, Executive, KernelMode, FALSE, NULL);
+        Status = IoStatus.Status;
+    }
+    KdpBootLogStorageReady = NT_SUCCESS(Status) &&
+                             (KdpBootLogStorage.Version == ROS_STORAGE_DUMP_INTERFACE_VERSION) &&
+                             (KdpBootLogStorage.Size >= sizeof(KdpBootLogStorage)) &&
+                             (KdpBootLogStorage.Context != NULL) &&
+                             (KdpBootLogStorage.BytesPerSector == KdpBootLogSectorSize) &&
+                             (KdpBootLogStorage.MaximumTransferLength >= KdpBootLogSectorSize) &&
+                             (KdpBootLogStorage.Prepare != NULL) &&
+                             (KdpBootLogStorage.WriteRoutine != NULL) &&
+                             (KdpBootLogStorage.Flush != NULL);
+    if (!KdpBootLogStorageReady)
+        DPRINT1("KD: Boot log has no crash-time storage path of its own (0x%08lx)\n", Status);
     return STATUS_SUCCESS;
 }
 
@@ -291,7 +317,7 @@ static NTSTATUS KdpBootLogTranslate(_In_ PRETRIEVAL_POINTERS_BUFFER Extents, _In
     return STATUS_END_OF_FILE;
 }
 
-NTSTATUS NTAPI KdpWriteBootLogAtCrash(_In_ PROS_STORAGE_DUMP_INTERFACE Storage, _In_opt_ PFILE_OBJECT DumpFileObject)
+NTSTATUS NTAPI KdpWriteBootLogAtCrash(_In_opt_ PROS_STORAGE_DUMP_INTERFACE Storage, _In_opt_ PFILE_OBJECT DumpFileObject)
 {
     PKDP_BOOT_LOG_STATE State;
     PHYSICAL_ADDRESS PhysicalAddress;
@@ -308,14 +334,28 @@ NTSTATUS NTAPI KdpWriteBootLogAtCrash(_In_ PROS_STORAGE_DUMP_INTERFACE Storage, 
     NTSTATUS Status;
 
     State = KdpBootLogPublished;
-    if ((State == NULL) || (DumpFileObject == NULL))
+    if (State == NULL)
         return STATUS_NOT_FOUND;
 
-    Vpb = DumpFileObject->Vpb;
-    if ((Vpb == NULL) && (DumpFileObject->DeviceObject != NULL))
-        Vpb = DumpFileObject->DeviceObject->Vpb;
-    if ((Vpb == NULL) || (Vpb->RealDevice != KdpBootLogDevice) || (Storage->BytesPerSector != KdpBootLogSectorSize))
-        return STATUS_NOT_SUPPORTED;
+    if (Storage == NULL)
+    {
+        if (!KdpBootLogStorageReady)
+            return STATUS_NOT_SUPPORTED;
+        Storage = &KdpBootLogStorage;
+        Status = Storage->Prepare(Storage->Context);
+        if (!NT_SUCCESS(Status))
+            return Status;
+    }
+    else
+    {
+        if (DumpFileObject == NULL)
+            return STATUS_NOT_FOUND;
+        Vpb = DumpFileObject->Vpb;
+        if ((Vpb == NULL) && (DumpFileObject->DeviceObject != NULL))
+            Vpb = DumpFileObject->DeviceObject->Vpb;
+        if ((Vpb == NULL) || (Vpb->RealDevice != KdpBootLogDevice) || (Storage->BytesPerSector != KdpBootLogSectorSize))
+            return STATUS_NOT_SUPPORTED;
+    }
     if (State->ReserveEnd <= State->Written)
         return STATUS_DISK_FULL;
 

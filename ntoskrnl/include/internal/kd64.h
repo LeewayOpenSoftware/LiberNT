@@ -148,7 +148,7 @@ VOID NTAPI KdpPublishCrashDumpArtifacts(VOID);
 
 struct _ROS_STORAGE_DUMP_INTERFACE;
 
-NTSTATUS NTAPI KdpWriteBootLogAtCrash(_In_ struct _ROS_STORAGE_DUMP_INTERFACE *Storage, _In_opt_ PFILE_OBJECT DumpFileObject);
+NTSTATUS NTAPI KdpWriteBootLogAtCrash(_In_opt_ struct _ROS_STORAGE_DUMP_INTERFACE *Storage, _In_opt_ PFILE_OBJECT DumpFileObject);
 
 NTSTATUS NTAPI KdpWriteCrashDump(VOID);
 
