@@ -474,6 +474,7 @@ struct saxreader
     struct saxlocator *locator;
     int line;
     int column;
+    bool no_dispatch;
 #endif
 };
 
@@ -6584,6 +6585,12 @@ static HRESULT WINAPI saxxmlreader_QueryInterface(IVBSAXXMLReader *iface, REFIID
 
     *obj = NULL;
 
+#ifdef __REACTOS__
+    if (reader->no_dispatch && (IsEqualGUID(riid, &IID_IDispatch) ||
+            IsEqualGUID(riid, &IID_IDispatchEx) || IsEqualGUID(riid, &IID_IVBSAXXMLReader)))
+        return E_NOINTERFACE;
+#endif
+
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IDispatch) ||
         IsEqualGUID(riid, &IID_IVBSAXXMLReader))
@@ -7227,6 +7234,22 @@ HRESULT SAXXMLReader_create(MSXML_VERSION version, void **obj)
 
     return hr;
 }
+
+#ifdef __REACTOS__
+HRESULT SAXXMLReader_create_iid(MSXML_VERSION version, REFIID riid, void **obj)
+{
+    struct saxreader *reader;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = SAXXMLReader_create(version, obj)))
+    {
+        reader = impl_from_IVBSAXXMLReader(*obj);
+        reader->no_dispatch = version == MSXML4 && IsEqualGUID(riid, &IID_ISAXXMLReader);
+    }
+
+    return hr;
+}
+#endif
 
 /* Fixed size buffer variant, to be used without markup. */
 static void saxreader_parse_xmldecl_body(struct saxlocator *locator)

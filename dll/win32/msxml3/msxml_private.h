@@ -606,6 +606,9 @@ extern IXMLDOMParseError *create_parseError( LONG code, BSTR url, BSTR reason, B
 extern HRESULT SchemaCache_create(MSXML_VERSION, void**);
 extern HRESULT XMLDocument_create(void**);
 extern HRESULT SAXXMLReader_create(MSXML_VERSION, void**);
+#ifdef __REACTOS__
+extern HRESULT SAXXMLReader_create_iid(MSXML_VERSION, REFIID, void**);
+#endif
 extern HRESULT SAXAttributes_create(MSXML_VERSION, void**);
 extern HRESULT XMLHTTPRequest_create(void **);
 extern HRESULT ServerXMLHTTP_create(void **);

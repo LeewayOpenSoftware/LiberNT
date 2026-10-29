@@ -259,6 +259,11 @@ static HRESULT WINAPI DOMClassFactory_CreateInstance(
     if (pOuter)
         return CLASS_E_NOAGGREGATION;
 
+#ifdef __REACTOS__
+    if (This->pCreateInstance == SAXXMLReader_create)
+        r = SAXXMLReader_create_iid( This->version, riid, (void**) &punk );
+    else
+#endif
     r = This->pCreateInstance( This->version, (void**) &punk );
     if (FAILED(r))
         return r;
