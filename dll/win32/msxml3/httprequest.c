@@ -1533,8 +1533,16 @@ static HRESULT WINAPI XMLHTTPRequest_getAllResponseHeaders(IXMLHTTPRequest *ifac
 static HRESULT WINAPI XMLHTTPRequest_send(IXMLHTTPRequest *iface, VARIANT body)
 {
     httprequest *This = impl_from_IXMLHTTPRequest( iface );
+#ifdef __REACTOS__
+    HRESULT hr;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&body));
+    hr = httprequest_send(This, body);
+    return hr == HRESULT_FROM_WIN32(ERROR_INTERNET_NAME_NOT_RESOLVED) ? INET_E_RESOURCE_NOT_FOUND : hr;
+#else
     TRACE("(%p)->(%s)\n", This, debugstr_variant(&body));
     return httprequest_send(This, body);
+#endif
 }
 
 static HRESULT WINAPI XMLHTTPRequest_abort(IXMLHTTPRequest *iface)
