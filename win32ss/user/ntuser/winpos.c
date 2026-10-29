@@ -2569,14 +2569,14 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
        {
            PWND Parent = Window->spwndParent;
            if (!Parent || UserIsDesktopWindow(Parent)) Parent = Window;
-           UserSyncAndPaintWindows( Parent, RDW_ERASENOW);
+           UserSyncAndPaintWindows( Parent, RDW_ERASENOW | RDW_CLIPCHILDREN);
        }
 
        /* Give newly shown windows a chance to redraw */
        if(((WinPos.flags & SWP_AGG_STATUSFLAGS) != SWP_AGG_NOPOSCHANGE)
                 && !(flags & SWP_AGG_NOCLIENTCHANGE) && (flags & SWP_SHOWWINDOW))
        {
-           UserSyncAndPaintWindows( Window, RDW_ERASENOW);
+           UserSyncAndPaintWindows( Window, RDW_ERASENOW | RDW_CLIPCHILDREN);
        }
    }
 
