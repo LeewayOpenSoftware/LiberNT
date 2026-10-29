@@ -4101,7 +4101,11 @@ static void saxreader_stringify_entity(struct saxlocator *locator, struct string
 
 /* [10] AttValue ::= '"' ([^<&"] | Reference)* '"'
         |  "'" ([^<&'] | Reference)* "'" */
+#ifdef __REACTOS__
+static BSTR saxreader_parse_attvalue_eof(struct saxlocator *locator, HRESULT eof_error)
+#else
 static BSTR saxreader_parse_attvalue(struct saxlocator *locator)
+#endif
 {
     struct string_buffer buffer = { 0 };
     struct text_position position;
@@ -4177,7 +4181,11 @@ static BSTR saxreader_parse_attvalue(struct saxlocator *locator)
                 ch = *saxreader_get_ptr_noread(locator);
                 if (!ch)
                 {
+#ifdef __REACTOS__
+                    saxreader_set_error(locator, eof_error);
+#else
                     saxreader_set_error(locator, E_SAX_BADCHARINSTRING);
+#endif
                     break;
                 }
                 saxreader_string_append(locator, &buffer, &ch, 1);
@@ -4193,6 +4201,12 @@ static BSTR saxreader_parse_attvalue(struct saxlocator *locator)
 
     return saxreader_string_to_bstr(locator, &buffer);
 }
+#ifdef __REACTOS__
+static BSTR saxreader_parse_attvalue(struct saxlocator *locator)
+{
+    return saxreader_parse_attvalue_eof(locator, E_SAX_BADCHARINSTRING);
+}
+#endif
 
 static bool saxreader_add_namespace_attribute(struct saxlocator *locator, struct element *element,
         struct parsed_name *name, BSTR value)
@@ -4219,7 +4233,11 @@ static void saxreader_parse_attribute(struct saxlocator *locator, struct element
     if (!saxreader_cmp(locator, L"="))
         saxreader_set_error(locator, E_SAX_MISSINGEQUALS);
     saxreader_skipspaces(locator);
+#ifdef __REACTOS__
+    value = saxreader_parse_attvalue_eof(locator, E_SAX_UNCLOSEDSTRING);
+#else
     value = saxreader_parse_attvalue(locator);
+#endif
 
     ns = saxreader_add_namespace_attribute(locator, element, &name, value);
     saxreader_add_attribute(locator, &name, value, ns);
@@ -4336,6 +4354,13 @@ static void saxreader_parse_starttag(struct saxlocator *locator)
     struct element *element;
     struct parsed_name name;
 
+#ifdef __REACTOS__
+    if (!*saxreader_get_ptr(locator))
+        return saxreader_set_error(locator, E_SAX_MISSINGROOT);
+
+    if (saxreader_peek(locator, L"</", 2))
+        return saxreader_set_error(locator, E_SAX_UNEXPECTEDENDTAG);
+#endif
     if (!saxreader_cmp(locator, L"<"))
         return saxreader_set_error(locator, E_SAX_INVALIDATROOTLEVEL);
 
@@ -4357,6 +4382,13 @@ static void saxreader_parse_starttag(struct saxlocator *locator)
     {
         saxreader_skipspaces(locator);
 
+#ifdef __REACTOS__
+        if (!*saxreader_get_ptr(locator))
+        {
+            saxreader_set_error(locator, E_SAX_UNCLOSEDSTARTTAG);
+            break;
+        }
+#endif
         if (saxreader_cmp(locator, L"/>"))
         {
             empty_element = true;
@@ -4571,7 +4603,11 @@ static void saxreader_parse_comment(struct saxlocator *locator)
     }
 
     free(buffer.data);
+#ifdef __REACTOS__
+    saxreader_set_error(locator, E_SAX_UNCLOSEDCOMMENT);
+#else
     saxreader_set_error(locator, E_SAX_UNEXPECTED_EOF);
+#endif
 }
 
 static bool saxreader_predefined_entity(struct saxlocator *locator, const struct text_position *position, BSTR name)
@@ -4661,6 +4697,11 @@ static void saxreader_parse_reference(struct saxlocator *locator)
         position = locator->buffer.position;
 
         saxreader_parse_name(locator, &str);
+#ifdef __REACTOS__
+        if (!*saxreader_get_ptr(locator))
+            saxreader_set_error(locator, E_SAX_UNEXPECTED_EOF);
+        else
+#endif
         if (!saxreader_cmp(locator, L";"))
             saxreader_set_error(locator, E_SAX_MISSINGSEMICOLON);
 
@@ -4840,7 +4881,11 @@ static void saxreader_parse_chardata(struct saxlocator *locator)
     }
 
     free(context.buffer.data);
+#ifdef __REACTOS__
+    saxreader_set_error(locator, E_SAX_UNCLOSEDTAG);
+#else
     saxreader_set_error(locator, E_SAX_UNEXPECTED_EOF);
+#endif
 }
 
 /* [18] CDSect ::= CDStart CData CDEnd
@@ -6128,6 +6173,23 @@ static HRESULT saxreader_parse_stream(struct saxreader *reader, ISequentialStrea
 
                 if (locator->state == SAX_PARSER_EPILOG)
                 {
+#ifdef __REACTOS__
+                    if (saxreader_peek(locator, L"<!DOCTYPE", 9))
+                    {
+                        saxreader_set_error(locator, E_SAX_DOCTYPE_OUTSIDE_PROLOG);
+                        break;
+                    }
+                    if (saxreader_peek(locator, L"<", 1))
+                    {
+                        saxreader_set_error(locator, E_SAX_MULTIPLEROOTS);
+                        break;
+                    }
+                    if (*saxreader_get_ptr(locator))
+                    {
+                        saxreader_set_error(locator, E_SAX_INVALIDATROOTLEVEL);
+                        break;
+                    }
+#endif
                     locator->state = SAX_PARSER_EOF;
                     saxlocator_end_document(locator);
                 }
