@@ -107,7 +107,9 @@ NTSTATUS TCPAccept
   PCONNECTION_ENDPOINT Listener,
   PCONNECTION_ENDPOINT Connection,
   PTCP_COMPLETION_ROUTINE Complete,
-  PVOID Context );
+  PVOID Context,
+  PCONNECTION_ENDPOINT *DrainListener );
+VOID TCPDrainPendingAccept( PCONNECTION_ENDPOINT Listener );
 
 /* tcp.c */
 PCONNECTION_ENDPOINT TCPAllocateConnectionEndpoint( PVOID ClientContext );
