@@ -149,7 +149,7 @@ static VOID IGMPTransmitReport(PIGMP_SEND Send)
 
     Header = Packet.Header;
     Header->VerIHL = 0x40 | (HeaderSize / 4);
-    Header->Tos = 0xc0;
+    Header->Tos = 0;
     Header->TotalLength = WH2N((USHORT)Packet.TotalSize);
     Header->Id = (USHORT)Random();
     Header->FlagsFragOfs = 0;
