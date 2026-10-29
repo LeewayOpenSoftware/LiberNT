@@ -1539,6 +1539,11 @@ NtUserSetWindowsHookEx( HINSTANCE Mod,
     else  /* System-global hook */
     {
        ptiHook = pti; // gptiCurrent;
+       if (HookId == WH_JOURNALRECORD || HookId == WH_JOURNALPLAYBACK)
+       {
+          EngSetLastError(ERROR_ACCESS_DENIED);
+          goto Cleanup;
+       }
        if ( !Mod &&
             (HookId == WH_GETMESSAGE ||
              HookId == WH_CALLWNDPROC ||
