@@ -78,14 +78,18 @@ public:
         IoCompleteRequest(Irp, PriorityBoost);
     }
 
+    template <typename TAdapter>
     NTSTATUS
     NdisWdfCreateIrpHandler(
-        _In_ NDIS_HANDLE NdisAdapterHandle,
+        _In_ TAdapter * Adapter,
         _Inout_ IRP * Irp,
         _In_ WDFCONTEXT DispatchContext) const
     {
         UNREFERENCED_PARAMETER(DispatchContext);
-        return ::NdisWdfCreateIrpHandler(NdisAdapterHandle, Irp);
+        NDIS_HANDLE const ndisAdapterHandle = Adapter->GetNdisHandle();
+        NTSTATUS const status = ::NdisWdfCreateIrpHandler(ndisAdapterHandle, Irp);
+        NdisWdfMiniportDereference(ndisAdapterHandle);
+        return status;
     }
 
     NTSTATUS
