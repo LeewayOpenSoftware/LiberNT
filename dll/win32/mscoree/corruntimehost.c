@@ -1851,6 +1851,9 @@ DWORD WINAPI GetTokenForVTableEntry(HINSTANCE hinst, BYTE **ppVTEntry)
     DWORD result = 0;
     DWORD rva;
     int i;
+#ifdef __REACTOS__
+    BOOL found = FALSE;
+#endif
 
     TRACE("%p,%p\n", hinst, ppVTEntry);
 
@@ -1865,9 +1868,17 @@ DWORD WINAPI GetTokenForVTableEntry(HINSTANCE hinst, BYTE **ppVTEntry)
             continue;
         i = (rva - fixup->fixup->rva) / sizeof(ULONG_PTR);
         result = ((ULONG_PTR*)fixup->tokens)[i];
+#ifdef __REACTOS__
+        found = TRUE;
+#endif
         break;
     }
     LeaveCriticalSection(&fixup_list_cs);
+
+#ifdef __REACTOS__
+    if (!found)
+        result = (DWORD)(ULONG_PTR)*ppVTEntry;
+#endif
 
     TRACE("<-- %lx\n", result);
     return result;
