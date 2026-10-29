@@ -17,6 +17,9 @@
 #include <debug.h>
 
 #define DNS_PORT 53
+#define LLMNR_PORT 5355
+#define LLMNR_RESEND 420
+#define LLMNR_ROUNDS 2
 #define DNS_MAX_ADAPTERS 16
 #define DNS_MAX_SERVERS 32
 #define DNS_MAX_CANDIDATES 8
@@ -279,7 +282,7 @@ ResolverLoadConfig(PRESOLVER_CONFIG Config, PCWSTR Name)
         }
     }
 
-    if (!Config->CandidateCount)
+    if (!Config->CandidateCount && !SingleLabel)
         ResolverAddCandidate(Config, Name, NULL);
     return ERROR_SUCCESS;
 }
@@ -892,6 +895,170 @@ ResolverQueryName(PRESOLVER_CONFIG Config, PCWSTR Name, WORD Type, DWORD Options
     return Negative != ERROR_SUCCESS ? Negative : Failure;
 }
 
+static
+ULONG
+ResolverLlmnrLinks(PULONG Links4, PULONG Count4, PULONG Links6, PULONG Count6)
+{
+    ULONG Size = 16384;
+    PIP_ADAPTER_ADDRESSES List, Adapter;
+    DWORD Error;
+
+    *Count4 = *Count6 = 0;
+    for (;;)
+    {
+        List = RtlAllocateHeap(RtlGetProcessHeap(), 0, Size);
+        if (!List)
+            return 0;
+        Error = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                                     GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_SKIP_FRIENDLY_NAME, NULL, List, &Size);
+        if (Error != ERROR_BUFFER_OVERFLOW)
+            break;
+        RtlFreeHeap(RtlGetProcessHeap(), 0, List);
+    }
+    if (Error != ERROR_SUCCESS)
+    {
+        RtlFreeHeap(RtlGetProcessHeap(), 0, List);
+        return 0;
+    }
+
+    for (Adapter = List; Adapter; Adapter = Adapter->Next)
+    {
+        PIP_ADAPTER_UNICAST_ADDRESS Unicast;
+        BOOL Have4 = FALSE, Have6 = FALSE;
+
+        if (Adapter->OperStatus != IfOperStatusUp || Adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK)
+            continue;
+        for (Unicast = Adapter->FirstUnicastAddress; Unicast; Unicast = Unicast->Next)
+        {
+            const SOCKADDR *Address = Unicast->Address.lpSockaddr;
+
+            if (!Address)
+                continue;
+            if (Address->sa_family == AF_INET && !Have4 && *Count4 < DNS_MAX_ADAPTERS)
+            {
+                Links4[(*Count4)++] = ((const SOCKADDR_IN *)Address)->sin_addr.s_addr;
+                Have4 = TRUE;
+            }
+            else if (Address->sa_family == AF_INET6 && !Have6 && Adapter->Ipv6IfIndex && *Count6 < DNS_MAX_ADAPTERS)
+            {
+                Links6[(*Count6)++] = Adapter->Ipv6IfIndex;
+                Have6 = TRUE;
+            }
+        }
+    }
+    RtlFreeHeap(RtlGetProcessHeap(), 0, List);
+    return *Count4 + *Count6;
+}
+
+static
+DNS_STATUS
+ResolverLlmnrQuery(PCWSTR Name, WORD Type, PDNS_RECORDW *Result)
+{
+    ULONG Links4[DNS_MAX_ADAPTERS], Links6[DNS_MAX_ADAPTERS], Count4, Count6, i;
+    UCHAR Query[512], Packet[DNS_UDP_SIZE + 256];
+    SOCKADDR_IN Group4;
+    SOCKADDR_IN6 Group6;
+    SOCKET Sockets[2];
+    DWORD Start, Hops = 1;
+    INT QueryLength, Round;
+    WORD Id;
+
+    if (!ResolverLlmnrLinks(Links4, &Count4, Links6, &Count6))
+        return ERROR_INVALID_NAME;
+
+    Id = (WORD)(GetTickCount() ^ (GetCurrentThreadId() << 7) ^ (ULONG_PTR)Name ^ Type);
+    QueryLength = ResolverBuildQuery(Name, Type, Id, FALSE, Query, sizeof(Query));
+    if (QueryLength < 0)
+        return ERROR_INVALID_NAME;
+
+    RtlZeroMemory(&Group4, sizeof(Group4));
+    Group4.sin_family = AF_INET;
+    Group4.sin_port = htons(LLMNR_PORT);
+    Group4.sin_addr.s_addr = htonl(0xE00000FC);
+    RtlZeroMemory(&Group6, sizeof(Group6));
+    Group6.sin6_family = AF_INET6;
+    Group6.sin6_port = htons(LLMNR_PORT);
+    Group6.sin6_addr.s6_addr[0] = 0xFF;
+    Group6.sin6_addr.s6_addr[1] = 0x02;
+    Group6.sin6_addr.s6_addr[13] = 0x01;
+    Group6.sin6_addr.s6_addr[15] = 0x03;
+
+    Sockets[0] = Count4 ? socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP) : INVALID_SOCKET;
+    Sockets[1] = Count6 ? socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP) : INVALID_SOCKET;
+    if (Sockets[0] != INVALID_SOCKET)
+        setsockopt(Sockets[0], IPPROTO_IP, IP_MULTICAST_TTL, (PCHAR)&Hops, sizeof(Hops));
+    if (Sockets[1] != INVALID_SOCKET)
+        setsockopt(Sockets[1], IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (PCHAR)&Hops, sizeof(Hops));
+
+    Start = GetTickCount();
+    for (Round = 0; Round < LLMNR_ROUNDS; Round++)
+    {
+        DWORD Deadline = Start + (Round + 1) * LLMNR_RESEND;
+
+        for (i = 0; i < Count4 && Sockets[0] != INVALID_SOCKET; i++)
+        {
+            setsockopt(Sockets[0], IPPROTO_IP, IP_MULTICAST_IF, (PCHAR)&Links4[i], sizeof(Links4[i]));
+            sendto(Sockets[0], (PCHAR)Query, QueryLength, 0, (const SOCKADDR *)&Group4, sizeof(Group4));
+        }
+        for (i = 0; i < Count6 && Sockets[1] != INVALID_SOCKET; i++)
+        {
+            setsockopt(Sockets[1], IPPROTO_IPV6, IPV6_MULTICAST_IF, (PCHAR)&Links6[i], sizeof(Links6[i]));
+            Group6.sin6_scope_id = Links6[i];
+            sendto(Sockets[1], (PCHAR)Query, QueryLength, 0, (const SOCKADDR *)&Group6, sizeof(Group6));
+        }
+
+        for (;;)
+        {
+            LONG Remaining = (LONG)(Deadline - GetTickCount());
+            struct timeval Wait;
+            fd_set Read;
+            ULONG s;
+
+            if (Remaining <= 0)
+                break;
+            FD_ZERO(&Read);
+            for (s = 0; s < 2; s++)
+            {
+                if (Sockets[s] != INVALID_SOCKET)
+                    FD_SET(Sockets[s], &Read);
+            }
+            Wait.tv_sec = Remaining / 1000;
+            Wait.tv_usec = (Remaining % 1000) * 1000;
+            if (select(0, &Read, NULL, NULL, &Wait) <= 0)
+                break;
+
+            for (s = 0; s < 2; s++)
+            {
+                RESOLVER_REPLY Reply;
+                INT Received;
+
+                if (Sockets[s] == INVALID_SOCKET || !FD_ISSET(Sockets[s], &Read))
+                    continue;
+                Received = recvfrom(Sockets[s], (PCHAR)Packet, sizeof(Packet), 0, NULL, NULL);
+                if (Received <= 0)
+                    continue;
+                ResolverParseReply(Packet, Received, Id, Name, Type, &Reply);
+                if (Reply.Final && Reply.Status == ERROR_SUCCESS && Reply.Records)
+                {
+                    *Result = Reply.Records;
+                    if (Sockets[0] != INVALID_SOCKET)
+                        closesocket(Sockets[0]);
+                    if (Sockets[1] != INVALID_SOCKET)
+                        closesocket(Sockets[1]);
+                    return ERROR_SUCCESS;
+                }
+                DnsIntFreeRecordList((PDNS_RECORD)Reply.Records);
+            }
+        }
+    }
+
+    if (Sockets[0] != INVALID_SOCKET)
+        closesocket(Sockets[0]);
+    if (Sockets[1] != INVALID_SOCKET)
+        closesocket(Sockets[1]);
+    return ERROR_INVALID_NAME;
+}
+
 DNS_STATUS
 DnsIntResolve(LPCWSTR Name, WORD Type, DWORD Options, PDNS_RECORDW *Result)
 {
@@ -909,11 +1076,13 @@ DnsIntResolve(LPCWSTR Name, WORD Type, DWORD Options, PDNS_RECORDW *Result)
         return ERROR_OUTOFMEMORY;
 
     Status = ResolverLoadConfig(Config, Name);
-    if (Status != ERROR_SUCCESS)
+    if (Status != ERROR_SUCCESS && (Status != DNS_ERROR_NO_DNS_SERVERS || wcschr(Name, L'.')))
     {
         RtlFreeHeap(RtlGetProcessHeap(), 0, Config);
         return Status;
     }
+    if (Status != ERROR_SUCCESS)
+        Config->CandidateCount = 0;
 
     for (i = 0; i < Config->CandidateCount; i++)
     {
@@ -925,6 +1094,13 @@ DnsIntResolve(LPCWSTR Name, WORD Type, DWORD Options, PDNS_RECORDW *Result)
             First = Status;
         if (Status != DNS_ERROR_RCODE_NAME_ERROR && Status != DNS_INFO_NO_RECORDS)
             break;
+    }
+
+    if (!wcschr(Name, L'.') && (!Config->CandidateCount || Status != ERROR_SUCCESS))
+    {
+        Status = (Options & DNS_QUERY_NO_MULTICAST) ? ERROR_INVALID_NAME : ResolverLlmnrQuery(Name, Type, Result);
+        if (Status != ERROR_SUCCESS && First == ERROR_SUCCESS)
+            First = Status;
     }
 
     RtlFreeHeap(RtlGetProcessHeap(), 0, Config);
