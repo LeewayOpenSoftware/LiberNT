@@ -308,7 +308,8 @@ class CDefView :
     public IViewObject,
     public IServiceProvider,
     public IFolderFilterSite,
-    public IPersistHistory
+    public IPersistHistory,
+    public IPersistFolder
 {
 private:
     CComPtr<IShellFolder>     m_pSFParent;
@@ -659,6 +660,7 @@ public:
     STDMETHOD(SetFilter)(IUnknown *punk) override;
 
     STDMETHOD(GetClassID)(CLSID *pClassID) override;
+    STDMETHOD(Initialize)(PCIDLIST_ABSOLUTE pidl) override;
     STDMETHOD(LoadHistory)(IStream *pStream, IBindCtx *pbc) override;
     STDMETHOD(SaveHistory)(IStream *pStream) override;
     STDMETHOD(SetPositionCookie)(DWORD dwPositioncookie) override;
@@ -770,6 +772,8 @@ public:
     COM_INTERFACE_ENTRY_IID(IID_IViewObject, IViewObject)
     COM_INTERFACE_ENTRY_IID(IID_IServiceProvider, IServiceProvider)
     COM_INTERFACE_ENTRY_IID(IID_IPersistHistory, IPersistHistory)
+    COM_INTERFACE_ENTRY_IID(IID_IPersist, IPersistFolder)
+    COM_INTERFACE_ENTRY_IID(IID_IPersistFolder, IPersistFolder)
     END_COM_MAP()
 };
 
@@ -2342,6 +2346,8 @@ void CDefView::FinishFillList()
 
     ApplySavedItemPositions();
     ArrangeComputerView();
+    if (m_ListView.GetItemCount() > 0 && m_ListView.GetNextItem(-1, LVNI_FOCUSED) < 0)
+        m_ListView.SetItemState(0, LVIS_FOCUSED, LVIS_FOCUSED);
     FireFolderViewEvent(DISPID_FILELISTENUMDONE);
 }
 
@@ -4706,7 +4712,14 @@ HRESULT STDMETHODCALLTYPE CDefView::GetClassID(CLSID *pClassID)
 {
     if (!pClassID)
         return E_POINTER;
-    return E_FAIL;
+    return E_NOTIMPL;
+}
+
+HRESULT STDMETHODCALLTYPE CDefView::Initialize(PCIDLIST_ABSOLUTE pidl)
+{
+    if (!pidl || !m_pidlParent || !ILIsEqual(pidl, m_pidlParent))
+        return E_FAIL;
+    return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE CDefView::LoadHistory(IStream *pStream, IBindCtx *pbc)
