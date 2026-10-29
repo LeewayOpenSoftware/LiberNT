@@ -1642,7 +1642,7 @@ IntTrackMouseMove(PWND pwndTrack, PDESKTOP pDesk, PMSG msg, USHORT hittest)
    }
 }
 
-BOOL co_IntProcessMouseMessage(MSG* msg, BOOL* RemoveMessages, BOOL* NotForUs, LONG_PTR ExtraInfo, UINT first, UINT last)
+BOOL co_IntProcessMouseMessage(MSG* msg, BOOL* RemoveMessages, BOOL* NotForUs, LONG_PTR ExtraInfo, UINT first, UINT last, PWND pwndFilter)
 {
     MSG clk_msg;
     POINT pt;
@@ -1704,6 +1704,13 @@ BOOL co_IntProcessMouseMessage(MSG* msg, BOOL* RemoveMessages, BOOL* NotForUs, L
     {
         // This is not for us and we should leave so the other thread can check for messages!!!
         *NotForUs = TRUE;
+        *RemoveMessages = FALSE;
+        return FALSE;
+    }
+
+    if (pwndFilter && pwndFilter != PWND_BOTTOM &&
+        pwndMsg != pwndFilter && !IntIsChildWindow(pwndFilter, pwndMsg))
+    {
         *RemoveMessages = FALSE;
         return FALSE;
     }
@@ -2067,11 +2074,11 @@ Exit:
     return Ret;
 }
 
-BOOL co_IntProcessHardwareMessage(MSG* Msg, BOOL* RemoveMessages, BOOL* NotForUs, LONG_PTR ExtraInfo, UINT first, UINT last)
+BOOL co_IntProcessHardwareMessage(MSG* Msg, BOOL* RemoveMessages, BOOL* NotForUs, LONG_PTR ExtraInfo, UINT first, UINT last, PWND pwndFilter)
 {
     if ( IS_MOUSE_MESSAGE(Msg->message))
     {
-        return co_IntProcessMouseMessage(Msg, RemoveMessages, NotForUs, ExtraInfo, first, last);
+        return co_IntProcessMouseMessage(Msg, RemoveMessages, NotForUs, ExtraInfo, first, last, pwndFilter);
     }
     else if ( IS_KBD_MESSAGE(Msg->message))
     {
@@ -2189,7 +2196,7 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
          MessageId = CurrentMessage->Id;
 
          UpdateKeyStateFromMsg(MessageQueue, &msg);
-         AcceptMessage = co_IntProcessHardwareMessage(&msg, &RemoveMsg, &NotForUs, ExtraInfo, MsgFilterLow, MsgFilterHigh);
+         AcceptMessage = co_IntProcessHardwareMessage(&msg, &RemoveMsg, &NotForUs, ExtraInfo, MsgFilterLow, MsgFilterHigh, Window);
 
          if (pti->MessageQueue != MessageQueue)
          {
