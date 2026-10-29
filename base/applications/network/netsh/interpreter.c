@@ -142,6 +142,7 @@ InterpretCommand(
     INTERPRETER_STATE State = STATE_ANALYZE;
     DWORD dwArgIndex = 0;
     DWORD dwError = ERROR_SUCCESS;
+    BOOL bDescended = FALSE;
 
     /* If no args provided */
     if (dwArgCount == 0)
@@ -344,12 +345,13 @@ InterpretCommand(
                 pTempContext = pTempSubContext;
                 State = STATE_ANALYZE;
                 dwArgIndex++;
+                bDescended = TRUE;
                 break;
 
             case STATE_PARENT_CONTEXT:
                 DPRINT("STATE_PARENT_CONTEXT\n");
 
-                if (pTempContext->pParentContext == NULL)
+                if (pTempContext->pParentContext == NULL || bDescended)
                 {
                     dwError = ERROR_CMD_NOT_FOUND;
                     State = STATE_DONE;
