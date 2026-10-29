@@ -69,6 +69,24 @@ LxTimespecToNs(
     return Timespec->Seconds * 1000000000LL + Timespec->Nanoseconds;
 }
 
+LONG64
+LxTimespecTo100ns(
+    _In_ PLX_TIMESPEC Timespec)
+{
+    if (Timespec->Seconds >= LX_KTIME_SEC_MAX)
+        return LX_KTIME_MAX_100NS;
+    return Timespec->Seconds * 10000000 + (Timespec->Nanoseconds + 99) / 100;
+}
+
+LONG64
+LxTimevalTo100ns(
+    _In_ PLX_TIMEVAL Timeval)
+{
+    if (Timeval->Seconds >= LX_KTIME_SEC_MAX)
+        return LX_KTIME_MAX_100NS;
+    return Timeval->Seconds * 10000000 + Timeval->Microseconds * 10;
+}
+
 NTSTATUS
 LxFillRandom(
     _Out_writes_bytes_(Length) PUCHAR Buffer,

@@ -47,6 +47,8 @@
 #define LX_SPEC_SSB_NOEXEC       0x04
 #define LX_JOBCTL_STOPPED        0x01
 #define LX_JOBCTL_CONTINUED      0x02
+#define LX_KTIME_SEC_MAX         (MAXLONG64 / 1000000000LL)
+#define LX_KTIME_MAX_100NS       (MAXLONG64 / 100)
 #define LX_VMA_DONTDUMP     0x00040000
 #define LX_VMA_TOUCHED      0x00080000
 #define LX_VMA_WIPEONFORK   0x00100000
@@ -913,6 +915,9 @@ NTSTATUS LxFillRandom(_Out_writes_bytes_(Length) PUCHAR Buffer, _In_ ULONG Lengt
 VOID LxNtTimeToTimespec(_In_ LONG64 NtTime, _Out_ PLX_TIMESPEC Timespec);
 LONG64 LxTimespecToNtTime(_In_ PLX_TIMESPEC Timespec);
 LONG64 LxTimespecToNs(_In_ PLX_TIMESPEC Timespec);
+LONG64 LxTimespecTo100ns(_In_ PLX_TIMESPEC Timespec);
+LONG64 LxTimevalTo100ns(_In_ PLX_TIMEVAL Timeval);
+LONG64 LxSocketTimeout(_In_ PLX_TIMEVAL Timeval);
 VOID LxSchedInherit(_Inout_ PLX_THREAD Child, _In_ PLX_THREAD Parent);
 VOID LxSchedInitialize(VOID);
 ULONG64 LxSchedActiveMask(VOID);

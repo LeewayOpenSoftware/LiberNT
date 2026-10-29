@@ -11,7 +11,6 @@
 #include <debug.h>
 
 #define LX_TIMER_ABSTIME 1
-#define LX_KTIME_SEC_MAX (MAXLONG64 / 1000000000LL)
 
 static ULONG64 LxReportedSyscalls[1024 / 64];
 
@@ -718,16 +717,6 @@ LX_SYSCALL(LxSysGettimeofday)
     return Result;
 }
 
-static
-LONG64
-LxSleepInterval(
-    _In_ const LX_TIMESPEC *Request)
-{
-    if (Request->Seconds >= LX_KTIME_SEC_MAX)
-        return MAXLONG64 / 100;
-    return Request->Seconds * 10000000 + (Request->Nanoseconds + 99) / 100;
-}
-
 LX_SYSCALL(LxSysNanosleep)
 {
     LX_TIMESPEC Request;
@@ -738,7 +727,7 @@ LX_SYSCALL(LxSysNanosleep)
     if ((Request.Seconds < 0) || (Request.Nanoseconds < 0) || (Request.Nanoseconds >= 1000000000))
         return -LX_EINVAL;
 
-    Result = LxSleep(LxSleepInterval(&Request));
+    Result = LxSleep(LxTimespecTo100ns(&Request));
     if ((Result != 0) && (Call->Args[1] != 0))
     {
         LX_TIMESPEC Remaining = { 0, 0 };
@@ -759,7 +748,7 @@ LX_SYSCALL(LxSysClockNanosleep)
     if ((Request.Seconds < 0) || (Request.Nanoseconds < 0) || (Request.Nanoseconds >= 1000000000))
         return -LX_EINVAL;
 
-    Interval = LxSleepInterval(&Request);
+    Interval = LxTimespecTo100ns(&Request);
     if (Call->Args[1] & LX_TIMER_ABSTIME)
     {
         LONG Error = LxQueryClockIn(Call->Process, (ULONG)Call->Args[0], &Now);
@@ -4290,7 +4279,7 @@ LX_SYSCALL(LxSysSetitimer)
     PLX_PROCESS Process = Call->Process;
     PLX_ITIMER Timer;
     LX_TIMEVAL New[2], Old[2];
-    LONG64 Value, Interval, Result;
+    LONG64 Value, Interval, Result, Now;
 
     if (Call->Args[0] > 2)
         return -LX_EINVAL;
@@ -4337,10 +4326,13 @@ LX_SYSCALL(LxSysSetitimer)
     LxItimerCurrent(Timer, Old);
     ExCancelTimer(Timer->Timer, NULL);
 
-    Value = New[1].Seconds * 10000000LL + New[1].Microseconds * 10;
-    Interval = New[0].Seconds * 10000000LL + New[0].Microseconds * 10;
+    Value = LxTimevalTo100ns(&New[1]);
+    Interval = LxTimevalTo100ns(&New[0]);
+    Now = (LONG64)KeQueryInterruptTime();
+    if (Value > LX_KTIME_MAX_100NS - Now)
+        Value = LX_KTIME_MAX_100NS - Now;
     Timer->IntervalNs = (Value != 0) ? Interval * 100 : 0;
-    Timer->Due = (Value != 0) ? (LONG64)KeQueryInterruptTime() + Value : 0;
+    Timer->Due = (Value != 0) ? Now + Value : 0;
     if (Value != 0)
         ExSetTimer(Timer->Timer, -Value, Interval, NULL);
 

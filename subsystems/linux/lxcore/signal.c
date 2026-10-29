@@ -1041,7 +1041,7 @@ LX_SYSCALL(LxSysRtSigtimedwait)
             return Result;
         if ((Timeout.Seconds < 0) || (Timeout.Nanoseconds < 0) || (Timeout.Nanoseconds >= 1000000000))
             return -LX_EINVAL;
-        Deadline.QuadPart = (LONG64)KeQueryInterruptTime() + Timeout.Seconds * 10000000LL + Timeout.Nanoseconds / 100;
+        Deadline.QuadPart = (LONG64)KeQueryInterruptTime() + LxTimespecTo100ns(&Timeout);
     }
 
     for (;;)
