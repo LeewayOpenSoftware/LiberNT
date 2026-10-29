@@ -2293,6 +2293,9 @@ static void saxreader_shrink(struct saxlocator *locator)
         size = buffer->written - buffer->cur * sizeof(WCHAR);
         if (size)
             memmove(buffer->data, (WCHAR *)buffer->data + buffer->cur, size);
+#ifdef __REACTOS__
+        *(WCHAR *)(buffer->data + size) = 0;
+#endif
 
         buffer->written = size;
         buffer->cur = 0;
