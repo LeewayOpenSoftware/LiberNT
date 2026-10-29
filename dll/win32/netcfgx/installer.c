@@ -81,6 +81,19 @@ AppendStringToMultiSZ(
                               &dwTmp);
         if (rc != ERROR_SUCCESS)
             goto cleanup;
+
+        /* Already present (reinstall of the same adapter): nothing to do */
+        {
+            PCWSTR Entry;
+            for (Entry = Buffer; (PBYTE)Entry < (PBYTE)Buffer + dwTmp && *Entry != UNICODE_NULL; Entry += wcslen(Entry) + 1)
+            {
+                if (_wcsicmp(Entry, ValueToAppend) == 0)
+                {
+                    rc = ERROR_SUCCESS;
+                    goto cleanup;
+                }
+            }
+        }
     }
     else
     {
@@ -109,6 +122,167 @@ AppendStringToMultiSZ(
 cleanup:
     HeapFree(GetProcessHeap(), 0, Buffer);
     return rc;
+}
+
+#define NET_CONNECTIONS_KEY L"SYSTEM\\CurrentControlSet\\Control\\Network\\{4D36E972-E325-11CE-BFC1-08002BE10318}"
+
+/* Does Network\{4D36...}\<Guid>\Connection\PnpInstanceID name this device instance? */
+static
+BOOL
+ConnectionBelongsToInstance(
+    _In_ HKEY hNetworkKey,
+    _In_ PCWSTR Guid,
+    _In_ PCWSTR InstanceId)
+{
+    WCHAR SubKey[96];
+    WCHAR Value[MAX_DEVICE_ID_LEN + 1];
+    DWORD dwType, dwSize = sizeof(Value) - sizeof(WCHAR);
+    HKEY hKey;
+    BOOL Same = FALSE;
+
+    if (FAILED(StringCchPrintfW(SubKey, _countof(SubKey), L"%s\\Connection", Guid)))
+        return FALSE;
+    if (RegOpenKeyExW(hNetworkKey, SubKey, 0, KEY_QUERY_VALUE, &hKey) != ERROR_SUCCESS)
+        return FALSE;
+    ZeroMemory(Value, sizeof(Value));
+    if (RegQueryValueExW(hKey, L"PnpInstanceID", NULL, &dwType, (LPBYTE)Value, &dwSize) == ERROR_SUCCESS &&
+        dwType == REG_SZ && _wcsicmp(Value, InstanceId) == 0)
+    {
+        Same = TRUE;
+    }
+    RegCloseKey(hKey);
+    return Same;
+}
+
+/* Existing connection GUID ({...}) already created for this device instance, if any */
+static
+BOOL
+FindConnectionForInstance(
+    _In_ PCWSTR InstanceId,
+    _Out_writes_(40) PWSTR Guid)
+{
+    HKEY hNetworkKey;
+    WCHAR SubKey[64];
+    DWORD Index, cchSubKey;
+    BOOL Found = FALSE;
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, NET_CONNECTIONS_KEY, 0, KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE, &hNetworkKey) != ERROR_SUCCESS)
+        return FALSE;
+    for (Index = 0; !Found; Index++)
+    {
+        cchSubKey = _countof(SubKey);
+        if (RegEnumKeyExW(hNetworkKey, Index, SubKey, &cchSubKey, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+            break;
+        if (SubKey[0] == L'{' && cchSubKey == 38 && ConnectionBelongsToInstance(hNetworkKey, SubKey, InstanceId))
+        {
+            StringCchCopyW(Guid, 40, SubKey);
+            Found = TRUE;
+        }
+    }
+    RegCloseKey(hNetworkKey);
+    return Found;
+}
+
+/* Remove Value from a REG_MULTI_SZ (no-op if absent) */
+static
+VOID
+RemoveStringFromMultiSZ(
+    _In_ HKEY hKey,
+    _In_ PCWSTR ValueName,
+    _In_ PCWSTR ValueToRemove)
+{
+    PWSTR Buffer, Out, Entry;
+    DWORD dwType, dwSize = 0, dwNew;
+    BOOL Changed = FALSE;
+
+    if (RegQueryValueExW(hKey, ValueName, NULL, &dwType, NULL, &dwSize) != ERROR_SUCCESS ||
+        dwType != REG_MULTI_SZ || dwSize < sizeof(WCHAR))
+    {
+        return;
+    }
+    Buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, dwSize + 2 * sizeof(WCHAR));
+    if (!Buffer)
+        return;
+    Out = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, dwSize + 2 * sizeof(WCHAR));
+    if (!Out)
+    {
+        HeapFree(GetProcessHeap(), 0, Buffer);
+        return;
+    }
+    if (RegQueryValueExW(hKey, ValueName, NULL, &dwType, (LPBYTE)Buffer, &dwSize) == ERROR_SUCCESS)
+    {
+        PWSTR Dst = Out;
+        for (Entry = Buffer; (PBYTE)Entry < (PBYTE)Buffer + dwSize && *Entry != UNICODE_NULL; Entry += wcslen(Entry) + 1)
+        {
+            if (_wcsicmp(Entry, ValueToRemove) == 0)
+            {
+                Changed = TRUE;
+                continue;
+            }
+            wcscpy(Dst, Entry);
+            Dst += wcslen(Entry) + 1;
+        }
+        *Dst++ = UNICODE_NULL;
+        dwNew = (DWORD)((PBYTE)Dst - (PBYTE)Out);
+        if (Changed)
+            RegSetValueExW(hKey, ValueName, 0, REG_MULTI_SZ, (const BYTE*)Out, dwNew);
+    }
+    HeapFree(GetProcessHeap(), 0, Out);
+    HeapFree(GetProcessHeap(), 0, Buffer);
+}
+
+/*
+ * Every driver change used to leave the previous connection behind ("Ethernet 2",
+ * "Ethernet 3", ...), all with the same PnpInstanceID. Keep the connection that
+ * is in use and remove the others together with their Tcpip interface and linkage.
+ */
+static
+VOID
+PurgeStaleConnections(
+    _In_ PCWSTR InstanceId,
+    _In_ PCWSTR KeepGuid)
+{
+    HKEY hNetworkKey, hLinkageKey;
+    WCHAR SubKey[64];
+    WCHAR Path[160];
+    WCHAR Name[96];
+    DWORD Index, cchSubKey;
+    BOOL Deleted;
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, NET_CONNECTIONS_KEY, 0, KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | DELETE, &hNetworkKey) != ERROR_SUCCESS)
+        return;
+
+    for (Index = 0; ; )
+    {
+        cchSubKey = _countof(SubKey);
+        if (RegEnumKeyExW(hNetworkKey, Index, SubKey, &cchSubKey, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+            break;
+        Deleted = FALSE;
+        if (SubKey[0] == L'{' && cchSubKey == 38 && _wcsicmp(SubKey, KeepGuid) != 0 &&
+            ConnectionBelongsToInstance(hNetworkKey, SubKey, InstanceId))
+        {
+            TRACE("Removing stale connection %S of %S\n", SubKey, InstanceId);
+            if (RegDeleteTreeW(hNetworkKey, SubKey) == ERROR_SUCCESS)
+            {
+                Deleted = TRUE;
+                StringCchPrintfW(Path, _countof(Path), L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\%s", SubKey);
+                RegDeleteTreeW(HKEY_LOCAL_MACHINE, Path);
+                if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Linkage", 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &hLinkageKey) == ERROR_SUCCESS)
+                {
+                    StringCchPrintfW(Name, _countof(Name), L"\\Device\\%s", SubKey);
+                    RemoveStringFromMultiSZ(hLinkageKey, L"Bind", Name);
+                    StringCchPrintfW(Name, _countof(Name), L"\\Device\\Tcpip_%s", SubKey);
+                    RemoveStringFromMultiSZ(hLinkageKey, L"Export", Name);
+                    RemoveStringFromMultiSZ(hLinkageKey, L"Route", SubKey);
+                    RegCloseKey(hLinkageKey);
+                }
+            }
+        }
+        /* A deleted key shifts the following ones down: do not advance then */
+        if (!Deleted)
+            Index++;
+    }
+    RegCloseKey(hNetworkKey);
 }
 
 static
@@ -539,9 +713,11 @@ InstallNetDevice(
     LPCWSTR UuidString,
     DWORD Characteristics,
     LPCWSTR BusType,
-    PCNET_INF_KEYWORDS Keywords)
+    PCNET_INF_KEYWORDS Keywords,
+    BOOL Reuse)
 {
     SP_DEVINSTALL_PARAMS_W DeviceInstallParams;
+    DWORD dwDisposition = REG_CREATED_NEW_KEY;
     LPWSTR InstanceId = NULL;
     LPWSTR ComponentId = NULL;
     LPWSTR DeviceName = NULL;
@@ -640,12 +816,16 @@ InstallNetDevice(
         goto cleanup;
     }
 
-    rc = RegCreateKeyExW(hInterfacesKey, UuidString, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hInterfaceKey, NULL);
+    rc = RegCreateKeyExW(hInterfacesKey, UuidString, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hInterfaceKey, &dwDisposition);
     if (rc != ERROR_SUCCESS)
     {
         ERR("RegCreateKeyExW() failed with error 0x%lx\n", rc);
         goto cleanup;
     }
+
+    /* A reused interface keeps the addressing the user configured */
+    if (dwDisposition != REG_CREATED_NEW_KEY)
+        goto InterfaceDone;
 
     rc = RegSetValueExW(hInterfaceKey, L"DefaultGateway", 0, REG_MULTI_SZ, (const BYTE*)L"0.0.0.0\0", (wcslen(L"0.0.0.0") + 2) * sizeof(WCHAR));
     if (rc != ERROR_SUCCESS)
@@ -676,6 +856,7 @@ InstallNetDevice(
         goto cleanup;
     }
 
+InterfaceDone:
     /* Write 'Linkage' key in hardware key */
 #if _WIN32_WINNT >= 0x502
     hKey = SetupDiOpenDevRegKey(DeviceInfoSet, DeviceInfoData, DICS_FLAG_GLOBAL, 0, DIREG_DRV, KEY_READ | KEY_WRITE);
@@ -797,11 +978,36 @@ InstallNetDevice(
         goto cleanup;
     }
 
-    rc = GetUniqueConnectionName(hNetworkKey, NameId, &pszNameBuffer);
-    if (rc != ERROR_SUCCESS)
+    if (Reuse)
     {
-        ERR("GetUniqueConnectionName() failed with error 0x%lx\n", rc);
-        goto cleanup;
+        /* Keep the name the user already sees for this adapter */
+        WCHAR ConnKey[96];
+        WCHAR OldName[256];
+        DWORD dwOldType, dwOldSize = sizeof(OldName) - sizeof(WCHAR);
+        HKEY hOldConn;
+
+        ZeroMemory(OldName, sizeof(OldName));
+        StringCchPrintfW(ConnKey, _countof(ConnKey), L"%s\\Connection", UuidString);
+        if (RegOpenKeyExW(hNetworkKey, ConnKey, 0, KEY_QUERY_VALUE, &hOldConn) == ERROR_SUCCESS)
+        {
+            if (RegQueryValueExW(hOldConn, L"Name", NULL, &dwOldType, (LPBYTE)OldName, &dwOldSize) == ERROR_SUCCESS &&
+                dwOldType == REG_SZ && OldName[0] != UNICODE_NULL)
+            {
+                pszNameBuffer = HeapAlloc(GetProcessHeap(), 0, (wcslen(OldName) + 1) * sizeof(WCHAR));
+                if (pszNameBuffer)
+                    wcscpy(pszNameBuffer, OldName);
+            }
+            RegCloseKey(hOldConn);
+        }
+    }
+    if (!pszNameBuffer)
+    {
+        rc = GetUniqueConnectionName(hNetworkKey, NameId, &pszNameBuffer);
+        if (rc != ERROR_SUCCESS)
+        {
+            ERR("GetUniqueConnectionName() failed with error 0x%lx\n", rc);
+            goto cleanup;
+        }
     }
 
     rc = RegCreateKeyExW(hNetworkKey, UuidString, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_CREATE_SUB_KEY, NULL, &hKey, NULL);
@@ -874,6 +1080,9 @@ InstallNetDevice(
         ERR("WriteNetSetupInterface() failed with error 0x%lx\n", rc);
         goto cleanup;
     }
+
+    /* One connection per adapter: drop the ones left by earlier driver installs */
+    PurgeStaleConnections(InstanceId, UuidString);
 
     /* Start the device */
     if (!SetupDiRestartDevices(DeviceInfoSet, DeviceInfoData))
@@ -993,6 +1202,9 @@ NetClassInstaller(
     HKEY hDriverKey;
     LONG rc;
     DWORD dwLength;
+    BOOL Reuse = FALSE;
+    WCHAR DeviceInstanceId[MAX_DEVICE_ID_LEN + 1];
+    WCHAR ExistingGuid[40];
 
     if (InstallFunction != DIF_INSTALLDEVICE)
         return ERROR_DI_DO_DEFAULT;
@@ -1021,7 +1233,7 @@ NetClassInstaller(
     if (hInf == INVALID_HANDLE_VALUE)
     {
         rc = GetLastError();
-        ERR("SetupOpenInfFileW() failed with error 0x%lx\n", rc);
+        ERR("SetupOpenInfFileW(%S) failed with error 0x%lx\n", DriverInfoDetail.InfFileName, rc);
         goto cleanup;
     }
 
@@ -1112,39 +1324,61 @@ NetClassInstaller(
         }
     }
 
-    /* Create a new UUID */
-    RpcStatus = UuidCreate(&Uuid);
-    if (RpcStatus != RPC_S_OK && RpcStatus != RPC_S_UUID_LOCAL_ONLY)
+    /*
+     * The driver key has no NetCfgInstanceId (new driver key after a driver change),
+     * but this adapter may already own a connection from an earlier install: reuse
+     * it so the adapter keeps its name and Tcpip interface instead of getting
+     * "Ethernet 2", "Ethernet 3", ...
+     */
+    if (IsEqualIID(&DeviceInfoData->ClassGuid, &GUID_DEVCLASS_NET) &&
+        SetupDiGetDeviceInstanceIdW(DeviceInfoSet, DeviceInfoData, DeviceInstanceId, _countof(DeviceInstanceId), NULL) &&
+        FindConnectionForInstance(DeviceInstanceId, ExistingGuid))
     {
-        ERR("UuidCreate() failed with RPC status 0x%lx\n", RpcStatus);
-        rc = ERROR_GEN_FAILURE;
-        goto cleanup;
+        UuidString = HeapAlloc(GetProcessHeap(), 0, (wcslen(ExistingGuid) + 1) * sizeof(WCHAR));
+        if (UuidString)
+        {
+            wcscpy(UuidString, ExistingGuid);
+            _wcsupr(UuidString);
+            Reuse = TRUE;
+        }
     }
 
-    RpcStatus = UuidToStringW(&Uuid, &UuidRpcString);
-    if (RpcStatus != RPC_S_OK)
-    {
-        ERR("UuidToStringW() failed with RPC status 0x%lx\n", RpcStatus);
-        rc = ERROR_GEN_FAILURE;
-        goto cleanup;
-    }
-
-    /* Add curly braces around Uuid */
-    UuidString = HeapAlloc(GetProcessHeap(), 0, (2 + wcslen(UuidRpcString)) * sizeof(WCHAR) + sizeof(UNICODE_NULL));
     if (!UuidString)
     {
-        ERR("HeapAlloc() failed\n");
-        rc = ERROR_NOT_ENOUGH_MEMORY;
-        goto cleanup;
+        /* Create a new UUID */
+        RpcStatus = UuidCreate(&Uuid);
+        if (RpcStatus != RPC_S_OK && RpcStatus != RPC_S_UUID_LOCAL_ONLY)
+        {
+            ERR("UuidCreate() failed with RPC status 0x%lx\n", RpcStatus);
+            rc = ERROR_GEN_FAILURE;
+            goto cleanup;
+        }
+
+        RpcStatus = UuidToStringW(&Uuid, &UuidRpcString);
+        if (RpcStatus != RPC_S_OK)
+        {
+            ERR("UuidToStringW() failed with RPC status 0x%lx\n", RpcStatus);
+            rc = ERROR_GEN_FAILURE;
+            goto cleanup;
+        }
+
+        /* Add curly braces around Uuid */
+        UuidString = HeapAlloc(GetProcessHeap(), 0, (2 + wcslen(UuidRpcString)) * sizeof(WCHAR) + sizeof(UNICODE_NULL));
+        if (!UuidString)
+        {
+            ERR("HeapAlloc() failed\n");
+            rc = ERROR_NOT_ENOUGH_MEMORY;
+            goto cleanup;
+        }
+
+        wcscpy(UuidString, L"{");
+        wcscat(UuidString, UuidRpcString);
+        wcscat(UuidString, L"}");
+        _wcsupr(UuidString);
     }
 
-    wcscpy(UuidString, L"{");
-    wcscat(UuidString, UuidRpcString);
-    wcscat(UuidString, L"}");
-    _wcsupr(UuidString);
-
     if (IsEqualIID(&DeviceInfoData->ClassGuid, &GUID_DEVCLASS_NET))
-        rc = InstallNetDevice(DeviceInfoSet, DeviceInfoData, UuidString, Characteristics, BusType, &Keywords);
+        rc = InstallNetDevice(DeviceInfoSet, DeviceInfoData, UuidString, Characteristics, BusType, &Keywords, Reuse);
     else if (IsEqualIID(&DeviceInfoData->ClassGuid, &GUID_DEVCLASS_NETCLIENT))
         rc = InstallNetClient();
     else if (IsEqualIID(&DeviceInfoData->ClassGuid, &GUID_DEVCLASS_NETSERVICE))

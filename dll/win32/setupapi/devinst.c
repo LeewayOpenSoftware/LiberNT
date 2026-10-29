@@ -6653,7 +6653,20 @@ RestartDevice(
     }
 
     if (cr == CR_SUCCESS)
+    {
+        /*
+         * The devnode was set up, but its driver may have failed to start (Code 10).
+         * That used to go unnoticed: report the problem so that the failure is visible
+         * in the debug log and to callers that query the devnode status afterwards.
+         */
+        if (CM_Get_DevNode_Status_Ex(&Status, &Problem, deviceInfo->dnDevInst, 0, set->hMachine) == CR_SUCCESS &&
+            (Status & DN_HAS_PROBLEM) && Problem != CM_PROB_NEED_RESTART)
+        {
+            ERR("Device %S did not start after its driver was installed (problem %lu, status 0x%lx)\n",
+                deviceInfo->instanceId, Problem, Status);
+        }
         return TRUE;
+    }
 
     InstallParams.cbSize = sizeof(InstallParams);
     if (!SetupDiGetDeviceInstallParamsW(DeviceInfoSet, DeviceInfoData, &InstallParams))

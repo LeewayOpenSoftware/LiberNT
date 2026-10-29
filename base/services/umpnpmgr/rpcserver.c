@@ -89,6 +89,13 @@ RpcServerThread(LPVOID lpParameter)
         return 0;
     }
 
+    /* The driver install jobs share the endpoint of the Plug and Play interface */
+    Status = RpcServerRegisterIf(drvinst_v1_0_s_ifspec,
+                                 NULL,
+                                 NULL);
+    if (Status != RPC_S_OK)
+        DPRINT1("Driver install jobs interface not registered (Status %lx)\n", Status);
+
     Status = RpcServerUseProtseqEpW(L"ncacn_np",
                                     20,
                                     L"\\pipe\\wine_plugplay",

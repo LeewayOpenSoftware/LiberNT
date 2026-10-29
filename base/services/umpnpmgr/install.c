@@ -475,6 +475,15 @@ InstallDevice(PCWSTR DeviceInstance, BOOL ShowWizard)
 
     DPRINT("Installing: %S\n", DeviceInstance);
 
+    /* Install through a worker process of its own when the system is set up for it */
+    if (DrvInstUseWorker())
+    {
+        return DrvInstRunDeviceJob(DeviceInstance,
+                                   DRVINST_SOURCE_ARRIVAL,
+                                   ShowWizard ? 0 : DRVINST_F_SILENT,
+                                   NULL);
+    }
+
     /* Create a random UUID for the named pipe & event*/
     UuidCreate(&RandomUuid);
     _swprintf(UuidString, L"{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
