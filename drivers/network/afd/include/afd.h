@@ -240,6 +240,7 @@ typedef struct _AFD_STORED_DATAGRAM {
 typedef struct _AFD_FCB {
     SOCK_SHARED_INFO SharedData;
     BOOLEAN Locked, Critical, NonBlocking, OobInline, TdiReceiveClosed, SendClosed;
+    BOOLEAN ReceiveShutdown;
     BOOLEAN ReceiveRepostActive, ReceiveRepostPending;
     BOOLEAN SendStartActive, SendStartPending;
     BOOLEAN CleanedUp;

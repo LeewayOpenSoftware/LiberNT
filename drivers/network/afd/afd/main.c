@@ -863,6 +863,7 @@ AfdDisconnect(PDEVICE_OBJECT DeviceObject, PIRP Irp,
 
         /* Mark that we can't issue another receive request */
         FCB->TdiReceiveClosed = TRUE;
+        FCB->ReceiveShutdown = TRUE;
 
         /* Try to cancel a pending TDI receive IRP if there was one in progress */
         if (FCB->ReceiveIrp.InFlightRequest)

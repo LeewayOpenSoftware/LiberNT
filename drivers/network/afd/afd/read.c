@@ -332,7 +332,17 @@ static NTSTATUS ReceiveActivity( PAFD_FCB FCB, PIRP Irp ) {
          * with zero bytes if we haven't yet overread, then kill the others.
          */
         while( !IsListEmpty( &FCB->PendingIrpList[FUNCTION_RECV] ) ) {
-            NextIrpEntry = RemoveHeadList(&FCB->PendingIrpList[FUNCTION_RECV]);
+            if (FCB->ReceiveShutdown)
+            {
+                if (!Irp)
+                    break;
+                NextIrpEntry = &Irp->Tail.Overlay.ListEntry;
+                RemoveEntryList(NextIrpEntry);
+            }
+            else
+            {
+                NextIrpEntry = RemoveHeadList(&FCB->PendingIrpList[FUNCTION_RECV]);
+            }
             NextIrp = CONTAINING_RECORD(NextIrpEntry, IRP, Tail.Overlay.ListEntry);
             NextIrpSp = IoGetCurrentIrpStackLocation( NextIrp );
             RecvReq = GetLockedData(NextIrp, NextIrpSp);
@@ -351,6 +361,8 @@ static NTSTATUS ReceiveActivity( PAFD_FCB FCB, PIRP Irp ) {
             if( NextIrp->MdlAddress ) UnlockRequest( NextIrp, IoGetCurrentIrpStackLocation( NextIrp ) );
             (void)IoSetCancelRoutine(NextIrp, NULL);
             IoCompleteRequest( NextIrp, IO_NETWORK_INCREMENT );
+            if (FCB->ReceiveShutdown)
+                break;
         }
     } else {
         /* Kick the user that receive would be possible now */
