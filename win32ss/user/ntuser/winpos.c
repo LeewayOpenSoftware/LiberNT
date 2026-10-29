@@ -2651,7 +2651,8 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
 
        /* Give newly shown windows a chance to redraw */
        if(((WinPos.flags & SWP_AGG_STATUSFLAGS) != SWP_AGG_NOPOSCHANGE)
-                && !(flags & SWP_AGG_NOCLIENTCHANGE) && (flags & SWP_SHOWWINDOW))
+                && !(flags & SWP_AGG_NOCLIENTCHANGE) && (flags & SWP_SHOWWINDOW)
+                && !(Window->style & WS_MINIMIZE))
        {
            UserSyncAndPaintWindows( Window, RDW_ERASENOW | RDW_CLIPCHILDREN);
        }
