@@ -1491,6 +1491,40 @@ WinPosBatchAddOwnerGroup(PWINPOS_BATCH Batch, HWND *List, PWND Window, PWND Skip
       WinPosBatchAdd(Batch, Window);
 }
 
+static VOID FASTCALL
+WinPosBatchAddOwnedGroups(PWINPOS_BATCH Batch, HWND *List, PWND Owner, PWND Skip)
+{
+   UINT i;
+   PWND Child;
+
+   for (i = 0; List[i]; i++)
+   {
+      Child = ValidateHwndNoErr(List[i]);
+      if (!Child || Child == Skip || Child == Owner || Child->spwndOwner != Owner)
+         continue;
+      WinPosBatchAddOwnerGroup(Batch, List, Child, NULL, FALSE, 1);
+   }
+}
+
+static BOOL FASTCALL
+WinPosHasTopmostOwned(PWND Window)
+{
+   PWND Child, Owner;
+   UINT Depth;
+
+   for (Child = Window->spwndParent->spwndChild; Child; Child = Child->spwndNext)
+   {
+      if (!(Child->ExStyle & WS_EX_TOPMOST))
+         continue;
+      for (Owner = Child->spwndOwner, Depth = 0; Owner && Depth < 64; Owner = Owner->spwndOwner, Depth++)
+      {
+         if (Owner == Window)
+            return TRUE;
+      }
+   }
+   return FALSE;
+}
+
 static BOOL FASTCALL
 WinPosIsIgnoredRequest(PWND Window, HWND hwndInsertAfter, UINT flags)
 {
@@ -1555,7 +1589,8 @@ WinPosBatchAddRequest(PWINPOS_BATCH Batch, PWND Window, HWND hwndInsertAfter, IN
    if (Window->spwndParent && UserIsDesktopWindow(Window->spwndParent) &&
        !(flags & (SWP_NOACTIVATE | SWP_HIDEWINDOW)) &&
        UserHMGetHandle(Window) != UserGetForegroundWindow() &&
-       ((flags & SWP_NOZORDER) || (hwndGroupAfter != HWND_TOPMOST && hwndGroupAfter != HWND_NOTOPMOST)))
+       ((flags & SWP_NOZORDER) ||
+        (hwndGroupAfter != HWND_TOPMOST && hwndGroupAfter != HWND_NOTOPMOST && hwndGroupAfter != HWND_BOTTOM)))
    {
       GroupFlags &= ~SWP_NOZORDER;
       hwndGroupAfter = (Window->ExStyle & WS_EX_TOPMOST) ? HWND_TOPMOST : HWND_TOP;
@@ -1563,8 +1598,7 @@ WinPosBatchAddRequest(PWINPOS_BATCH Batch, PWND Window, HWND hwndInsertAfter, IN
 
    if (!Window->spwndParent || !UserIsDesktopWindow(Window->spwndParent) ||
        (GroupFlags & (SWP_NOZORDER | SWP_NOOWNERZORDER)) ||
-       hwndGroupAfter == HWND_BOTTOM ||
-       (hwndGroupAfter == HWND_NOTOPMOST && !(Window->ExStyle & WS_EX_TOPMOST)) ||
+       (hwndGroupAfter == HWND_NOTOPMOST && !(Window->ExStyle & WS_EX_TOPMOST) && !WinPosHasTopmostOwned(Window)) ||
        !(List = IntWinListChildren(Window->spwndParent)))
    {
       Entry = WinPosBatchAdd(Batch, Window);
@@ -1577,11 +1611,35 @@ WinPosBatchAddRequest(PWINPOS_BATCH Batch, PWND Window, HWND hwndInsertAfter, IN
       hwndBand = hwndGroupAfter;
    else if (hwndGroupAfter == HWND_TOP && (Window->ExStyle & WS_EX_TOPMOST))
       hwndBand = HWND_TOPMOST;
-   else
+   else if (hwndGroupAfter != HWND_BOTTOM)
       bSkipTopmost = !(Window->ExStyle & WS_EX_TOPMOST);
 
    First = Batch->Count;
-   WinPosBatchAddOwnerGroup(Batch, List, Window, NULL, bSkipTopmost, 0);
+   if (hwndGroupAfter == HWND_BOTTOM)
+   {
+      PWND Chain[64];
+      UINT Depth = 1, k;
+
+      Chain[0] = Window;
+      while (Depth < ARRAYSIZE(Chain) && Chain[Depth - 1]->spwndOwner &&
+             Chain[Depth - 1]->spwndOwner->spwndParent == Window->spwndParent)
+      {
+         Chain[Depth] = Chain[Depth - 1]->spwndOwner;
+         Depth++;
+      }
+      for (k = Depth - 1; k > 0; k--)
+         WinPosBatchAddOwnedGroups(Batch, List, Chain[k], Chain[k - 1]);
+      WinPosBatchAddOwnerGroup(Batch, List, Window, NULL, FALSE, 0);
+      for (k = 1; k < Depth; k++)
+      {
+         if (!WinPosBatchFind(Batch, Chain[k]))
+            WinPosBatchAdd(Batch, Chain[k]);
+      }
+   }
+   else
+   {
+      WinPosBatchAddOwnerGroup(Batch, List, Window, NULL, bSkipTopmost, 0);
+   }
    GroupEnd = Batch->Count;
    if (hwndGroupAfter == HWND_TOP || hwndGroupAfter == HWND_TOPMOST || hwndGroupAfter == HWND_NOTOPMOST)
    {
@@ -1722,7 +1780,8 @@ WinPosFixupFlags(WINDOWPOS *WinPos, PWND Wnd, BOOL bChained)
       /* Bring to the top when activating */
       if (!(WinPos->flags & (SWP_NOACTIVATE|SWP_HIDEWINDOW)) &&
            (WinPos->flags & SWP_NOZORDER ||
-           (WinPos->hwndInsertAfter != HWND_TOPMOST && WinPos->hwndInsertAfter != HWND_NOTOPMOST)))
+           (WinPos->hwndInsertAfter != HWND_TOPMOST && WinPos->hwndInsertAfter != HWND_NOTOPMOST &&
+            WinPos->hwndInsertAfter != HWND_BOTTOM)))
       {
          WinPos->flags &= ~SWP_NOZORDER;
          WinPos->hwndInsertAfter = (0 != (Wnd->ExStyle & WS_EX_TOPMOST) ? HWND_TOPMOST : HWND_TOP);
