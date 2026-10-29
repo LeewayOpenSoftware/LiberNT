@@ -1184,6 +1184,33 @@ IntHandleAltNumpad(
     return FALSE; /* More key processing has to be done */
 }
 
+static BOOL
+IntIsKeyDownForQueue(PUSER_MESSAGE_QUEUE MessageQueue, WORD wSimpleVk)
+{
+    PLIST_ENTRY ListEntry;
+    PUSER_MESSAGE Message;
+    BOOL bDown = IS_KEY_DOWN(MessageQueue->afKeyState, wSimpleVk);
+
+    for (ListEntry = MessageQueue->HardwareMessagesListHead.Flink;
+         ListEntry != &MessageQueue->HardwareMessagesListHead;
+         ListEntry = ListEntry->Flink)
+    {
+        Message = CONTAINING_RECORD(ListEntry, USER_MESSAGE, ListEntry);
+        switch (Message->Msg.message)
+        {
+            case WM_KEYDOWN:
+            case WM_SYSKEYDOWN:
+            case WM_KEYUP:
+            case WM_SYSKEYUP:
+                if (IntSimplifyVk((WORD)(Message->Msg.wParam & 0xFF)) == wSimpleVk)
+                    bDown = (Message->Msg.message == WM_KEYDOWN || Message->Msg.message == WM_SYSKEYDOWN);
+                break;
+        }
+    }
+
+    return bDown;
+}
+
 /*
  * UserSendKeyboardInput
  *
@@ -1395,7 +1422,7 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
                 Msg.lParam |= KF_EXTENDED << 16;
             if (IS_KEY_DOWN(gafAsyncKeyState, VK_MENU))
                 Msg.lParam |= KF_ALTDOWN << 16;
-            if (bWasSimpleDown)
+            if (IntIsKeyDownForQueue(pti->MessageQueue, wSimpleVk))
                 Msg.lParam |= KF_REPEAT << 16;
             if (!bIsDown)
                 Msg.lParam |= (ULONG)KF_UP << 16;
