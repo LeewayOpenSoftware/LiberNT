@@ -34,6 +34,22 @@ DrvInstInitialize(VOID)
     JobsInitialized = (hRunMutex != NULL);
 }
 
+/* Serializes rollback with running install jobs; the RPC path uses these. */
+DWORD
+DrvInstAcquireInstallLock(
+    _In_ DWORD TimeoutMs)
+{
+    if (!JobsInitialized)
+        return ERROR_SERVICE_NOT_ACTIVE;
+    return WaitForSingleObject(hRunMutex, TimeoutMs) == WAIT_OBJECT_0 ? ERROR_SUCCESS : ERROR_BUSY;
+}
+
+VOID
+DrvInstReleaseInstallLock(VOID)
+{
+    ReleaseMutex(hRunMutex);
+}
+
 static PDRVINST_JOB_INFO
 FindJob(
     _In_ DRVINST_JOB_ID JobId)
@@ -373,19 +389,32 @@ ExecuteJob(
 {
     DRVINST_RESULT Result;
     ULONG State;
+    DWORD SnapshotSeq = 0;
+    DWORD RollbackError;
 
     WaitForSingleObject(hRunMutex, INFINITE);
 
     SetJobState(JobId, DrvInstJobRunning, NULL);
-    DrvInstSnapshotDevice(DeviceInstanceId, NULL);
+    if (DrvInstSnapshotDevice(DeviceInstanceId, &SnapshotSeq) != ERROR_SUCCESS)
+        SnapshotSeq = 0;
     State = RunWorker(DeviceInstanceId, !(Flags & DRVINST_F_SILENT), &Result);
     if ((State == DrvInstJobFailed || State == DrvInstJobTimedOut) &&
         Result.Problem != 0 &&
-        QueryDrvInstValue(DRVINST_REG_AUTOROLLBACK, 1) != 0 &&
-        DrvInstRollbackDevice(DeviceInstanceId) == ERROR_SUCCESS)
+        SnapshotSeq != 0 &&
+        QueryDrvInstValue(DRVINST_REG_AUTOROLLBACK, 1) != 0)
     {
-        Result.Flags |= DRVINST_RF_ROLLEDBACK;
-        State = DrvInstJobRolledBack;
+        /* Only the snapshot of this job: an old one may not describe the device. */
+        RollbackError = DrvInstRollbackDeviceToSeq(DeviceInstanceId, SnapshotSeq);
+        if (RollbackError == ERROR_SUCCESS)
+        {
+            Result.Flags |= DRVINST_RF_ROLLEDBACK;
+            State = DrvInstJobRolledBack;
+        }
+        else if (RollbackError == ERROR_INSTALL_FAILURE)
+        {
+            /* The registry is restored but the device still reports a problem. */
+            Result.Flags |= DRVINST_RF_ROLLEDBACK;
+        }
     }
     SetJobState(JobId, State, &Result);
 

@@ -32,8 +32,15 @@
 #define CLASS_KEY             L"SYSTEM\\CurrentControlSet\\Control\\Class\\"
 #define SERVICES_KEY          L"SYSTEM\\CurrentControlSet\\Services\\"
 
-#define KEY_NAME_CCH          256
-#define VALUE_NAME_CCH        256
+/* One snapshot sequence counter for the whole service; ExecuteJob serializes
+ * installs, but the counter also feeds future manual paths. */
+static CRITICAL_SECTION SnapshotLock;
+
+VOID
+DrvInstRollbackInitialize(VOID)
+{
+    InitializeCriticalSection(&SnapshotLock);
+}
 
 /* The device id is used as a single registry key name: encode its separators. */
 static VOID
@@ -48,6 +55,30 @@ EncodeDeviceId(
     *Encoded = UNICODE_NULL;
 }
 
+/* A service or key leaf name taken from the registry must not be able to
+ * redirect a composed path before it is deleted. */
+static BOOL
+IsSafeKeyName(
+    _In_ PCWSTR Name)
+{
+    static const WCHAR Allowed[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.";
+    PCWSTR p;
+
+    if (!Name[0])
+        return FALSE;
+    for (; *Name; Name++)
+    {
+        for (p = Allowed; *p; p++)
+        {
+            if (*p == *Name)
+                break;
+        }
+        if (!*p)
+            return FALSE;
+    }
+    return TRUE;
+}
+
 static LONG
 OpenPath(
     _In_ HKEY hRoot,
@@ -58,14 +89,115 @@ OpenPath(
     return RegOpenKeyExW(hRoot, Path, 0, Sam, phKey);
 }
 
+typedef struct _NAME_LIST
+{
+    PWSTR Names;
+    SIZE_T Count;
+    SIZE_T Capacity;
+    SIZE_T Stride;
+} NAME_LIST, *PNAME_LIST;
+
+static VOID
+NameListFree(
+    _Inout_ PNAME_LIST List)
+{
+    HeapFree(GetProcessHeap(), 0, List->Names);
+    List->Names = NULL;
+    List->Count = 0;
+    List->Capacity = 0;
+    List->Stride = 0;
+}
+
+/* Enumerates the value names or subkey names of hKey into a stable list, so
+ * entries can be deleted while iterating over the list. */
+static LONG
+NameListCollect(
+    _In_ HKEY hKey,
+    _In_ BOOL Values,
+    _Out_ PNAME_LIST List)
+{
+    DWORD Count, MaxLen, i, Size;
+    WCHAR StackBuffer[64];
+    PWSTR Buffer = StackBuffer;
+    DWORD BufferCch = (DWORD)RTL_NUMBER_OF(StackBuffer);
+    LONG Error;
+
+    Error = Values
+        ? RegQueryInfoKeyW(hKey, NULL, NULL, NULL, NULL, NULL, NULL, &Count, &MaxLen, NULL, NULL, NULL)
+        : RegQueryInfoKeyW(hKey, NULL, NULL, NULL, &Count, &MaxLen, NULL, NULL, NULL, NULL, NULL, NULL);
+    if (Error != ERROR_SUCCESS)
+        return Error;
+
+    if (MaxLen + 1 > BufferCch)
+    {
+        Buffer = HeapAlloc(GetProcessHeap(), 0, (MaxLen + 1) * sizeof(WCHAR));
+        if (!Buffer)
+            return ERROR_NOT_ENOUGH_MEMORY;
+        BufferCch = MaxLen + 1;
+    }
+
+    List->Capacity = (Count + 1) * BufferCch;
+    List->Stride = BufferCch;
+    List->Names = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, List->Capacity * sizeof(WCHAR));
+    if (!List->Names)
+    {
+        Error = ERROR_NOT_ENOUGH_MEMORY;
+        goto Cleanup;
+    }
+
+    for (i = 0; i < Count; i++)
+    {
+        PWSTR Next;
+
+        Size = BufferCch;
+        Error = Values ? RegEnumValueW(hKey, i, Buffer, &Size, NULL, NULL, NULL, NULL)
+                       : RegEnumKeyExW(hKey, i, Buffer, &Size, NULL, NULL, NULL, NULL);
+        if (Error != ERROR_SUCCESS)
+            break;
+
+        Next = List->Names + List->Count * List->Stride;
+        if ((List->Count + 1) * List->Stride >= List->Capacity)
+        {
+            Error = ERROR_BUFFER_OVERFLOW;
+            break;
+        }
+        lstrcpynW(Next, Buffer, (int)List->Stride);
+        List->Count++;
+    }
+
+Cleanup:
+    if (Buffer != StackBuffer)
+        HeapFree(GetProcessHeap(), 0, Buffer);
+    if (Error != ERROR_SUCCESS)
+        NameListFree(List);
+    return Error;
+}
+
+static BOOL
+NameListHas(
+    _In_ PNAME_LIST List,
+    _In_ PCWSTR Name)
+{
+    SIZE_T i;
+
+    if (!List->Names || List->Count == 0)
+        return FALSE;
+    for (i = 0; i < List->Count; i++)
+    {
+        if (!lstrcmpW(List->Names + i * List->Stride, Name))
+            return TRUE;
+    }
+    return FALSE;
+}
+
 /* Copies every value and subkey of hSrc into the already open hDst. */
 static LONG
 CopyTreeIntoKey(
     _In_ HKEY hSrc,
     _In_ HKEY hDst)
 {
-    WCHAR ValueName[VALUE_NAME_CCH];
-    WCHAR KeyName[KEY_NAME_CCH];
+    WCHAR ValueName[256];
+    WCHAR KeyName[256];
     PBYTE Data = NULL;
     DWORD ValueCount, MaxValueLen, MaxDataLen;
     DWORD KeyCount, MaxKeyLen, Type, Size, i;
@@ -76,13 +208,12 @@ CopyTreeIntoKey(
                              &ValueCount, &MaxValueLen, &MaxDataLen, NULL, NULL);
     if (Error != ERROR_SUCCESS)
         return Error;
-
-    if (MaxValueLen >= VALUE_NAME_CCH || MaxKeyLen >= KEY_NAME_CCH)
+    if (MaxValueLen >= RTL_NUMBER_OF(ValueName) || MaxKeyLen >= RTL_NUMBER_OF(KeyName))
         return ERROR_BUFFER_OVERFLOW;
 
     for (i = 0; i < ValueCount; i++)
     {
-        Size = sizeof(ValueName) / sizeof(ValueName[0]);
+        Size = RTL_NUMBER_OF(ValueName);
         Error = RegEnumValueW(hSrc, i, ValueName, &Size, NULL, &Type, NULL, NULL);
         if (Error != ERROR_SUCCESS)
             return Error;
@@ -96,18 +227,16 @@ CopyTreeIntoKey(
 
         Size = MaxDataLen;
         Error = RegQueryValueExW(hSrc, ValueName, NULL, &Type, Data, &Size);
-        if (Error != ERROR_SUCCESS)
-            break;
-        Error = RegSetValueExW(hDst, ValueName, 0, Type, Data, Size);
+        if (Error == ERROR_SUCCESS)
+            Error = RegSetValueExW(hDst, ValueName, 0, Type, Data, Size);
         if (Error != ERROR_SUCCESS)
             break;
     }
-
     HeapFree(GetProcessHeap(), 0, Data);
 
-    for (i = 0; KeyCount && i < KeyCount && Error == ERROR_SUCCESS; i++)
+    for (i = 0; i < KeyCount && Error == ERROR_SUCCESS; i++)
     {
-        Size = sizeof(KeyName) / sizeof(KeyName[0]);
+        Size = RTL_NUMBER_OF(KeyName);
         Error = RegEnumKeyExW(hSrc, i, KeyName, &Size, NULL, NULL, NULL, NULL);
         if (Error != ERROR_SUCCESS)
             break;
@@ -135,87 +264,73 @@ SyncKeyWithSnapshot(
     _In_ HKEY hSnap,
     _In_ HKEY hReal)
 {
-    WCHAR ValueName[VALUE_NAME_CCH];
-    WCHAR KeyName[KEY_NAME_CCH];
-    WCHAR SnapName[VALUE_NAME_CCH];
-    DWORD ValueCount, MaxValueLen, DataLen;
-    DWORD KeyCount, MaxKeyLen, Type, Size, i, j;
+    NAME_LIST SnapValues = {0}, RealValues = {0}, SnapKeys = {0}, RealKeys = {0};
+    DWORD ValueCount, i, Type, Size;
     HKEY hSnapSub = NULL, hRealSub = NULL;
     LONG Error;
 
-    Error = RegQueryInfoKeyW(hSnap, NULL, NULL, NULL, &KeyCount, &MaxKeyLen, NULL,
-                             &ValueCount, &MaxValueLen, &DataLen, NULL, NULL);
+    Error = RegQueryInfoKeyW(hSnap, NULL, NULL, NULL, NULL, NULL, NULL,
+                             &ValueCount, NULL, NULL, NULL, NULL);
     if (Error != ERROR_SUCCESS)
         return Error;
 
-    if (MaxValueLen >= VALUE_NAME_CCH || MaxKeyLen >= KEY_NAME_CCH)
-        return ERROR_BUFFER_OVERFLOW;
+    Error = NameListCollect(hSnap, TRUE, &SnapValues);
+    if (Error != ERROR_SUCCESS)
+        goto Cleanup;
+    Error = NameListCollect(hReal, TRUE, &RealValues);
+    if (Error != ERROR_SUCCESS)
+        goto Cleanup;
+    Error = NameListCollect(hSnap, FALSE, &SnapKeys);
+    if (Error != ERROR_SUCCESS)
+        goto Cleanup;
+    Error = NameListCollect(hReal, FALSE, &RealKeys);
+    if (Error != ERROR_SUCCESS)
+        goto Cleanup;
 
-    for (i = 0; i < ValueCount; i++)
+    /* Overwrite with every value the snapshot has. */
+    for (i = 0; i < SnapValues.Count; i++)
     {
-        Size = sizeof(ValueName) / sizeof(ValueName[0]);
-        Error = RegEnumValueW(hSnap, i, ValueName, &Size, NULL, &Type, NULL, NULL);
-        if (Error != ERROR_SUCCESS)
-            return Error;
+        PCWSTR Name = SnapValues.Names + i * SnapValues.Stride;
+        PBYTE Data;
 
         Size = 0;
-        RegQueryValueExW(hSnap, ValueName, NULL, NULL, NULL, &Size);
+        RegQueryValueExW(hSnap, Name, NULL, &Type, NULL, &Size);
+        Data = HeapAlloc(GetProcessHeap(), 0, Size ? Size : 1);
+        if (!Data)
         {
-            PBYTE Data = HeapAlloc(GetProcessHeap(), 0, Size ? Size : 1);
-            if (!Data)
-                return ERROR_NOT_ENOUGH_MEMORY;
-            Error = RegQueryValueExW(hSnap, ValueName, NULL, NULL, Data, &Size);
-            if (Error == ERROR_SUCCESS)
-                Error = RegSetValueExW(hReal, ValueName, 0, Type, Data, Size);
-            HeapFree(GetProcessHeap(), 0, Data);
+            Error = ERROR_NOT_ENOUGH_MEMORY;
+            goto Cleanup;
         }
+        Error = RegQueryValueExW(hSnap, Name, NULL, &Type, Data, &Size);
+        if (Error == ERROR_SUCCESS)
+            Error = RegSetValueExW(hReal, Name, 0, Type, Data, Size);
+        HeapFree(GetProcessHeap(), 0, Data);
         if (Error != ERROR_SUCCESS)
-            return Error;
+            goto Cleanup;
     }
 
+    /* Delete the values only the failed install added. */
+    for (i = 0; i < RealValues.Count; i++)
     {
-        DWORD RealCount;
-        Error = RegQueryInfoKeyW(hReal, NULL, NULL, NULL, NULL, NULL, NULL,
-                                 &RealCount, NULL, NULL, NULL, NULL);
-        if (Error != ERROR_SUCCESS)
-            return Error;
+        PCWSTR Name = RealValues.Names + i * RealValues.Stride;
 
-        for (i = 0; i < RealCount; /* requery below as we delete */)
+        if (!NameListHas(&SnapValues, Name))
         {
-            Size = sizeof(ValueName) / sizeof(ValueName[0]);
-            Error = RegEnumValueW(hReal, 0, ValueName, &Size, NULL, NULL, NULL, NULL);
-            if (Error != ERROR_SUCCESS)
-                return Error == ERROR_NO_MORE_ITEMS ? ERROR_SUCCESS : Error;
-
-            for (j = 0; j < ValueCount; j++)
-            {
-                Size = sizeof(SnapName) / sizeof(SnapName[0]);
-                if (RegEnumValueW(hSnap, j, SnapName, &Size, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
-                    continue;
-                if (!lstrcmpW(SnapName, ValueName))
-                    break;
-            }
-            if (j == ValueCount)
-            {
-                Error = RegDeleteValueW(hReal, ValueName);
-                if (Error != ERROR_SUCCESS && Error != ERROR_FILE_NOT_FOUND)
-                    return Error;
-            }
-            i++;
+            Error = RegDeleteValueW(hReal, Name);
+            if (Error != ERROR_SUCCESS && Error != ERROR_FILE_NOT_FOUND)
+                goto Cleanup;
         }
     }
 
-    for (i = 0; i < KeyCount; i++)
+    /* Recurse into the subkeys the snapshot has (create + sync). */
+    for (i = 0; i < SnapKeys.Count; i++)
     {
-        Size = sizeof(KeyName) / sizeof(KeyName[0]);
-        Error = RegEnumKeyExW(hSnap, i, KeyName, &Size, NULL, NULL, NULL, NULL);
-        if (Error != ERROR_SUCCESS)
-            return Error;
+        PCWSTR Name = SnapKeys.Names + i * SnapKeys.Stride;
 
-        Error = OpenPath(hSnap, KeyName, KEY_READ, &hSnapSub);
+        Error = OpenPath(hSnap, Name, KEY_READ, &hSnapSub);
         if (Error != ERROR_SUCCESS)
-            return Error;
-        Error = RegCreateKeyExW(hReal, KeyName, 0, NULL, REG_OPTION_NON_VOLATILE,
+            goto Cleanup;
+        Error = RegCreateKeyExW(hReal, Name, 0, NULL, REG_OPTION_NON_VOLATILE,
                                 KEY_WRITE | KEY_READ, NULL, &hRealSub, NULL);
         if (Error == ERROR_SUCCESS)
         {
@@ -223,65 +338,78 @@ SyncKeyWithSnapshot(
             RegCloseKey(hRealSub);
         }
         RegCloseKey(hSnapSub);
+        hSnapSub = NULL;
         if (Error != ERROR_SUCCESS)
-            return Error;
+            goto Cleanup;
     }
 
+    /* Delete the subkeys only the failed install added. */
+    for (i = 0; i < RealKeys.Count; i++)
     {
-        DWORD RealCount, MaxRealLen;
-        Error = RegQueryInfoKeyW(hReal, NULL, NULL, NULL, &RealCount, &MaxRealLen, NULL,
-                                 NULL, NULL, NULL, NULL, NULL);
-        if (Error != ERROR_SUCCESS)
-            return Error;
+        PCWSTR Name = RealKeys.Names + i * RealKeys.Stride;
 
-        for (i = 0; i < RealCount; /* requery as we delete */)
+        if (!NameListHas(&SnapKeys, Name))
         {
-            Size = sizeof(KeyName) / sizeof(KeyName[0]);
-            Error = RegEnumKeyExW(hReal, 0, KeyName, &Size, NULL, NULL, NULL, NULL);
-            if (Error != ERROR_SUCCESS)
-                return Error == ERROR_NO_MORE_ITEMS ? ERROR_SUCCESS : Error;
-
-            if (RegOpenKeyExW(hSnap, KeyName, 0, KEY_READ, &hSnapSub) == ERROR_SUCCESS)
-            {
-                RegCloseKey(hSnapSub);
-            }
-            else
-            {
-                Error = RegDeleteTreeW(hReal, KeyName);
-                if (Error != ERROR_SUCCESS && Error != ERROR_FILE_NOT_FOUND)
-                    return Error;
-            }
-            i++;
+            Error = RegDeleteTreeW(hReal, Name);
+            if (Error != ERROR_SUCCESS && Error != ERROR_FILE_NOT_FOUND)
+                goto Cleanup;
         }
     }
 
-    return ERROR_SUCCESS;
+    Error = ERROR_SUCCESS;
+
+Cleanup:
+    NameListFree(&SnapValues);
+    NameListFree(&RealValues);
+    NameListFree(&SnapKeys);
+    NameListFree(&RealKeys);
+    if (hSnapSub)
+        RegCloseKey(hSnapSub);
+    if (hRealSub)
+        RegCloseKey(hRealSub);
+    UNREFERENCED_PARAMETER(ValueCount);
+    return Error;
 }
 
+/* Deletes every snapshot of the device except the Newest two. */
 static VOID
 PruneOldSnapshots(
-    _In_ HKEY hDeviceKey,
-    _In_ ULONG KeepSeq)
+    _In_ HKEY hDeviceKey)
 {
-    WCHAR KeyName[KEY_NAME_CCH];
-    DWORD KeyCount, MaxKeyLen, Size, i;
+    NAME_LIST Keys = {0};
+    ULONG Newest[2] = {0, 0};
+    SIZE_T i;
     LONG Error;
 
-    Error = RegQueryInfoKeyW(hDeviceKey, NULL, NULL, NULL, &KeyCount, &MaxKeyLen,
-                             NULL, NULL, NULL, NULL, NULL, NULL);
+    Error = NameListCollect(hDeviceKey, FALSE, &Keys);
     if (Error != ERROR_SUCCESS)
         return;
+    if (Keys.Count == 0)
+        goto Cleanup;
 
-    for (i = 0; i < KeyCount; i++)
+    for (i = 0; i < Keys.Count; i++)
     {
-        ULONG Seq;
-        Size = sizeof(KeyName) / sizeof(KeyName[0]);
-        if (RegEnumKeyExW(hDeviceKey, i, KeyName, &Size, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
-            continue;
-        Seq = wcstoul(KeyName, NULL, 10);
-        if (Seq < KeepSeq + 1 - DRVINST_MAX_SNAPSHOTS)
-            RegDeleteTreeW(hDeviceKey, KeyName);
+        ULONG Seq = wcstoul(Keys.Names + i * Keys.Stride, NULL, 10);
+        if (Seq >= Newest[0])
+        {
+            Newest[1] = Newest[0];
+            Newest[0] = Seq;
+        }
+        else if (Seq > Newest[1])
+        {
+            Newest[1] = Seq;
+        }
     }
+
+    for (i = 0; i < Keys.Count; i++)
+    {
+        ULONG Seq = wcstoul(Keys.Names + i * Keys.Stride, NULL, 10);
+        if (Seq != Newest[0] && Seq != Newest[1])
+            RegDeleteTreeW(hDeviceKey, Keys.Names + i * Keys.Stride);
+    }
+
+Cleanup:
+    NameListFree(&Keys);
 }
 
 /* Saves the devnode, its class driver key and its service key. */
@@ -292,7 +420,7 @@ DrvInstSnapshotDevice(
 {
     WCHAR Encoded[DRVINST_DEVICE_ID_CCH];
     WCHAR Path[512];
-    WCHAR ValueBuffer[VALUE_NAME_CCH];
+    WCHAR ValueBuffer[256];
     HKEY hSnapshots = NULL, hDeviceKey = NULL, hSeqKey = NULL;
     HKEY hSrc = NULL, hDst = NULL;
     DWORD Seq = 0, Size, HadDriver = 0;
@@ -303,10 +431,12 @@ DrvInstSnapshotDevice(
 
     EncodeDeviceId(DeviceInstanceId, Encoded);
 
+    EnterCriticalSection(&SnapshotLock);
+
     Error = RegCreateKeyExW(HKEY_LOCAL_MACHINE, DRVINST_REG_SNAPSHOTS, 0, NULL,
                             REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hSnapshots, NULL);
     if (Error != ERROR_SUCCESS)
-        return Error;
+        goto Cleanup;
 
     Size = sizeof(Seq);
     if (RegQueryValueExW(hSnapshots, L"NextSeq", NULL, NULL, (PBYTE)&Seq, &Size) != ERROR_SUCCESS || Size != sizeof(Seq))
@@ -332,9 +462,10 @@ DrvInstSnapshotDevice(
     RegSetValueExW(hSeqKey, SNAP_VAL_DEVICENAME, 0, REG_SZ,
                    (PBYTE)DeviceInstanceId, (lstrlenW(DeviceInstanceId) + 1) * sizeof(WCHAR));
 
-    /* 1. The devnode subtree. */
     _snwprintf(Path, RTL_NUMBER_OF(Path), L"%s%s", ENUM_KEY, DeviceInstanceId);
     Path[RTL_NUMBER_OF(Path) - 1] = UNICODE_NULL;
+
+    /* 1. The devnode subtree. */
     Error = OpenPath(HKEY_LOCAL_MACHINE, Path, KEY_READ, &hSrc);
     if (Error != ERROR_SUCCESS)
         goto Cleanup;
@@ -368,6 +499,8 @@ DrvInstSnapshotDevice(
             {
                 if (CopyTreeIntoKey(hSrc, hDst) == ERROR_SUCCESS)
                     HadDriver |= 1;
+                else
+                    DPRINT1("Snapshot of class key %ls incomplete for %ls\n", ClassPath, DeviceInstanceId);
                 RegCloseKey(hDst);
             }
             RegCloseKey(hSrc);
@@ -393,6 +526,8 @@ DrvInstSnapshotDevice(
             {
                 if (CopyTreeIntoKey(hSrc, hDst) == ERROR_SUCCESS)
                     HadDriver |= 2;
+                else
+                    DPRINT1("Snapshot of service %ls incomplete for %ls\n", ValueBuffer, DeviceInstanceId);
                 RegCloseKey(hDst);
             }
             RegCloseKey(hSrc);
@@ -402,7 +537,7 @@ DrvInstSnapshotDevice(
 
     RegSetValueExW(hSeqKey, SNAP_VAL_HADDRIVER, 0, REG_DWORD, (PBYTE)&HadDriver, sizeof(HadDriver));
 
-    PruneOldSnapshots(hDeviceKey, Seq);
+    PruneOldSnapshots(hDeviceKey);
     if (OutSeq)
         *OutSeq = Seq;
     Error = ERROR_SUCCESS;
@@ -416,57 +551,64 @@ Cleanup:
         RegCloseKey(hDeviceKey);
     if (hSnapshots)
         RegCloseKey(hSnapshots);
+    LeaveCriticalSection(&SnapshotLock);
     return Error;
 }
 
 static ULONG
 FindNewestSeq(
-    _In_ HKEY hDeviceKey,
-    _Out_opt_ PULONG OutCount)
+    _In_ HKEY hDeviceKey)
 {
-    WCHAR KeyName[KEY_NAME_CCH];
-    DWORD KeyCount, MaxKeyLen, Size, i;
-    ULONG Newest = 0;
+    NAME_LIST Keys = {0};
+    ULONG Newest = 0, Seq, i;
 
-    if (OutCount)
-        *OutCount = 0;
-    if (RegQueryInfoKeyW(hDeviceKey, NULL, NULL, NULL, &KeyCount, &MaxKeyLen, NULL,
-                         NULL, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+    if (NameListCollect(hDeviceKey, FALSE, &Keys) != ERROR_SUCCESS)
         return 0;
+    if (Keys.Count == 0)
+        goto Cleanup;
 
-    for (i = 0; i < KeyCount; i++)
+    for (i = 0; i < Keys.Count; i++)
     {
-        ULONG Seq;
-        Size = sizeof(KeyName) / sizeof(KeyName[0]);
-        if (RegEnumKeyExW(hDeviceKey, i, KeyName, &Size, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
-            continue;
-        Seq = wcstoul(KeyName, NULL, 10);
-        if (OutCount)
-            (*OutCount)++;
+        Seq = wcstoul(Keys.Names + i * Keys.Stride, NULL, 10);
         if (Seq > Newest)
             Newest = Seq;
     }
+
+Cleanup:
+    NameListFree(&Keys);
     return Newest;
 }
 
-/* Restores the newest snapshot of the device and re-runs its start. */
+/* Restores one snapshot of the device and re-runs its start.
+ * Returns ERROR_SUCCESS when the registry is restored and the device restarted
+ * without a problem, ERROR_INSTALL_FAILURE when the registry is restored but
+ * the device still reports a problem, and another error when the restore
+ * itself failed. The caller must hold the install lock. */
 DWORD
-DrvInstRollbackDevice(
-    _In_ PCWSTR DeviceInstanceId)
+DrvInstRollbackDeviceToSeq(
+    _In_ PCWSTR DeviceInstanceId,
+    _In_ ULONG Seq)
 {
     WCHAR Encoded[DRVINST_DEVICE_ID_CCH];
     WCHAR Path[512];
-    WCHAR CurrentService[VALUE_NAME_CCH];
+    WCHAR CurrentDriver[256];
+    WCHAR RestoredDriver[256];
+    WCHAR CurrentService[256];
     WCHAR ClassPath[512];
-    WCHAR ServiceName[VALUE_NAME_CCH];
+    WCHAR ServiceName[256];
     WCHAR SeqName[16];
     HKEY hSnapshots = NULL, hDeviceKey = NULL, hSeqKey = NULL;
     HKEY hSnap = NULL, hReal = NULL;
     DWORD Size, HadDriver = 0, Disposition;
-    ULONG Newest;
+    CONFIGRET Cr = CR_FAILURE;
+    DEVINST DevInst;
     LONG Error;
 
     EncodeDeviceId(DeviceInstanceId, Encoded);
+    CurrentDriver[0] = UNICODE_NULL;
+    CurrentService[0] = UNICODE_NULL;
+    ServiceName[0] = UNICODE_NULL;
+    ClassPath[0] = UNICODE_NULL;
 
     Error = OpenPath(HKEY_LOCAL_MACHINE, DRVINST_REG_SNAPSHOTS, KEY_READ, &hSnapshots);
     if (Error != ERROR_SUCCESS)
@@ -475,23 +617,22 @@ DrvInstRollbackDevice(
     if (Error != ERROR_SUCCESS)
         goto Cleanup;
 
-    Newest = FindNewestSeq(hDeviceKey, NULL);
-    if (!Newest)
+    _snwprintf(SeqName, RTL_NUMBER_OF(SeqName), L"%lu", Seq);
+    SeqName[RTL_NUMBER_OF(SeqName) - 1] = UNICODE_NULL;
+    Error = OpenPath(hDeviceKey, SeqName, KEY_READ, &hSeqKey);
+    if (Error != ERROR_SUCCESS)
     {
         Error = ERROR_NOT_FOUND;
         goto Cleanup;
     }
 
-    _snwprintf(SeqName, RTL_NUMBER_OF(SeqName), L"%lu", Newest);
-    SeqName[RTL_NUMBER_OF(SeqName) - 1] = UNICODE_NULL;
-    Error = OpenPath(hDeviceKey, SeqName, KEY_READ, &hSeqKey);
-    if (Error != ERROR_SUCCESS)
-        goto Cleanup;
-
-    /* The service the failed install registered, before we overwrite the devnode. */
+    /* What the failed install pointed the devnode at, before we overwrite it. */
     _snwprintf(Path, RTL_NUMBER_OF(Path), L"%s%s", ENUM_KEY, DeviceInstanceId);
     Path[RTL_NUMBER_OF(Path) - 1] = UNICODE_NULL;
-    CurrentService[0] = UNICODE_NULL;
+    Size = sizeof(CurrentDriver);
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, Path, L"Driver", RRF_RT_REG_SZ, NULL,
+                     CurrentDriver, &Size) != ERROR_SUCCESS)
+        CurrentDriver[0] = UNICODE_NULL;
     Size = sizeof(CurrentService);
     if (RegGetValueW(HKEY_LOCAL_MACHINE, Path, L"Service", RRF_RT_REG_SZ, NULL,
                      CurrentService, &Size) != ERROR_SUCCESS)
@@ -502,11 +643,7 @@ DrvInstRollbackDevice(
         HadDriver = 0;
 
     Size = sizeof(ClassPath);
-    if (RegGetValueW(hSeqKey, NULL, SNAP_VAL_CLASSKEYPATH, RRF_RT_REG_SZ, NULL,
-                     ClassPath, &Size) != ERROR_SUCCESS)
-        ClassPath[0] = UNICODE_NULL;
-
-    ServiceName[0] = UNICODE_NULL;
+    RegGetValueW(hSeqKey, NULL, SNAP_VAL_CLASSKEYPATH, RRF_RT_REG_SZ, NULL, ClassPath, &Size);
     Size = sizeof(ServiceName);
     RegGetValueW(hSeqKey, NULL, SNAP_VAL_SERVICENAME, RRF_RT_REG_SZ, NULL, ServiceName, &Size);
 
@@ -526,7 +663,8 @@ DrvInstRollbackDevice(
     if (Error != ERROR_SUCCESS)
         goto Cleanup;
 
-    /* 2. Class driver key: restore the saved one, or delete what the failed install added. */
+    /* 2. Class driver key: restore the saved one, and remove the one the
+     *    failed install left behind when it differs. */
     if (HadDriver & 1)
     {
         Error = OpenPath(hSeqKey, SNAP_KEY_CLASSKEY, KEY_READ, &hSnap);
@@ -543,14 +681,28 @@ DrvInstRollbackDevice(
             hSnap = NULL;
         }
     }
-    else if (ClassPath[0])
+    if (Error == ERROR_SUCCESS && CurrentDriver[0])
     {
-        RegDeleteTreeW(HKEY_LOCAL_MACHINE, ClassPath);
+        Size = sizeof(RestoredDriver);
+        if (RegGetValueW(HKEY_LOCAL_MACHINE, Path, L"Driver", RRF_RT_REG_SZ, NULL,
+                         RestoredDriver, &Size) == ERROR_SUCCESS &&
+            lstrcmpW(RestoredDriver, CurrentDriver) != 0 &&
+            IsSafeKeyName(CurrentDriver))
+        {
+            WCHAR Orphan[512];
+
+            _snwprintf(Orphan, RTL_NUMBER_OF(Orphan), L"%s%s", CLASS_KEY, CurrentDriver);
+            Orphan[RTL_NUMBER_OF(Orphan) - 1] = UNICODE_NULL;
+            RegDeleteTreeW(HKEY_LOCAL_MACHINE, Orphan);
+        }
     }
     if (Error != ERROR_SUCCESS)
         goto Cleanup;
 
-    /* 3. Service: restore the saved one, or delete the service of the failed install. */
+    /* 3. Service: restore the saved one; remove the service of the failed
+     *    install only when it is not the restored one, has a safe name, and is
+     *    a demand- or disabled-start service (never a boot/system one, and
+     *    never the service another device may share). */
     if (HadDriver & 2)
     {
         Error = OpenPath(hSeqKey, SNAP_KEY_SERVICE, KEY_READ, &hSnap);
@@ -571,30 +723,51 @@ DrvInstRollbackDevice(
             hSnap = NULL;
         }
     }
-    else if (CurrentService[0])
+
+    if (Error == ERROR_SUCCESS && CurrentService[0] &&
+        lstrcmpW(CurrentService, ServiceName) != 0 && IsSafeKeyName(CurrentService))
     {
         WCHAR ServicePath[512];
+        DWORD Start = 0xFFFFFFFF;
 
+        Size = sizeof(Start);
         _snwprintf(ServicePath, RTL_NUMBER_OF(ServicePath), L"%s%s", SERVICES_KEY, CurrentService);
         ServicePath[RTL_NUMBER_OF(ServicePath) - 1] = UNICODE_NULL;
-        RegDeleteTreeW(HKEY_LOCAL_MACHINE, ServicePath);
+        if (RegGetValueW(HKEY_LOCAL_MACHINE, ServicePath, L"Start", RRF_RT_REG_DWORD, NULL,
+                         &Start, &Size) != ERROR_SUCCESS)
+            Start = 0xFFFFFFFF;
+        if (Start == SERVICE_DEMAND_START || Start == SERVICE_DISABLED)
+            RegDeleteTreeW(HKEY_LOCAL_MACHINE, ServicePath);
+        else if (Start != 0xFFFFFFFF)
+            DPRINT1("Keeping service %ls after rollback of %ls (start %lu)\n",
+                    CurrentService, DeviceInstanceId, Start);
     }
     if (Error != ERROR_SUCCESS)
         goto Cleanup;
 
-    /* 4. Re-run the start so the restored driver binds again. */
+    /* 4. Re-run the start so the restored driver binds again, and check. */
+    Cr = CM_Locate_DevNodeW(&DevInst, (DEVINSTID_W)DeviceInstanceId, CM_LOCATE_DEVNODE_NORMAL);
+    if (Cr == CR_SUCCESS)
+        Cr = CM_Setup_DevNode(DevInst, CM_SETUP_DEVNODE_READY);
+    if (Cr == CR_SUCCESS)
     {
-        DEVINST DevInst;
-        CONFIGRET Cr;
+        ULONG Status = 0, Problem = 0;
 
-        Cr = CM_Locate_DevNodeW(&DevInst, (DEVINSTID_W)DeviceInstanceId, CM_LOCATE_DEVNODE_NORMAL);
-        if (Cr == CR_SUCCESS)
-            Cr = CM_Setup_DevNode(DevInst, CM_SETUP_DEVNODE_READY);
-        if (Cr != CR_SUCCESS)
-            DPRINT1("Rollback restart of %ls failed (cr %lu)\n", DeviceInstanceId, Cr);
+        Cr = CM_Get_DevNode_Status(&Status, &Problem, DevInst, 0);
+        if (Cr == CR_SUCCESS && Problem != 0)
+            Cr = (CONFIGRET)Problem;
     }
 
-    Error = ERROR_SUCCESS;
+    if (Cr != CR_SUCCESS)
+    {
+        DPRINT1("Rollback restart of %ls did not clear the problem (cr %lu)\n",
+                DeviceInstanceId, Cr);
+        Error = ERROR_INSTALL_FAILURE;
+    }
+    else
+    {
+        Error = ERROR_SUCCESS;
+    }
 
 Cleanup:
     if (hSnap)
@@ -606,4 +779,32 @@ Cleanup:
     if (hSnapshots)
         RegCloseKey(hSnapshots);
     return Error;
+}
+
+/* Restores the newest snapshot of the device. Caller holds the install lock. */
+DWORD
+DrvInstRollbackDevice(
+    _In_ PCWSTR DeviceInstanceId)
+{
+    WCHAR Encoded[DRVINST_DEVICE_ID_CCH];
+    HKEY hSnapshots = NULL, hDeviceKey = NULL;
+    ULONG Newest;
+    DWORD Error;
+
+    EncodeDeviceId(DeviceInstanceId, Encoded);
+
+    Error = OpenPath(HKEY_LOCAL_MACHINE, DRVINST_REG_SNAPSHOTS, KEY_READ, &hSnapshots);
+    if (Error != ERROR_SUCCESS)
+        return Error;
+    Error = OpenPath(hSnapshots, Encoded, KEY_READ, &hDeviceKey);
+    RegCloseKey(hSnapshots);
+    if (Error != ERROR_SUCCESS)
+        return Error;
+
+    Newest = FindNewestSeq(hDeviceKey);
+    RegCloseKey(hDeviceKey);
+    if (!Newest)
+        return ERROR_NOT_FOUND;
+
+    return DrvInstRollbackDeviceToSeq(DeviceInstanceId, Newest);
 }

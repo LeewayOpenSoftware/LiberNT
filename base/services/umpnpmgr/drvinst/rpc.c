@@ -155,6 +155,8 @@ DrvInst_Rollback(
     _In_ handle_t hBinding,
     _In_ LPCWSTR pszDeviceInstanceId)
 {
+    DWORD Error;
+
     if (!IsCallerAdministrator(hBinding))
         return ERROR_ACCESS_DENIED;
 
@@ -162,5 +164,12 @@ DrvInst_Rollback(
         lstrlenW(pszDeviceInstanceId) >= DRVINST_DEVICE_ID_CCH)
         return ERROR_INVALID_PARAMETER;
 
-    return DrvInstRollbackDevice(pszDeviceInstanceId);
+    /* Never roll back in the middle of an install job for any device. */
+    Error = DrvInstAcquireInstallLock(60000);
+    if (Error != ERROR_SUCCESS)
+        return Error;
+    Error = DrvInstRollbackDevice(pszDeviceInstanceId);
+    DrvInstReleaseInstallLock();
+
+    return Error;
 }

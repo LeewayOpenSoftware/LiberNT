@@ -352,6 +352,7 @@ InitializePnPManager(VOID)
     RtlInitializeResource(&NotificationListLock);
     InitializeListeners();
     DrvInstInitialize();
+    DrvInstRollbackInitialize();
 
     /* Query the SuppressUI registry value and cache it for our whole lifetime */
     GetBooleanRegValue(HKEY_LOCAL_MACHINE,
