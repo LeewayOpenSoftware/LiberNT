@@ -114,6 +114,7 @@ typedef struct _ExplorerBrowserImpl {
     IUnknown *punk_filter;
     PCIDLIST_ABSOLUTE view_pidl;
     BOOL fs_explicit;
+    EXPLORERPANESTATE pane_states[5];
 #endif
 } ExplorerBrowserImpl;
 
@@ -533,6 +534,20 @@ static void update_panestate(ExplorerBrowserImpl *This)
     if(!This->pepv_site) return;
 
     IExplorerPaneVisibility_GetPaneState(This->pepv_site, (REFEXPLORERPANE) &EP_NavPane, &eps);
+#ifdef __REACTOS__
+    {
+        static const GUID *panes[] =
+        {
+            &EP_Commands, &EP_Commands_Organize, &EP_Commands_View, &EP_DetailsPane, &EP_PreviewPane,
+        };
+
+        for (UINT i = 0; i < ARRAY_SIZE(panes); ++i)
+        {
+            This->pane_states[i] = EPS_DONTCARE;
+            IExplorerPaneVisibility_GetPaneState(This->pepv_site, (REFEXPLORERPANE)panes[i], &This->pane_states[i]);
+        }
+    }
+#endif
     if( !(eps & EPS_DEFAULT_OFF) )
         show_navpane = TRUE;
     else
