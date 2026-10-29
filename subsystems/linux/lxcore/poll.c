@@ -144,7 +144,8 @@ LxSignalPending(
 {
     if (Thread == NULL)
         return FALSE;
-    return (((ULONG64)Thread->Pending | (ULONG64)Thread->Process->Pending) & ~Thread->SigMask) != 0;
+    return ((((ULONG64)Thread->Pending | (ULONG64)Thread->Process->Pending) & ~Thread->SigMask) != 0) ||
+           Thread->JobctlStop;
 }
 
 static

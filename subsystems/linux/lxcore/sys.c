@@ -3091,6 +3091,41 @@ LxWaitMatches(
 
 static
 BOOLEAN
+LxWaitJobctlReport(
+    _In_ PLX_WAIT_SELECTOR Selector,
+    _In_ PLX_PROCESS Child,
+    _In_ BOOLEAN Consume,
+    _Out_opt_ PLONG WaitStatus)
+{
+    ULONG Options = Selector->Options;
+    BOOLEAN Found = FALSE;
+    LONG Status = 0;
+
+    if (!(Options & (LX_WSTOPPED | LX_WCONTINUED)) || Child->Exited)
+        return FALSE;
+    ExAcquireFastMutex(&Child->Lock);
+    if ((Options & LX_WSTOPPED) && (Child->JobctlFlags & LX_JOBCTL_STOPPED) && (Child->GroupExitCode != 0))
+    {
+        Status = (Child->GroupExitCode << 8) | 0x7F;
+        if (Consume && !(Options & LX_WNOWAIT))
+            Child->GroupExitCode = 0;
+        Found = TRUE;
+    }
+    else if ((Options & LX_WCONTINUED) && (Child->JobctlFlags & LX_JOBCTL_CONTINUED))
+    {
+        Status = 0xFFFF;
+        if (Consume && !(Options & LX_WNOWAIT))
+            Child->JobctlFlags &= ~LX_JOBCTL_CONTINUED;
+        Found = TRUE;
+    }
+    ExReleaseFastMutex(&Child->Lock);
+    if (WaitStatus != NULL)
+        *WaitStatus = Status;
+    return Found;
+}
+
+static
+BOOLEAN
 LxWaitReady(
     _In_ PVOID Context)
 {
@@ -3107,7 +3142,8 @@ LxWaitReady(
         if (!LxWaitMatches(Selector, Child))
             continue;
         Any = TRUE;
-        if (Child->Lx->Exited)
+        if ((Child->Lx->Exited && (Selector->Options & LX_WEXITED)) ||
+            LxWaitJobctlReport(Selector, Child->Lx, FALSE, NULL))
         {
             Ready = TRUE;
             break;
@@ -3137,8 +3173,10 @@ LxWaitChild(
     {
         PLIST_ENTRY Entry;
         PLX_CHILD Found = NULL;
+        PLX_PROCESS Reported = NULL;
         BOOLEAN Any = FALSE;
         LONG64 Result;
+        LONG Status;
 
         ExAcquireFastMutex(&Process->Lock);
         for (Entry = Process->Children.Flink; Entry != &Process->Children; Entry = Entry->Flink)
@@ -3150,13 +3188,31 @@ LxWaitChild(
             Any = TRUE;
             if (Child->Lx->Exited)
             {
+                if (!(Selector->Options & LX_WEXITED))
+                    continue;
                 Found = Child;
                 if (!(Selector->Options & LX_WNOWAIT))
                     RemoveEntryList(&Child->Link);
                 break;
             }
+            if (LxWaitJobctlReport(Selector, Child->Lx, TRUE, &Status))
+            {
+                Reported = Child->Lx;
+                LxProcessReference(Reported);
+                break;
+            }
         }
         ExReleaseFastMutex(&Process->Lock);
+
+        if (Reported != NULL)
+        {
+            *FoundPid = LxPidNr(Process, Reported);
+            *WaitStatus = Status;
+            *Uid = Reported->Uid[0];
+            LxProcessUsage(Reported, NULL, ChildUsage);
+            LxProcessDereference(Reported);
+            return 0;
+        }
 
         if (Found != NULL)
         {
@@ -3210,7 +3266,7 @@ LX_SYSCALL(LxSysWait4)
 
     RtlZeroMemory(&Selector, sizeof(Selector));
     Selector.Process = Call->Process;
-    Selector.Options = (ULONG)Call->Args[2];
+    Selector.Options = (ULONG)Call->Args[2] | LX_WEXITED;
     if (Pid > 0)
     {
         Selector.Type = LX_P_PID;
@@ -3314,9 +3370,6 @@ LX_SYSCALL(LxSysWaitid)
             return -LX_EINVAL;
     }
 
-    if (!(Options & LX_WEXITED))
-        Selector.Options |= LX_WNOHANG;
-
     Result = LxWaitChild(&Selector, &FoundPid, &Status, &Uid, &Usage);
     if ((Result == 0) && (FoundPid == 0) && (Type == LX_P_PIDFD) && !(Options & LX_WNOHANG) && (Pidfd->Flags & LX_O_NONBLOCK))
         Result = -LX_EAGAIN;
@@ -3331,7 +3384,17 @@ LX_SYSCALL(LxSysWaitid)
         Info.Signo = LX_SIGCHLD;
         Info.Child.Pid = (LONG)FoundPid;
         Info.Child.Uid = LxCredViewId(Call->Process, FALSE, Uid);
-        if (Status & 0x7F)
+        if ((Status & 0xFF) == 0x7F)
+        {
+            Info.Code = LX_CLD_STOPPED;
+            Info.Child.Status = (Status >> 8) & 0xFF;
+        }
+        else if (Status == 0xFFFF)
+        {
+            Info.Code = LX_CLD_CONTINUED;
+            Info.Child.Status = LX_SIGCONT;
+        }
+        else if (Status & 0x7F)
         {
             Info.Code = (Status & 0x80) ? LX_CLD_DUMPED : LX_CLD_KILLED;
             Info.Child.Status = Status & 0x7F;

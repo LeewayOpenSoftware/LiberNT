@@ -1095,6 +1095,8 @@ LxGenPidStat(
             continue;
         if ((State == 'S') && (Thread->CurrentSyscall == MAXULONG))
             State = 'R';
+        if ((State != 'Z') && Thread->Stopped && ((Synth->Tid != 0) || (Thread->Tid == Process->Pid)))
+            State = 'T';
         if ((Synth->Tid != 0) && (Thread->EThread != NULL))
         {
             Target = Thread->EThread;
@@ -1196,7 +1198,9 @@ LxGenPidStatus(
     LxTextPrintf(Text,
                  "Name:\t%s\nUmask:\t%04lo\nState:\t%s\nTgid:\t%lu\nNgid:\t0\nPid:\t%lu\nPPid:\t%lu\nTracerPid:\t0\n"
                  "Uid:\t%lu\t%lu\t%lu\t%lu\nGid:\t%lu\t%lu\t%lu\t%lu\nFDSize:\t%lu\nGroups:\t",
-                 Comm, Process->Umask, Process->Exited ? "Z (zombie)" : "S (sleeping)", LxPidNrIn(ProcNs, Process),
+                 Comm, Process->Umask,
+                 Process->Exited ? "Z (zombie)" : ((Process->JobctlFlags & LX_JOBCTL_STOPPED) ? "T (stopped)" : "S (sleeping)"),
+                 LxPidNrIn(ProcNs, Process),
                  LxGlobalToNrIn(ProcNs, Synth->Tid ? Synth->Tid : Process->Pid),
                  LxPidNsIsInit(Process) ? 0UL : LxGlobalToNrIn(ProcNs, Process->ParentPid),
                  LxCredViewId(Self, FALSE, Process->Uid[0]), LxCredViewId(Self, FALSE, Process->Uid[1]),

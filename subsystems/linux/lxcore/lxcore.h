@@ -45,6 +45,8 @@
 #define LX_SPEC_SSB_DISABLE      0x01
 #define LX_SPEC_SSB_FORCE        0x02
 #define LX_SPEC_SSB_NOEXEC       0x04
+#define LX_JOBCTL_STOPPED        0x01
+#define LX_JOBCTL_CONTINUED      0x02
 #define LX_VMA_DONTDUMP     0x00040000
 #define LX_VMA_TOUCHED      0x00080000
 #define LX_VMA_WIPEONFORK   0x00100000
@@ -635,6 +637,11 @@ struct _LX_PROCESS
     LIST_ENTRY Timers;
     LONG NextTimerId;
     volatile LONG Membarrier;
+    ULONG JobctlFlags;
+    LONG GroupExitCode;
+    ULONG GroupStopCount;
+    volatile LONG ContinueGeneration;
+    KEVENT ContinueEvent;
 };
 
 typedef struct _LX_CRED_SAVE
@@ -713,6 +720,8 @@ struct _LX_THREAD
     PLX_SECCOMP_FILTER Seccomp;
     PVOID volatile SeccompNotif;
     UCHAR SpecSsb;
+    volatile BOOLEAN JobctlStop;
+    volatile BOOLEAN Stopped;
 };
 
 typedef struct _LX_CALL
@@ -1377,6 +1386,9 @@ BOOLEAN LxSignalDeliverFault(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFr
 VOID LxThreadAttach(_In_ PLX_THREAD Thread);
 BOOLEAN LxThreadDetach(_In_ PLX_THREAD Thread);
 BOOLEAN LxSignalIgnoredByDefault(_In_ LONG Signal);
+BOOLEAN LxSignalStopsByDefault(_In_ LONG Signal);
+BOOLEAN LxPgrpOrphaned(_In_ PLX_INSTANCE Instance, _In_ ULONG Pgid, _In_opt_ PLX_PROCESS Ignored);
+VOID LxJobctlOrphanCheck(_In_ PLX_PROCESS Process, _In_opt_ PLX_PROCESS Father);
 ULONG64 LxSignalDequeue(_In_ PLX_THREAD Thread, _In_ ULONG64 Mask, _Out_ PLX_SIGINFO Info);
 VOID LxSignalNotifyFds(_In_ PLX_PROCESS Process);
 

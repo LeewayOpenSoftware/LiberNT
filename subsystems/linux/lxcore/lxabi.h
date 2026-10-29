@@ -424,6 +424,7 @@ typedef struct _LX_SCHED_ATTR
 #define LX_ECHOK            0000040
 #define LX_ECHONL           0000100
 #define LX_NOFLSH           0000200
+#define LX_TOSTOP           0000400
 #define LX_IEXTEN           0100000
 #define LX_ECHOCTL          0001000
 #define LX_ECHOKE           0004000
@@ -465,6 +466,7 @@ typedef struct _LX_SCHED_ATTR
 #define LX_SIG_DFL          0
 #define LX_SIG_IGN          1
 
+#define LX_SA_NOCLDSTOP     0x00000001
 #define LX_SA_SIGINFO       0x00000004
 #define LX_SA_RESTORER      0x04000000
 #define LX_SA_ONSTACK       0x08000000

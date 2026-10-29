@@ -331,6 +331,7 @@ LxProcessCreate(
     ExInitializeFastMutex(&Process->Lock);
     KeInitializeEvent(&Process->VforkDone, NotificationEvent, FALSE);
     KeInitializeEvent(&Process->MmLock, SynchronizationEvent, TRUE);
+    KeInitializeEvent(&Process->ContinueEvent, NotificationEvent, FALSE);
     LxPollHeadInit(&Process->ExitPoll);
     LxPollHeadInit(&Process->SignalPoll);
     LxPollHeadInit(&Process->ChildPoll);
@@ -1028,6 +1029,8 @@ LxProcessExited(
             ExReleaseFastMutex(&Reaper->Lock);
             if (Child->Lx->Exited)
                 LxProcessNotifyParent(Reaper, Child->Lx);
+            else
+                LxJobctlOrphanCheck(Child->Lx, Process);
         }
         if (Reaper != NULL)
             LxProcessDereference(Reaper);
@@ -1035,6 +1038,8 @@ LxProcessExited(
 
     LxCgroupAttach(Process, NULL);
 
+    if ((Process->Pid != 1) && !LxPidNsIsInit(Process))
+        LxJobctlOrphanCheck(Process, NULL);
     Parent = (Process->ParentPid != 0) ? LxProcessLookup(Instance, Process->ParentPid) : NULL;
     if ((Parent != NULL) && !Parent->Exited)
         LxProcessNotifyParent(Parent, Process);
