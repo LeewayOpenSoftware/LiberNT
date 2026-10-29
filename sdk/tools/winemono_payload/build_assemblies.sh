@@ -29,6 +29,7 @@ if [ ! -d "$M/.git" ]; then
     git -C "$M" apply "$HERE/patches/mono-variant-record.patch"
     git -C "$M" apply "$HERE/patches/mono-typelib-version.patch"
     git -C "$M" apply "$HERE/patches/mono-interop-proxy-keep-identity.patch"
+    git -C "$M" apply "$HERE/patches/mono-assemblybuilder-ignores-access-checks.patch"
     git -C "$E/corefx" apply "$HERE/patches/corefx-certificatechoices.patch"
 fi
 P="$W/wpf"

@@ -1,0 +1,14 @@
+diff --git a/mcs/class/corlib/System.Reflection.Emit/AssemblyBuilder.cs b/mcs/class/corlib/System.Reflection.Emit/AssemblyBuilder.cs
+index 85df8067d8..97dce6c79c 100644
+--- a/mcs/class/corlib/System.Reflection.Emit/AssemblyBuilder.cs
++++ b/mcs/class/corlib/System.Reflection.Emit/AssemblyBuilder.cs
+@@ -1011,7 +1011,8 @@ public void SetCustomAttribute( CustomAttributeBuilder customBuilder)
+ 			/*
+ 			Only update the native list of custom attributes if we're adding one that is known to change dynamic execution behavior.
+ 			*/
+-			if (customBuilder.Ctor != null && customBuilder.Ctor.DeclaringType == typeof (System.Runtime.CompilerServices.RuntimeCompatibilityAttribute))
++			if (customBuilder.Ctor != null && (customBuilder.Ctor.DeclaringType == typeof (System.Runtime.CompilerServices.RuntimeCompatibilityAttribute) ||
++			    customBuilder.Ctor.DeclaringType.FullName == "System.Runtime.CompilerServices.IgnoresAccessChecksToAttribute"))
+ 				UpdateNativeCustomAttributes (this);
+ 		}
+ 
