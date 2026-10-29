@@ -1378,6 +1378,7 @@ LX_SYSCALL(LxSysMemfdCreate)
             return Result;
         File->Memfd->RefCount = 1;
         File->Memfd->Seals = (Flags & LX_MFD_ALLOW_SEALING) ? 0 : LX_F_SEAL_SEAL;
+        File->Flags |= LX_O_LARGEFILE;
         return LxInstallNewFile(Call->Process, File, (Flags & LX_MFD_CLOEXEC) != 0);
     }
 
@@ -1404,7 +1405,7 @@ LX_SYSCALL(LxSysMemfdCreate)
         return -LxStatusToErrno(Status);
     }
 
-    File = LxFileFromNtHandle(Handle, LX_O_RDWR);
+    File = LxFileFromNtHandle(Handle, LX_O_RDWR | LX_O_LARGEFILE);
     if (File == NULL)
     {
         ZwClose(Handle);

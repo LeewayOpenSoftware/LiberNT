@@ -264,6 +264,8 @@ LxOpenCommon(
     LxFree(Path);
     if (Error != 0)
         return Error;
+    if (!(Flags & LX_O_PATH))
+        File->Flags |= LX_O_LARGEFILE;
 
     Tty = LxFileGetTty(File);
     if ((Tty != NULL) && !(Flags & LX_O_NOCTTY))
@@ -449,7 +451,7 @@ LX_SYSCALL(LxSysFcntl)
             break;
 
         case LX_F_GETFL:
-            Result = File->Flags | LX_O_LARGEFILE;
+            Result = File->Flags;
             break;
 
         case LX_F_SETFL:
