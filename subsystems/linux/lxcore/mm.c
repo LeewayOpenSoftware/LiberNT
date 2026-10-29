@@ -2309,7 +2309,15 @@ LxMmFaultIn(
     LxMmLock(Thread->Process->Mm);
     Result = LxMmPopulate(Thread->Process->Mm, Start, End, Write ? LX_PROT_WRITE : LX_PROT_READ, FALSE);
     LxMmUnlock(Thread->Process->Mm);
-    return (Result > 0);
+    if (Result < 0)
+        return FALSE;
+    if ((Result > 0) || (Thread->FaultAddress != Start))
+    {
+        Thread->FaultAddress = Start;
+        Thread->FaultRetries = 0;
+        return TRUE;
+    }
+    return (++Thread->FaultRetries < 8);
 }
 
 BOOLEAN
