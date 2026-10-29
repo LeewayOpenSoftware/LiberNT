@@ -434,6 +434,21 @@ LxArchExecPersonality(
     return ((Personality & 0xFF) != LX_PER_LINUX32) ? (Personality & ~0xFFUL) : Personality;
 }
 
+VOID
+LxArchMmapRndBits(
+    _Out_ PULONG Minimum,
+    _Out_ PULONG Maximum)
+{
+    *Minimum = 18;
+    *Maximum = 24;
+}
+
+ULONG64
+LxArchStackRndMask(VOID)
+{
+    return 0x3FFFF;
+}
+
 LONG
 LxArchPtraceSyscallNumber(
     _In_ PKTRAP_FRAME TrapFrame,

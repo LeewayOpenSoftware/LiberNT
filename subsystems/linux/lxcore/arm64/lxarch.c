@@ -540,6 +540,21 @@ LxArchExecPersonality(
     return Personality & ~LX_PER_READ_IMPLIES_EXEC;
 }
 
+VOID
+LxArchMmapRndBits(
+    _Out_ PULONG Minimum,
+    _Out_ PULONG Maximum)
+{
+    *Minimum = 18;
+    *Maximum = 30;
+}
+
+ULONG64
+LxArchStackRndMask(VOID)
+{
+    return 0x3FFFF;
+}
+
 LONG
 LxArchPtraceSyscallNumber(
     _In_ PKTRAP_FRAME TrapFrame,

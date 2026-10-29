@@ -4187,7 +4187,6 @@ LX_SYSCALL(LxSysPersonality)
         return Old;
     if (!LxArchPersonalityAllowed(Persona))
         return -LX_EINVAL;
-    /* TODO: apply ADDR_NO_RANDOMIZE once exec randomizes the layout. */
     Call->Process->Personality = Persona;
     return Old;
 }

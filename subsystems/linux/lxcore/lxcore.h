@@ -669,6 +669,8 @@ struct _LX_PROCESS
     ULONG LoginUid;
     ULONG SessionId;
     ULONG ThpDisable;
+    ULONG64 MmapTop;
+    ULONG64 StackTop;
 };
 
 typedef struct _LX_CRED_SAVE
@@ -1384,6 +1386,13 @@ PLX_THREAD LxThreadLookupReferenced(_In_ PLX_INSTANCE Instance, _In_ ULONG Tid, 
 BOOLEAN LxProcessExitStatus(_In_ PLX_PROCESS Process, _In_ LONG WaitStatus);
 VOID LxProcessExitGroup(_In_ PLX_PROCESS Process, _In_ LONG WaitStatus);
 VOID LxProcessZapThreads(_In_ PLX_PROCESS Process, _In_opt_ PLX_THREAD Except);
+LONG LxMmRandomizeVaSpace(VOID);
+VOID LxMmSetRandomizeVaSpace(_In_ LONG Value);
+ULONG LxMmRndBits(VOID);
+LONG LxMmSetRndBits(_In_ ULONG Bits);
+BOOLEAN LxMmPickLayout(_Inout_ PLX_PROCESS Process);
+ULONG64 LxMmRandomOffset(VOID);
+ULONG64 LxMmRandomizeBrk(_In_ ULONG64 Base);
 VOID LxProcessExited(_In_ PLX_PROCESS Process, _In_ NTSTATUS ExitStatus);
 VOID LxItimerRelease(_In_ PLX_PROCESS Process);
 VOID LxPosixTimersRelease(_In_ PLX_PROCESS Process, _In_ BOOLEAN Free);
@@ -1527,6 +1536,8 @@ LONG LxArchPtraceSyscallNumber(_In_ PKTRAP_FRAME TrapFrame, _In_ LONG Recorded);
 LONG64 LxArchPtraceSyscallReturn(_In_ PCONTEXT Context);
 BOOLEAN LxArchPersonalityAllowed(_In_ ULONG Personality);
 ULONG LxArchExecPersonality(_In_ ULONG Personality);
+VOID LxArchMmapRndBits(_Out_ PULONG Minimum, _Out_ PULONG Maximum);
+ULONG64 LxArchStackRndMask(VOID);
 BOOLEAN LxArchPtraceSingleStep(_Inout_ PCONTEXT Context, _In_ BOOLEAN Enable);
 VOID LxArchApplySpeculation(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame);
 LONG64 LxSpecCtrlGet(_In_ PLX_THREAD Thread, _In_ ULONG64 Which);

@@ -3189,6 +3189,68 @@ LxWriteYamaScope(
 
 static
 VOID
+LxGenRandomizeVaSpace(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    UNREFERENCED_PARAMETER(Self);
+    UNREFERENCED_PARAMETER(Synth);
+    LxTextPrintf(Text, "%ld\n", LxMmRandomizeVaSpace());
+}
+
+static
+LONG
+LxWriteRandomizeVaSpace(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    ULONG Value;
+    LONG Error;
+
+    UNREFERENCED_PARAMETER(File);
+    if (Length == 0)
+        return 0;
+    Error = LxParseWrittenNumber(Data, Length, &Value);
+    if ((Error == 0) && (Value > MAXLONG))
+        Error = -LX_EINVAL;
+    if (Error == 0)
+        LxMmSetRandomizeVaSpace((LONG)Value);
+    return Error;
+}
+
+static
+VOID
+LxGenMmapRndBits(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    UNREFERENCED_PARAMETER(Self);
+    UNREFERENCED_PARAMETER(Synth);
+    LxTextPrintf(Text, "%lu\n", LxMmRndBits());
+}
+
+static
+LONG
+LxWriteMmapRndBits(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    ULONG Value;
+    LONG Error;
+
+    UNREFERENCED_PARAMETER(File);
+    if (Length == 0)
+        return 0;
+    Error = LxParseWrittenNumber(Data, Length, &Value);
+    return (Error != 0) ? Error : LxMmSetRndBits(Value);
+}
+
+static
+VOID
 LxGenSeccompActions(
     _In_ PLX_PROCESS Self,
     _In_ PLX_SYNTH Synth,
@@ -3433,6 +3495,7 @@ static const LX_TABLE_ENTRY LxProcSysTable[] =
     { "kernel/random/entropy_avail", 0444, "256\n", NULL, NULL },
     { "kernel/random/poolsize", 0444, "256\n", NULL, NULL },
     { "kernel/random/uuid", 0444, NULL, LxGenUuid, NULL },
+    { "kernel/randomize_va_space", 0644, NULL, LxGenRandomizeVaSpace, LxWriteRandomizeVaSpace },
     { "kernel/seccomp/actions_avail", 0444, NULL, LxGenSeccompActionsAvail, NULL },
     { "kernel/seccomp/actions_logged", 0644, NULL, LxGenSeccompActionsLogged, LxWriteSeccompActionsLogged },
     { "kernel/sysrq", 0644, "176\n", NULL, LxWriteAccept },
@@ -3451,6 +3514,7 @@ static const LX_TABLE_ENTRY LxProcSysTable[] =
     { "vm/compact_memory", 0200, "", NULL, LxWriteAccept },
     { "vm/drop_caches", 0200, "", NULL, LxWriteAccept },
     { "vm/max_map_count", 0644, NULL, LxGenMaxMapCount, LxWriteMaxMapCount },
+    { "vm/mmap_rnd_bits", 0600, NULL, LxGenMmapRndBits, LxWriteMmapRndBits },
     { "vm/nr_hugepages", 0644, NULL, LxGenHugePages, LxWriteHugePages },
     { "vm/nr_overcommit_hugepages", 0644, NULL, LxGenHugePages, LxWriteAccept },
     { "vm/overcommit_memory", 0644, "0\n", NULL, LxWriteAccept },
