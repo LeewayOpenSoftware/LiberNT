@@ -316,31 +316,6 @@ static DWORD get_ndis(struct nsi_get_all_parameters_ex *params)
     return ERROR_SUCCESS;
 }
 
-static ULONG automatic_metric(ULONG64 speed, UINT type)
-{
-    static const struct { ULONG64 speed; ULONG metric; } wired[] =
-    {
-        {100000000000ull, 5}, {40000000000ull, 10}, {10000000000ull, 15}, {2000000000ull, 20},
-        {200000000, 25}, {80000000, 35}, {20000000, 45}, {4000000, 55}, {500000, 65}
-    }, wireless[] =
-    {
-        {2000000000ull, 25}, {500000000, 30}, {200000000, 35}, {150000000, 40}, {80000000, 45}, {50000000, 50},
-        {20000000, 55}, {10000000, 60}, {4000000, 65}, {2000000, 70}, {500000, 75}, {200000, 80}
-    };
-    UINT i;
-
-    if (type == MIB_IF_TYPE_LOOPBACK) return 75;
-    if (type == IF_TYPE_IEEE80211)
-    {
-        for (i = 0; i < ARRAY_SIZE(wireless); i++)
-            if (speed >= wireless[i].speed) return wireless[i].metric;
-        return 85;
-    }
-    for (i = 0; i < ARRAY_SIZE(wired); i++)
-        if (speed >= wired[i].speed) return wired[i].metric;
-    return 75;
-}
-
 static void *ip6_query_table(ULONG table_id, ULONG *count);
 
 static ULONG64 interface_speed(UINT index)
@@ -441,8 +416,7 @@ static void fill_ip_interface(UINT index, struct nsi_ip_interface_key *key, stru
     if (rw)
     {
         memset(rw, 0, sizeof(*rw));
-        rw->metric = (have_info && !info.UseAutomaticMetric) ? info.Metric
-                                                             : automatic_metric(interface_speed(index), interface_type(index));
+        rw->metric = have_info ? info.Metric : 0;
         rw->base_reachable_time = have_info ? info.BaseReachableTime : 30000;
         rw->retransmit_time = have_info ? info.RetransmitTime : 1000;
         rw->path_mtu_discovery_timeout = have_info ? info.PathMtuDiscoveryTimeout : 600000;
@@ -530,8 +504,7 @@ static void fill_ipv6_interface(const IP6_INTERFACE_ROW *row, struct nsi_ip_inte
     if (rw)
     {
         memset(rw, 0, sizeof(*rw));
-        rw->metric = row->UseAutomaticMetric ? automatic_metric(row->LinkSpeed, row->Loopback ? MIB_IF_TYPE_LOOPBACK : interface_type(row->Index))
-                                             : row->Metric;
+        rw->metric = row->Metric;
         rw->base_reachable_time = row->BaseReachableTime;
         rw->retransmit_time = row->RetransmitTime;
         rw->path_mtu_discovery_timeout = row->PathMtuDiscoveryTimeout;
