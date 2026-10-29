@@ -116,7 +116,24 @@ CDefViewBckgrndMenu::Initialize(IShellFolder* psf)
 
     /* Get the context menu of the folder. Do it here because someone may call
        InvokeCommand without calling QueryContextMenu. It is fine if this fails */
-    m_psf->CreateViewObject(NULL, IID_PPV_ARG(IContextMenu, &m_folderCM));
+    if (FAILED(m_psf->CreateViewObject(NULL, IID_PPV_ARG(IContextMenu, &m_folderCM))))
+    {
+        CComPtr<IContextMenuCB> pcmcb;
+        CComPtr<IPersist> pPersist;
+        CLSID clsid;
+        WCHAR szClass[6 + CHARS_IN_GUID] = L"CLSID\\";
+
+        if (SUCCEEDED(m_psf->QueryInterface(IID_PPV_ARG(IContextMenuCB, &pcmcb))) &&
+            SUCCEEDED(m_psf->QueryInterface(IID_PPV_ARG(IPersist, &pPersist))) &&
+            SUCCEEDED(pPersist->GetClassID(&clsid)) &&
+            StringFromGUID2(clsid, szClass + 6, CHARS_IN_GUID))
+        {
+            CRegKeyHandleArray keys;
+            AddClassKeyToArray(szClass, keys, keys);
+            DEFCONTEXTMENU dcm = { NULL, pcmcb, NULL, m_psf, 0, NULL, NULL, keys, keys };
+            SHCreateDefaultContextMenu(&dcm, IID_PPV_ARG(IContextMenu, &m_folderCM));
+        }
+    }
 
     return S_OK;
 }
