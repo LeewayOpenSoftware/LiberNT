@@ -346,6 +346,8 @@ NTSTATUS TiCloseFileObject(
             break;
 
         case TDI_CONTROL_CHANNEL_FILE:
+            IGMPLeaveAllGroups(IrpSp->FileObject);
+            LibIP6LeaveAllGroups(IrpSp->FileObject);
             Request.Handle.ControlChannel = Context->Handle.ControlChannel;
             Status = FileCloseControlChannel(&Request);
             break;
@@ -576,6 +578,30 @@ TiWaitChange(
     return STATUS_PENDING;
 }
 
+static
+NTSTATUS
+TiChangeMembership(
+    PVOID Owner,
+    PIP_MEMBERSHIP_REQUEST Request)
+{
+    PIP_INTERFACE Interface;
+    IPv4_RAW_ADDRESS Group;
+    ULONG Index;
+
+    if (Request->Family == TDI_ADDRESS_TYPE_IP6)
+        return LibIP6ChangeMembership(Owner, Request->Interface, Request->Group, Request->Join != 0);
+    if (Request->Family != TDI_ADDRESS_TYPE_IP)
+        return STATUS_INVALID_PARAMETER;
+
+    Interface = GetMulticastInterface(Request->Interface);
+    if (!Interface)
+        return STATUS_INVALID_PARAMETER;
+    Index = Interface->Index;
+    IPDereferenceInterface(Interface);
+    RtlCopyMemory(&Group, Request->Group, sizeof(Group));
+    return Request->Join ? IGMPJoinGroup(Owner, Index, Group) : IGMPLeaveGroup(Owner, Index, Group);
+}
+
 VOID
 TiSignalChange(VOID)
 {
@@ -753,6 +779,15 @@ TiDispatch(
                     Status = STATUS_INVALID_DEVICE_REQUEST;
                 else
                     Status = TiWaitChange(Irp, IrpSp);
+                break;
+
+            case IOCTL_IP_CHANGE_MEMBERSHIP:
+                if (DeviceObject != IPDeviceObject)
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                else if (IrpSp->Parameters.DeviceIoControl.InputBufferLength < sizeof(IP_MEMBERSHIP_REQUEST))
+                    Status = STATUS_INVALID_PARAMETER;
+                else
+                    Status = TiChangeMembership(IrpSp->FileObject, Irp->AssociatedIrp.SystemBuffer);
                 break;
 
             case IOCTL_IP_QUERY_PATHS:
