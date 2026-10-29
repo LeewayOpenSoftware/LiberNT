@@ -18,6 +18,7 @@
 #include <nldef.h>
 #include <tcpip_undoc.h>
 #include <psdk/ipexport.h>
+#include <chew.h>
 
 typedef struct netif* PNETIF;
 
@@ -125,38 +126,86 @@ LibIPIsLocalAddress(const IP_ADDRESS *Address)
     return msg.Result;
 }
 
+typedef struct _LIB_UDP_DELIVERY
+{
+    PADDRESS_FILE AddrFile;
+    IP_ADDRESS SrcAddress;
+    IP_ADDRESS DstAddress;
+    USHORT SrcPort;
+    PIP_INTERFACE Interface;
+    UINT Size;
+    CHAR Data[ANYSIZE_ARRAY];
+} LIB_UDP_DELIVERY, *PLIB_UDP_DELIVERY;
+
+static
+BOOLEAN
+LibUDPReferenceAddressFile(PADDRESS_FILE AddrFile)
+{
+    LONG Count = AddrFile->RefCount;
+
+    while (Count)
+    {
+        LONG Previous = InterlockedCompareExchange(&AddrFile->RefCount, Count + 1, Count);
+
+        if (Previous == Count)
+            return TRUE;
+        Count = Previous;
+    }
+    return FALSE;
+}
+
+static
+VOID
+LibUDPDeliverWorker(PVOID Context)
+{
+    PLIB_UDP_DELIVERY Delivery = Context;
+    IP_PACKET Packet;
+
+    RtlZeroMemory(&Packet, sizeof(Packet));
+    Packet.Type = IP_ADDRESS_V6;
+    Packet.Header = Delivery->Data;
+    Packet.Data = Delivery->Data;
+    Packet.TotalSize = Delivery->Size;
+    Packet.SrcAddr = Delivery->SrcAddress;
+    Packet.DstAddr = Delivery->DstAddress;
+
+    DGDeliverData(Delivery->AddrFile, &Delivery->SrcAddress, &Delivery->DstAddress, Delivery->SrcPort,
+                  Delivery->AddrFile->Port, &Packet, Delivery->Size, Delivery->Interface);
+
+    DereferenceObject(Delivery->AddrFile);
+    ExFreePoolWithTag(Delivery, LWIP_TAG);
+}
+
 static
 void
 LibUDPRecvCallback(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
     PADDRESS_FILE AddrFile = arg;
-    IP_ADDRESS SrcAddress, DstAddress;
-    IP_PACKET Packet;
-    PCHAR Data;
+    PLIB_UDP_DELIVERY Delivery;
 
     if (!p)
         return;
 
-    Data = ExAllocatePoolWithTag(NonPagedPool, max(p->tot_len, 1), LWIP_TAG);
-    if (Data)
+    Delivery = ExAllocatePoolWithTag(NonPagedPool, FIELD_OFFSET(LIB_UDP_DELIVERY, Data) + max(p->tot_len, 1), LWIP_TAG);
+    if (Delivery)
     {
-        pbuf_copy_partial(p, Data, p->tot_len, 0);
-        LibIPAddressFromLwip(addr, &SrcAddress);
-        LibIPAddressFromLwip(ip_current_dest_addr(), &DstAddress);
+        pbuf_copy_partial(p, Delivery->Data, p->tot_len, 0);
+        LibIPAddressFromLwip(addr, &Delivery->SrcAddress);
+        LibIPAddressFromLwip(ip_current_dest_addr(), &Delivery->DstAddress);
+        Delivery->SrcPort = lwip_htons(port);
+        Delivery->Interface = ip_current_input_netif() ? ip_current_input_netif()->state : NULL;
+        Delivery->Size = p->tot_len;
+        Delivery->AddrFile = AddrFile;
 
-        RtlZeroMemory(&Packet, sizeof(Packet));
-        Packet.Type = IP_ADDRESS_V6;
-        Packet.Header = Data;
-        Packet.Data = Data;
-        Packet.TotalSize = p->tot_len;
-        Packet.SrcAddr = SrcAddress;
-        Packet.DstAddr = DstAddress;
-
-        DGDeliverData(AddrFile, &SrcAddress, &DstAddress, lwip_htons(port), AddrFile->Port,
-                      &Packet, p->tot_len,
-                      ip_current_input_netif() ? ip_current_input_netif()->state : NULL);
-
-        ExFreePoolWithTag(Data, LWIP_TAG);
+        if (!LibUDPReferenceAddressFile(AddrFile))
+        {
+            ExFreePoolWithTag(Delivery, LWIP_TAG);
+        }
+        else if (!ChewCreateHighPriority(LibUDPDeliverWorker, Delivery))
+        {
+            DereferenceObject(AddrFile);
+            ExFreePoolWithTag(Delivery, LWIP_TAG);
+        }
     }
 
     pbuf_free(p);
