@@ -14,6 +14,7 @@
 
 NTSTATUS ICMPStartup()
 {
+    RdiscStartup();
     IPRegisterProtocol(IPPROTO_ICMP, ICMPReceive);
 
     return STATUS_SUCCESS;
@@ -85,6 +86,10 @@ VOID ICMPReceive(
     if (ICMPHeader->Type == ICMP_TYPE_ECHO_REQUEST)
     {
         ICMPReply(Interface, IPPacket, ICMP_TYPE_ECHO_REPLY, 0);
+    }
+    else if (ICMPHeader->Type == ICMP_TYPE_ROUTER_ADVERT)
+    {
+        RdiscReceive(Interface, IPPacket);
     }
 }
 

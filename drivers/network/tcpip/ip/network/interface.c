@@ -13,6 +13,7 @@
 
 #include <ntifs.h>
 #include <ipifcons.h>
+#include <icmp.h>
 #include <nldef.h>
 #include <tcpip_undoc.h>
 
@@ -746,6 +747,9 @@ NTSTATUS IPAddInterfaceAddress(PIP_INTERFACE Interface, IPv4_RAW_ADDRESS Address
 
     TCPAddInterfaceAddress(Nte);
 
+    if (Nte->DadState == IpDadStatePreferred && Interface != Loopback)
+        RdiscStart(Interface);
+
     if (Context)
         *Context = Nte->Context;
     if (Instance)
@@ -876,6 +880,7 @@ IPQueryInterfaceV4(PIP4_INTERFACE_INFO Info)
     Info->WeakHostReceive = Interface->WeakHostReceive;
     Info->DisableDefaultRoutes = Interface->DisableDefaultRoutes;
     Info->AdvertiseDefaultRoute = Interface->AdvertiseDefaultRoute;
+    Info->DhcpRouterDiscovery = Interface->DhcpRouterDiscovery;
     IPDereferenceInterface(Interface);
     return STATUS_SUCCESS;
 }
@@ -884,6 +889,7 @@ NTSTATUS
 IPSetInterfaceV4(PIP4_INTERFACE_INFO Info)
 {
     PIP_INTERFACE Interface;
+    BOOLEAN Discovery;
 
     if ((Info->Mtu && Info->Mtu < 576) || !Info->BaseReachableTime || !Info->RetransmitTime ||
         Info->RouterDiscoveryBehavior > 2)
@@ -903,7 +909,13 @@ IPSetInterfaceV4(PIP4_INTERFACE_INFO Info)
         Interface->ReachableTime = Info->BaseReachableTime / 2 + (ULONG)(Random() % Info->BaseReachableTime);
     }
     Interface->DadTransmits = Info->DadTransmits;
+    Discovery = RdiscEnabled(Interface);
     Interface->RouterDiscoveryBehavior = Info->RouterDiscoveryBehavior;
+    Interface->DhcpRouterDiscovery = Info->DhcpRouterDiscovery;
+    if (!Discovery && RdiscEnabled(Interface))
+        RdiscStart(Interface);
+    else if (Discovery && !RdiscEnabled(Interface))
+        RdiscStop(Interface);
     Interface->PathMtuDiscoveryTimeout = Info->PathMtuDiscoveryTimeout;
     Interface->LinkLocalAddressTimeout = Info->LinkLocalAddressTimeout;
     Interface->SitePrefixLength = Info->SitePrefixLength;
@@ -982,6 +994,8 @@ VOID NteDadTimeout(VOID)
     for (i = 0; i < Count; i++)
     {
         ARPTransmitDad(Pending[i].Interface, Pending[i].Address, Pending[i].Announce);
+        if (Pending[i].Announce)
+            RdiscStart(Pending[i].Interface);
         IPDereferenceInterface(Pending[i].Interface);
     }
 }

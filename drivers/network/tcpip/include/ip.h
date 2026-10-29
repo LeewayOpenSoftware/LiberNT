@@ -195,6 +195,7 @@ typedef struct _IP_INTERFACE {
     ULONG LinkLocalAddressTimeout;
     ULONG SitePrefixLength;
     ULONG ZoneIndices[16];
+    BOOLEAN DhcpRouterDiscovery;
 } IP_INTERFACE, *PIP_INTERFACE;
 
 typedef struct _IP_NTE {

@@ -984,6 +984,8 @@ struct ipv4_route
     BOOL loopback;
     BOOL immortal;
     NET_LUID luid;
+    DWORD lifetime;
+    DWORD age;
 };
 
 static void fill_ipv4_forward(struct nsi_enumerate_all_ex *params, UINT_PTR i, const struct ipv4_route *route)
@@ -1001,8 +1003,8 @@ static void fill_ipv4_forward(struct nsi_enumerate_all_ex *params, UINT_PTR i, c
     {
         struct nsi_ip_forward_rw *rw = (struct nsi_ip_forward_rw *)params->rw_data + i;
         memset(rw, 0, sizeof(*rw));
-        rw->valid_lifetime = ~0u;
-        rw->preferred_lifetime = ~0u;
+        rw->valid_lifetime = route->lifetime;
+        rw->preferred_lifetime = route->lifetime;
         rw->metric = route->metric;
         rw->protocol = route->protocol;
         rw->loopback = route->loopback;
@@ -1013,6 +1015,7 @@ static void fill_ipv4_forward(struct nsi_enumerate_all_ex *params, UINT_PTR i, c
     {
         struct nsi_ipv4_forward_dynamic *dynamic = (struct nsi_ipv4_forward_dynamic *)params->dynamic_data + i;
         memset(dynamic, 0, sizeof(*dynamic));
+        dynamic->age = route->age;
         dynamic->addr2.S_un.S_addr = route->dest;
     }
     if (params->static_data)
@@ -1040,6 +1043,36 @@ static void add_ipv4_route(struct ipv4_route *routes, UINT_PTR *count, DWORD des
     route->origin = origin;
     route->loopback = loopback;
     route->immortal = immortal;
+    route->lifetime = ~0u;
+    route->age = 0;
+}
+
+static void ipv4_route_origin(struct ipv4_route *route)
+{
+    UNICODE_STRING name = RTL_CONSTANT_STRING(L"\\Device\\Ip");
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK iosb;
+    IP4_ROUTE_INFO info;
+    NTSTATUS status;
+    HANDLE file;
+
+    memset(&info, 0, sizeof(info));
+    info.Index = route->if_index;
+    info.Destination = route->dest;
+    info.Mask = route->mask;
+    info.NextHop = route->next_hop;
+    InitializeObjectAttributes(&attr, &name, OBJ_CASE_INSENSITIVE, NULL, NULL);
+    status = NtOpenFile(&file, SYNCHRONIZE, &attr, &iosb, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        FILE_SYNCHRONOUS_IO_NONALERT);
+    if (!NT_SUCCESS(status)) return;
+    status = NtDeviceIoControlFile(file, NULL, NULL, NULL, &iosb, IOCTL_IP_QUERY_ROUTE,
+                                   &info, sizeof(info), &info, sizeof(info));
+    NtClose(file);
+    if (!NT_SUCCESS(status) || info.Origin != NlroRouterAdvertisement) return;
+    route->origin = NlroRouterAdvertisement;
+    route->lifetime = info.ValidLifetime;
+    route->age = info.Age;
+    route->immortal = FALSE;
 }
 
 static int __cdecl ipv4_route_compare(const void *left, const void *right)
@@ -1159,6 +1192,7 @@ static DWORD enumerate_ipv4_forward(struct nsi_enumerate_all_ex *params)
         }
         add_ipv4_route(routes, &count, row->dest, row->mask, row->gateway, row->ifIndex, ifaddrs[j].luid, row->metric,
                        MIB_IPPROTO_NETMGMT, NlroManual, FALSE, TRUE);
+        ipv4_route_origin(routes + count - 1);
     }
 
     qsort(routes, count, sizeof(*routes), ipv4_route_compare);

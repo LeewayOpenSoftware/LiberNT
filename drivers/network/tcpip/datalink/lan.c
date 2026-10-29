@@ -250,6 +250,8 @@ VOID NTAPI ProtocolRequestComplete(
 }
 
 
+static const UCHAR LanAllHostsMac[IEEE_802_ADDR_LENGTH] = { 0x01, 0x00, 0x5e, 0x00, 0x00, 0x01 };
+
 NDIS_STATUS LANUpdateMulticastList(
     PVOID Context,
     const UCHAR *Address,
@@ -1515,6 +1517,8 @@ BOOLEAN BindAdapter(
         IPDestroyInterface(IF);
         return FALSE;
     }
+
+    LANUpdateMulticastList(Adapter, LanAllHostsMac, TRUE);
 
     return TRUE;
 }

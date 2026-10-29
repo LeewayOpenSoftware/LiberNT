@@ -19,6 +19,7 @@ list(APPEND SOURCE
     network/loopback.c
     network/neighbor.c
     network/ports.c
+    network/rdisc.c
     network/receive.c
     network/router.c
     network/routines.c

@@ -18,6 +18,9 @@ typedef struct _FIB_ENTRY {
     IP_ADDRESS Netmask;           /* Netmask of network */
     PNEIGHBOR_CACHE_ENTRY Router; /* Pointer to NCE of router to use */
     UINT Metric;                  /* Cost of this route */
+    ULONG Origin;
+    ULONG Lifetime;
+    ULONGLONG Updated;
 } FIB_ENTRY, *PFIB_ENTRY;
 
 PFIB_ENTRY RouterAddRoute(
@@ -27,6 +30,12 @@ PFIB_ENTRY RouterAddRoute(
     UINT Metric);
 
 PNEIGHBOR_CACHE_ENTRY RouterGetRoute(PIP_ADDRESS Destination);
+
+BOOLEAN RouterSetAdvertisedRoute(PIP_INTERFACE Interface, PIP_ADDRESS RouterAddress, UINT Metric, ULONG Lifetime);
+VOID RouterRemoveAdvertisedRoutes(PIP_INTERFACE Interface, PIP_ADDRESS RouterAddress);
+VOID RouterAgeAdvertisedRoutes(VOID);
+struct _IP4_ROUTE_INFO;
+NTSTATUS RouterQueryRouteV4(struct _IP4_ROUTE_INFO *Info);
 PNEIGHBOR_CACHE_ENTRY RouteGetMulticastRoute(PIP_ADDRESS Destination, ULONG Selector);
 PNEIGHBOR_CACHE_ENTRY RouteGetRouteOnInterface(PIP_ADDRESS Destination, PIP_INTERFACE Interface);
 

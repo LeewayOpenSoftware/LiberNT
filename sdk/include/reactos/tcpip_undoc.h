@@ -36,6 +36,20 @@ typedef struct _IP4_ADDRESS_INFO
     ULONG Reserved;
 } IP4_ADDRESS_INFO, *PIP4_ADDRESS_INFO;
 
+#define IOCTL_IP_QUERY_ROUTE _TCP_CTL_CODE(0x80C, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+typedef struct _IP4_ROUTE_INFO
+{
+    ULONG Index;
+    ULONG Destination;
+    ULONG Mask;
+    ULONG NextHop;
+    ULONG Origin;
+    ULONG ValidLifetime;
+    ULONG Age;
+    ULONG Reserved;
+} IP4_ROUTE_INFO, *PIP4_ROUTE_INFO;
+
 typedef struct _IP4_INTERFACE_INFO
 {
     ULONG Index;
@@ -56,7 +70,8 @@ typedef struct _IP4_INTERFACE_INFO
     BOOLEAN WeakHostReceive;
     BOOLEAN DisableDefaultRoutes;
     BOOLEAN AdvertiseDefaultRoute;
-    BOOLEAN Reserved[2];
+    BOOLEAN DhcpRouterDiscovery;
+    BOOLEAN Reserved;
 } IP4_INTERFACE_INFO, *PIP4_INTERFACE_INFO;
 
 typedef struct _IP_BEST_SOURCE
