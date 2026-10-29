@@ -350,6 +350,8 @@ KiRiscvDeliverSoftwareInterrupts(
             (Pcr->SoftwareInterrupts & (1 << DISPATCH_LEVEL)))
         {
             KiRiscvClearSoftwareInterrupt(DISPATCH_LEVEL);
+            KiClearDpcInterruptRequested(KeGetCurrentPrcb());
+            KeMemoryBarrier();
             KfRaiseIrql(DISPATCH_LEVEL);
             _enable();
             KiDispatchInterrupt();
