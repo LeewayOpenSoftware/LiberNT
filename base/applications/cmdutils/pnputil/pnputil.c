@@ -21,6 +21,7 @@
 #include <cfg.h>
 #include <newdev.h>
 #include <regstr.h>
+#include <umpnpmgr/drvinst.h>
 
 #include <conutils.h>
 
@@ -113,7 +114,7 @@ static const WCHAR UsageText[] =
     L"         /enum-drivers | /enum-devices [<...>] |\n"
     L"         /disable-device <...> | /enable-device <...> |\n"
     L"         /restart-device <...> | /remove-device <...> |\n"
-    L"         /scan-devices | /?]\n"
+    L"         /rollback-device <...> | /scan-devices | /?]\n"
     L"\n"
     L"Commands:\n"
     L"\n"
@@ -149,8 +150,9 @@ static const WCHAR UsageText[] =
     L"  /enable-device <instance ID> [/reboot]\n"
     L"  /restart-device <instance ID> [/reboot]\n"
     L"  /remove-device <instance ID> [/reboot]\n"
+    L"  /rollback-device <instance ID>\n"
     L"\n"
-    L"    Disable, enable, restart or remove a device.\n"
+    L"    Disable, enable, restart, remove or roll back a device.\n"
     L"      /reboot - reboot system if needed to complete the operation.\n"
     L"\n"
     L"  /scan-devices\n"
@@ -1075,6 +1077,40 @@ CommandScanDevices(VOID)
     return ERROR_SUCCESS;
 }
 
+static INT
+CommandRollbackDevice(_In_ INT argc, _In_ WCHAR **argv)
+{
+    PCWSTR InstanceId = NULL;
+    DWORD Error;
+    INT i;
+
+    for (i = 0; i < argc; i++)
+    {
+        if (IsOption(argv[i], L"reboot"))
+            continue;
+        else if (!InstanceId)
+            InstanceId = argv[i];
+        else
+            return ERROR_INVALID_PARAMETER;
+    }
+
+    if (!InstanceId)
+        return ERROR_INVALID_PARAMETER;
+
+    PrintHeader();
+    ConPrintf(StdOut, L"Rolling back device:       %s\n", InstanceId);
+
+    Error = DrvInstRollback(InstanceId);
+    if (Error != ERROR_SUCCESS)
+    {
+        ConPrintf(StdErr, L"Failed to roll back the device (error %lu).\n", Error);
+        return (INT)Error;
+    }
+
+    ConPuts(StdOut, L"Device rolled back successfully.\n");
+    return ERROR_SUCCESS;
+}
+
 int
 wmain(
     int argc,
@@ -1122,6 +1158,10 @@ wmain(
     else if (IsOption(Command, L"scan-devices"))
     {
         Result = CommandScanDevices();
+    }
+    else if (IsOption(Command, L"rollback-device"))
+    {
+        Result = CommandRollbackDevice(argc, argv);
     }
     else if (IsOption(Command, L"restart-device"))
     {
