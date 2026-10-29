@@ -3957,8 +3957,20 @@ LX_SYSCALL(LxSysPrctl)
         case LX_PR_SET_PTRACER:
             return LxPtraceSetPtracer(Process, Arg);
 
-        case LX_PR_SET_THP_DISABLE:
         case LX_PR_GET_THP_DISABLE:
+            if ((Arg | Call->Args[2] | Call->Args[3] | Call->Args[4]) != 0)
+                return -LX_EINVAL;
+            return Process->ThpDisable;
+
+        case LX_PR_SET_THP_DISABLE:
+            if (((Call->Args[3] | Call->Args[4]) != 0) || ((Arg == 0) && (Call->Args[2] != 0)) ||
+                (Call->Args[2] & ~(ULONG64)LX_PR_THP_DISABLE_EXCEPT_ADVISED))
+            {
+                return -LX_EINVAL;
+            }
+            Process->ThpDisable = (Arg == 0) ? 0 : (1 | (ULONG)Call->Args[2]);
+            return 0;
+
         case 0x53564D41:
             return 0;
 

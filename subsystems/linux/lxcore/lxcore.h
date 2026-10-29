@@ -668,6 +668,7 @@ struct _LX_PROCESS
     ULONG Personality;
     ULONG LoginUid;
     ULONG SessionId;
+    ULONG ThpDisable;
 };
 
 typedef struct _LX_CRED_SAVE

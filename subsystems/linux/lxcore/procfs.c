@@ -1293,8 +1293,8 @@ LxGenPidStatus(
         LxTextAppend(Text, "Kthread:\t0\n", 10);
     }
     LxTextPrintf(Text,
-                 "CoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffff\nThreads:\t%ld\nSigQ:\t0/63429\n",
-                 Process->Exited ? 1L : (LONG)Process->ThreadCount);
+                 "CoreDumping:\t0\nTHP_enabled:\t%d\nuntag_mask:\t0xffffffffffffff\nThreads:\t%ld\nSigQ:\t0/63429\n",
+                 Process->ThpDisable != 1, Process->Exited ? 1L : (LONG)Process->ThreadCount);
     switch (Spec)
     {
         case -LX_EINVAL:

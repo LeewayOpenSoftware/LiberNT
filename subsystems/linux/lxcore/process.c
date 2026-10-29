@@ -404,6 +404,7 @@ LxProcessFork(
     Process->Personality = Parent->Personality;
     Process->LoginUid = Parent->LoginUid;
     Process->SessionId = Parent->SessionId;
+    Process->ThpDisable = Parent->ThpDisable;
     Process->Trace = Parent->Trace;
     for (Fd = 0; Fd < LX_MAX_FDS; Fd++)
     {
