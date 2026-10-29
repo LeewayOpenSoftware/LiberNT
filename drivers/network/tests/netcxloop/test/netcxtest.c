@@ -20,6 +20,7 @@
 static const UCHAR AdapterAddress[6] = { 0x02, 0x00, 0x4C, 0x4F, 0x4F, 0x50 };
 
 static int Failures;
+static WCHAR DeviceInstanceId[MAX_DEVICE_ID_LEN];
 
 static
 void
@@ -74,7 +75,8 @@ InstallDevice(const WCHAR *InfPath)
     Info.cbSize = sizeof(Info);
     Result = SetupDiCreateDeviceInfoW(Set, ClassName, &ClassGuid, NULL, NULL, DICD_GENERATE_ID, &Info) &&
              SetupDiSetDeviceRegistryPropertyW(Set, &Info, SPDRP_HARDWAREID, (const BYTE *)HardwareId, sizeof(HardwareId)) &&
-             SetupDiCallClassInstaller(DIF_REGISTERDEVICE, Set, &Info);
+             SetupDiCallClassInstaller(DIF_REGISTERDEVICE, Set, &Info) &&
+             SetupDiGetDeviceInstanceIdW(Set, &Info, DeviceInstanceId, ARRAYSIZE(DeviceInstanceId), NULL);
     if (!Result)
     {
         Report("NETCXTEST: device registration error %lu", GetLastError());
@@ -153,18 +155,108 @@ ReportInterface(const char *When, const MIB_IF_ROW2 *Row)
            Row->InDiscards, Row->InErrors, Row->OutErrors);
 }
 
-int
-wmain(int argc, WCHAR **argv)
+static
+BOOL
+AddAddress(NET_LUID Luid)
 {
-    WCHAR InfPath[MAX_PATH];
     MIB_UNICASTIPADDRESS_ROW Address;
-    MIB_IF_ROW2 Row;
+    DWORD Status;
+    int i;
+
+    InitializeUnicastIpAddressEntry(&Address);
+    Address.InterfaceLuid = Luid;
+    Address.Address.Ipv4.sin_family = AF_INET;
+    Address.Address.Ipv4.sin_addr.s_addr = inet_addr("10.231.0.1");
+    Address.OnLinkPrefixLength = 24;
+    Status = CreateUnicastIpAddressEntry(&Address);
+    Report("NETCXTEST: CreateUnicastIpAddressEntry %lu", Status);
+    if (Status != NO_ERROR && Status != ERROR_OBJECT_ALREADY_EXISTS)
+        return FALSE;
+
+    for (i = 0; i < 50; i++)
+    {
+        if (GetUnicastIpAddressEntry(&Address) == NO_ERROR && Address.DadState == IpDadStatePreferred)
+            break;
+        if (i % 10 == 9)
+            Report("NETCXTEST: waiting for the address, %d ms", (i + 1) * 100);
+        Sleep(100);
+    }
+    Report("NETCXTEST: address DAD state %d", Address.DadState);
+    return Address.DadState == IpDadStatePreferred;
+}
+
+static
+int
+PingPeer(int Count)
+{
     UCHAR Reply[sizeof(ICMP_ECHO_REPLY) + 64 + 8];
     char Data[32];
     HANDLE Icmp;
     DWORD Status;
-    WCHAR *Slash;
     int Replies = 0;
+    int i;
+
+    Icmp = IcmpCreateFile();
+    if (Icmp == INVALID_HANDLE_VALUE)
+    {
+        Report("NETCXTEST: IcmpCreateFile error %lu", GetLastError());
+        return 0;
+    }
+    memset(Data, 'L', sizeof(Data));
+    for (i = 0; i < Count; i++)
+    {
+        PICMP_ECHO_REPLY Echo = (PICMP_ECHO_REPLY)Reply;
+
+        Status = IcmpSendEcho(Icmp, inet_addr("10.231.0.2"), Data, sizeof(Data), NULL, Reply, sizeof(Reply), 1000);
+        if (Status && Echo->Status == IP_SUCCESS && Echo->DataSize == sizeof(Data) &&
+            !memcmp(Echo->Data, Data, sizeof(Data)))
+            Replies++;
+        Report("NETCXTEST: echo %d: count %lu status %lu rtt %lu size %u error %lu",
+               i, Status, Status ? Echo->Status : 0, Status ? Echo->RoundTripTime : 0,
+               Status ? Echo->DataSize : 0, Status ? 0 : GetLastError());
+    }
+    IcmpCloseHandle(Icmp);
+    return Replies;
+}
+
+static
+BOOL
+SetDeviceEnabled(BOOL Enable)
+{
+    DEVINST DevInst;
+    CONFIGRET Result;
+
+    Result = CM_Locate_DevNodeW(&DevInst, DeviceInstanceId, CM_LOCATE_DEVNODE_PHANTOM);
+    if (Result == CR_SUCCESS)
+        Result = Enable ? CM_Enable_DevNode(DevInst, 0) : CM_Disable_DevNode(DevInst, 0);
+    Report("NETCXTEST: %s '%ls' result %lu", Enable ? "enable" : "disable", DeviceInstanceId, Result);
+    return Result == CR_SUCCESS;
+}
+
+static
+BOOL
+WaitForInterface(BOOL Present, MIB_IF_ROW2 *Row)
+{
+    int i;
+
+    for (i = 0; i < 100; i++)
+    {
+        if (FindInterface(Row) == Present &&
+            (!Present || Row->OperStatus == IfOperStatusUp))
+            return TRUE;
+        if (i % 10 == 9)
+            Report("NETCXTEST: waiting for the interface to be %s, %d ms", Present ? "up" : "gone", (i + 1) * 100);
+        Sleep(100);
+    }
+    return FALSE;
+}
+
+int
+wmain(int argc, WCHAR **argv)
+{
+    WCHAR InfPath[MAX_PATH];
+    MIB_IF_ROW2 Row;
+    WCHAR *Slash;
     int i;
 
     if (argc > 1)
@@ -211,48 +303,19 @@ wmain(int argc, WCHAR **argv)
     Check(Row.Mtu == 1500, "mtu 1500");
     Check(Row.TransmitLinkSpeed == 1000000000ULL, "link speed 1 Gbps");
 
-    InitializeUnicastIpAddressEntry(&Address);
-    Address.InterfaceLuid = Row.InterfaceLuid;
-    Address.Address.Ipv4.sin_family = AF_INET;
-    Address.Address.Ipv4.sin_addr.s_addr = inet_addr("10.231.0.1");
-    Address.OnLinkPrefixLength = 24;
-    Status = CreateUnicastIpAddressEntry(&Address);
-    Report("NETCXTEST: CreateUnicastIpAddressEntry %lu", Status);
-    Check(Status == NO_ERROR, "address created");
-
-    for (i = 0; i < 50; i++)
-    {
-        if (GetUnicastIpAddressEntry(&Address) == NO_ERROR && Address.DadState == IpDadStatePreferred)
-            break;
-        if (i % 10 == 9)
-            Report("NETCXTEST: waiting for the address, %d ms", (i + 1) * 100);
-        Sleep(100);
-    }
-    Report("NETCXTEST: address DAD state %d", Address.DadState);
-    Check(Address.DadState == IpDadStatePreferred, "address preferred");
-
-    Icmp = IcmpCreateFile();
-    Check(Icmp != INVALID_HANDLE_VALUE, "icmp handle");
-    memset(Data, 'L', sizeof(Data));
-    for (i = 0; i < 4 && Icmp != INVALID_HANDLE_VALUE; i++)
-    {
-        PICMP_ECHO_REPLY Echo = (PICMP_ECHO_REPLY)Reply;
-
-        Status = IcmpSendEcho(Icmp, inet_addr("10.231.0.2"), Data, sizeof(Data), NULL, Reply, sizeof(Reply), 1000);
-        if (Status && Echo->Status == IP_SUCCESS && Echo->DataSize == sizeof(Data) &&
-            !memcmp(Echo->Data, Data, sizeof(Data)))
-            Replies++;
-        Report("NETCXTEST: echo %d: count %lu status %lu rtt %lu size %u error %lu",
-               i, Status, Status ? Echo->Status : 0, Status ? Echo->RoundTripTime : 0,
-               Status ? Echo->DataSize : 0, Status ? 0 : GetLastError());
-    }
-    if (Icmp != INVALID_HANDLE_VALUE)
-        IcmpCloseHandle(Icmp);
-    Check(Replies >= 3, "peer answers echo");
+    Check(AddAddress(Row.InterfaceLuid), "address preferred");
+    Check(PingPeer(4) >= 3, "peer answers echo");
 
     if (GetIfEntry2(&Row) == NO_ERROR)
         ReportInterface("end", &Row);
     Check(Row.InOctets > 0 && Row.OutOctets > 0, "traffic counted");
+
+    Check(SetDeviceEnabled(FALSE), "disable");
+    Check(WaitForInterface(FALSE, &Row), "interface removed after disable");
+    Check(SetDeviceEnabled(TRUE), "enable");
+    Check(WaitForInterface(TRUE, &Row), "interface up after enable");
+    Check(AddAddress(Row.InterfaceLuid), "address preferred after enable");
+    Check(PingPeer(2) >= 1, "peer answers echo after enable");
 
     Report("NETCXTEST: DONE %d failures", Failures);
     return Failures ? 1 : 0;
