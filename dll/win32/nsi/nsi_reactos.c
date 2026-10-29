@@ -356,11 +356,50 @@ static ULONG64 interface_speed(UINT index)
     return speed;
 }
 
+static void fill_zone_indices(ULONG *zones, UINT index, BOOL loopback)
+{
+    UINT level;
+
+    for (level = 0; level < ScopeLevelCount; level++)
+        zones[level] = (level < ScopeLevelAdmin && !loopback) ? index : 1;
+    zones[ScopeLevelGlobal] = 0;
+}
+
+static BOOL ip4_query_interface(UINT index, IP4_INTERFACE_INFO *info)
+{
+    UNICODE_STRING name = RTL_CONSTANT_STRING(L"\\Device\\Ip");
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS status;
+    HANDLE file;
+
+    memset(info, 0, sizeof(*info));
+    info->Index = index;
+    InitializeObjectAttributes(&attr, &name, OBJ_CASE_INSENSITIVE, NULL, NULL);
+    status = NtOpenFile(&file, SYNCHRONIZE, &attr, &iosb, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        FILE_SYNCHRONOUS_IO_NONALERT);
+    if (!NT_SUCCESS(status)) return FALSE;
+    status = NtDeviceIoControlFile(file, NULL, NULL, NULL, &iosb, IOCTL_IP_QUERY_INTERFACE,
+                                   info, sizeof(*info), info, sizeof(*info));
+    NtClose(file);
+    return NT_SUCCESS(status);
+}
+
+static void override_zone_indices(ULONG *zones, const ULONG *overrides)
+{
+    UINT level;
+
+    for (level = 0; level < ScopeLevelCount; level++)
+        if (overrides[level]) zones[level] = overrides[level];
+}
+
 static void fill_ip_interface(UINT index, struct nsi_ip_interface_key *key, struct nsi_ip_interface_rw *rw,
                               struct nsi_ip_interface_dynamic *dynamic, struct nsi_ip_interface_static *stat)
 {
     DWORD mtu = 0, status = 0;
     BOOL loopback = interface_type(index) == MIB_IF_TYPE_LOOPBACK;
+    IP4_INTERFACE_INFO info;
+    BOOL have_info = ip4_query_interface(index, &info);
 
     getInterfaceMtuByIndex(index, &mtu);
     getInterfaceStatusByIndex(index, &status);
@@ -368,19 +407,25 @@ static void fill_ip_interface(UINT index, struct nsi_ip_interface_key *key, stru
     if (rw)
     {
         memset(rw, 0, sizeof(*rw));
-        rw->metric = automatic_metric(interface_speed(index), interface_type(index));
-        rw->base_reachable_time = 30000;
-        rw->retransmit_time = 1000;
-        rw->path_mtu_discovery_timeout = 600000;
-        rw->dad_transmits = loopback ? 0 : 1;
-        rw->mtu = loopback ? ~0u : mtu;
-        rw->site_prefix_len = 64;
+        rw->metric = (have_info && !info.UseAutomaticMetric) ? info.Metric
+                                                             : automatic_metric(interface_speed(index), interface_type(index));
+        rw->base_reachable_time = have_info ? info.BaseReachableTime : 30000;
+        rw->retransmit_time = have_info ? info.RetransmitTime : 1000;
+        rw->path_mtu_discovery_timeout = have_info ? info.PathMtuDiscoveryTimeout : 600000;
+        rw->dad_transmits = loopback ? 0 : have_info ? info.DadTransmits : 3;
+        rw->router_discovery_behaviour = have_info ? info.RouterDiscoveryBehavior : RouterDiscoveryDhcp;
+        rw->link_local_address_behavior = LinkLocalDelayed;
+        rw->link_local_address_timeout = have_info ? info.LinkLocalAddressTimeout : 6500;
+        rw->mtu = loopback ? ~0u : have_info ? info.Mtu : mtu;
+        rw->site_prefix_len = have_info ? info.SitePrefixLength : 64;
+        fill_zone_indices(rw->zone_indices, index, loopback);
+        if (have_info) override_zone_indices(rw->zone_indices, info.ZoneIndices);
     }
     if (dynamic)
     {
         memset(dynamic, 0, sizeof(*dynamic));
         dynamic->if_index = index;
-        dynamic->reachable_time = 30000;
+        dynamic->reachable_time = have_info ? info.ReachableTime : 30000;
         dynamic->connected = oper_status(status) == NET_IF_OPER_STATUS_UP;
     }
     if (stat) memset(stat, 0, sizeof(*stat));
@@ -451,15 +496,19 @@ static void fill_ipv6_interface(const IP6_INTERFACE_ROW *row, struct nsi_ip_inte
     if (rw)
     {
         memset(rw, 0, sizeof(*rw));
-        rw->metric = automatic_metric(row->LinkSpeed, row->Loopback ? MIB_IF_TYPE_LOOPBACK : interface_type(row->Index));
+        rw->metric = row->UseAutomaticMetric ? automatic_metric(row->LinkSpeed, row->Loopback ? MIB_IF_TYPE_LOOPBACK : interface_type(row->Index))
+                                             : row->Metric;
         rw->base_reachable_time = row->BaseReachableTime;
         rw->retransmit_time = row->RetransmitTime;
-        rw->path_mtu_discovery_timeout = 600000;
+        rw->path_mtu_discovery_timeout = row->PathMtuDiscoveryTimeout;
         rw->dad_transmits = row->DadTransmits;
         rw->link_local_address_behavior = LinkLocalAlwaysOn;
-        rw->link_local_address_timeout = ~0u;
+        rw->link_local_address_timeout = row->LinkLocalAddressTimeout;
         rw->mtu = row->Loopback ? ~0u : row->Mtu;
-        rw->site_prefix_len = 64;
+        rw->site_prefix_len = row->SitePrefixLength;
+        rw->router_discovery_behaviour = row->RouterDiscoveryBehavior;
+        fill_zone_indices(rw->zone_indices, row->Index, row->Loopback);
+        override_zone_indices(rw->zone_indices, row->ZoneIndices);
     }
     if (dynamic)
     {
@@ -488,13 +537,24 @@ static DWORD enumerate_ipv6_interface(struct nsi_enumerate_all_ex *params)
     return finish_enumeration(params, count, want_data);
 }
 
+static int __cdecl ipv6_unicast_compare(const void *left, const void *right)
+{
+    const IP6_ADDRESS_ROW *a = left, *b = right;
+
+    if (a->Index != b->Index) return a->Index < b->Index ? -1 : 1;
+    return memcmp(a->Address, b->Address, sizeof(a->Address));
+}
+
 static DWORD enumerate_ipv6_unicast(struct nsi_enumerate_all_ex *params)
 {
     ULONG count;
     IP6_TABLE_HEADER *header = ip6_query_table(Ip6TableAddresses, &count);
-    const IP6_ADDRESS_ROW *rows = (const IP6_ADDRESS_ROW *)(header + 1);
+    IP6_ADDRESS_ROW *rows = (IP6_ADDRESS_ROW *)(header + 1);
     BOOL want_data = params->key_size || params->rw_size || params->dynamic_size || params->static_size;
     UINT_PTR i, limit = count < params->count ? count : params->count;
+
+    if (header && count > 1)
+        qsort(rows, count, sizeof(*rows), ipv6_unicast_compare);
 
     for (i = 0; want_data && i < limit; i++)
     {
@@ -570,13 +630,27 @@ static DWORD enumerate_ipv6_neighbour(struct nsi_enumerate_all_ex *params)
     return finish_enumeration(params, count, want_data);
 }
 
+static int __cdecl ipv6_route_compare(const void *left, const void *right)
+{
+    const IP6_ROUTE_ROW *a = left, *b = right;
+    int diff = memcmp(a->Prefix, b->Prefix, sizeof(a->Prefix));
+
+    if (diff) return diff;
+    if (a->PrefixLength != b->PrefixLength) return a->PrefixLength < b->PrefixLength ? -1 : 1;
+    if (a->Index != b->Index) return a->Index < b->Index ? -1 : 1;
+    return memcmp(a->NextHop, b->NextHop, sizeof(a->NextHop));
+}
+
 static DWORD enumerate_ipv6_forward(struct nsi_enumerate_all_ex *params)
 {
     ULONG count;
     IP6_TABLE_HEADER *header = ip6_query_table(Ip6TableRoutes, &count);
-    const IP6_ROUTE_ROW *rows = (const IP6_ROUTE_ROW *)(header + 1);
+    IP6_ROUTE_ROW *rows = (IP6_ROUTE_ROW *)(header + 1);
     BOOL want_data = params->key_size || params->rw_size || params->dynamic_size || params->static_size;
     UINT_PTR i, limit = count < params->count ? count : params->count;
+
+    if (header && count > 1)
+        qsort(rows, count, sizeof(*rows), ipv6_route_compare);
 
     for (i = 0; want_data && i < limit; i++)
     {
