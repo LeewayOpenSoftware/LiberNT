@@ -477,6 +477,15 @@ NdisWdfPnpPowerEventHandler(
             return STATUS_SUCCESS;
 
         case NdisWdfActionPnpStop:
+            if (Ext->Initialized)
+            {
+                /* FIXME: a rebalance stop reports NdisHaltDeviceDisabled, not NdisHaltDeviceStopped */
+                Ndis6CallMiniportHaltEx(Adapter, Ext->WdfSurpriseRemoved ? NdisHaltDeviceSurpriseRemoved : NdisHaltDeviceDisabled);
+                Ext->Initialized = FALSE;
+                Ext->WdfBindingsStarted = FALSE;
+            }
+            return STATUS_SUCCESS;
+
         case NdisWdfActionPowerDx:
         case NdisWdfActionPowerDxFinal:
         case NdisWdfActionPowerDxOnSystemSx:
