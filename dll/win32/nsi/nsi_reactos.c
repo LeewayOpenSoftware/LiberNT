@@ -195,6 +195,8 @@ static DWORD finish_enumeration(struct nsi_enumerate_all_ex *params, UINT_PTR to
 
 static ULONG64 interface_speed(UINT index);
 
+static BOOL ip4_query_interface(UINT index, IP4_INTERFACE_INFO *info);
+
 static BOOL fill_ndis_entry(UINT index, NET_LUID *key, struct nsi_ndis_ifinfo_rw *rw,
                             struct nsi_ndis_ifinfo_dynamic *dynamic, struct nsi_ndis_ifinfo_static *stat)
 {
@@ -205,6 +207,7 @@ static BOOL fill_ndis_entry(UINT index, NET_LUID *key, struct nsi_ndis_ifinfo_rw
     char description[MAXLEN_IFDESCR + 1];
     WCHAR alias[IF_MAX_STRING_SIZE + 1], driver[IF_MAX_STRING_SIZE + 1];
     BOOL found, has_alias = FALSE, has_driver = FALSE;
+    IP4_INTERFACE_INFO medium;
     GUID guid;
 
     memset(&row, 0, sizeof(row));
@@ -246,6 +249,7 @@ static BOOL fill_ndis_entry(UINT index, NET_LUID *key, struct nsi_ndis_ifinfo_rw
         dynamic->mtu = row.dwMtu;
         dynamic->xmit_speed = interface_speed(index);
         if (!dynamic->xmit_speed) dynamic->xmit_speed = row.dwSpeed;
+        if (!dynamic->xmit_speed && type == MIB_IF_TYPE_LOOPBACK) dynamic->xmit_speed = 1073741824;
         dynamic->rcv_speed = dynamic->xmit_speed;
         dynamic->in_discards = row.dwInDiscards;
         dynamic->in_errors = row.dwInErrors;
@@ -274,6 +278,8 @@ static BOOL fill_ndis_entry(UINT index, NET_LUID *key, struct nsi_ndis_ifinfo_rw
         stat->perm_phys_addr.Length = physical_length;
         memcpy(stat->perm_phys_addr.Address, physical, stat->perm_phys_addr.Length);
         stat->flags.hw = type != MIB_IF_TYPE_LOOPBACK;
+        if (ip4_query_interface(index, &medium))
+            stat->phys_medium_type = medium.PhysicalMedium;
     }
     return found;
 }

@@ -871,6 +871,7 @@ IPQueryInterfaceV4(PIP4_INTERFACE_INFO Info)
         return STATUS_NOT_FOUND;
     Info->Metric = IPInterfaceMetric(Interface);
     Info->UseAutomaticMetric = !Interface->ManualMetric;
+    Info->PhysicalMedium = Interface->PhysicalMedium;
     Info->Mtu = Interface->MTU;
     Info->RetransmitTime = Interface->RetransmitTime;
     Info->BaseReachableTime = Interface->BaseReachableTime;

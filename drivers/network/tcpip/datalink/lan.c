@@ -1466,6 +1466,7 @@ BOOLEAN BindAdapter(
         return FALSE;
     }
 
+    IF->PhysicalMedium = BindParameters->PhysicalMediumType;
     IF->Wireless = BindParameters->PhysicalMediumType == NdisPhysicalMediumWirelessLan ||
                    BindParameters->PhysicalMediumType == NdisPhysicalMediumWirelessWan ||
                    BindParameters->PhysicalMediumType == NdisPhysicalMediumNative802_11;
