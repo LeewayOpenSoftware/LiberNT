@@ -27,6 +27,11 @@ typedef WDFOBJECT (NTAPI *PFN_NETADAPTERGETPARENT)(PNET_DRIVER_GLOBALS, NETADAPT
 typedef NTSTATUS (NTAPI *PFN_NETADAPTERINITALLOCATECONTEXT)(PNET_DRIVER_GLOBALS, NETADAPTER_INIT *, WDF_OBJECT_ATTRIBUTES *, void **);
 typedef void * (NTAPI *PFN_NETADAPTERINITGETTYPEDCONTEXTWORKER)(PNET_DRIVER_GLOBALS, NETADAPTER_INIT *, CONST WDF_OBJECT_CONTEXT_TYPE_INFO *);
 typedef NTSTATUS (NTAPI *PFN_NETDRIVEREXTENSIONINITIALIZE)(PNET_DRIVER_GLOBALS, WDFDRIVER, const NET_DRIVER_EXTENSION_CONFIG *);
+typedef NETADAPTEREXT_INIT * (NTAPI *PFN_NETADAPTEREXTENSIONINITALLOCATE)(PNET_DRIVER_GLOBALS, NETADAPTER_INIT *);
+typedef void (NTAPI *PFN_NETADAPTEREXTENSIONINITSETOIDREQUESTPREPROCESSCALLBACK)(PNET_DRIVER_GLOBALS, NETADAPTEREXT_INIT *, PFN_NET_ADAPTER_PRE_PROCESS_OID_REQUEST);
+typedef void (NTAPI *PFN_NETADAPTERDISPATCHPREPROCESSEDOIDREQUEST)(PNET_DRIVER_GLOBALS, NETADAPTER, NDIS_OID_REQUEST *, WDFCONTEXT);
+typedef void (NTAPI *PFN_NETADAPTERCOMPLETEOIDREQUEST)(PNET_DRIVER_GLOBALS, NETADAPTER, NDIS_OID_REQUEST *, NDIS_STATUS);
+typedef NDIS_HANDLE (NTAPI *PFN_NETADAPTERWDMGETNDISHANDLE)(PNET_DRIVER_GLOBALS, NETADAPTER);
 
 #define WX_TAG 'xCiW'
 #define WX_COMMAND_TIMEOUT_MS 5000
@@ -43,15 +48,27 @@ typedef struct _WX_TASK
     KEVENT Done;
 } WX_TASK;
 
+typedef struct _WX_TLV
+{
+    PUCHAR Buffer;
+    ULONG Length;
+    ULONG Capacity;
+    BOOLEAN Failed;
+} WX_TLV;
+
 typedef struct _WX_DEVICE
 {
     WDFDEVICE Device;
     WIFI_DEVICE_CONFIG Config;
     WIFI_DEVICE_CAPABILITIES DeviceCapabilities;
-    WIFI_STATION_CAPABILITIES StationCapabilities;
     WIFI_WIFIDIRECT_CAPABILITIES WifiDirectCapabilities;
-    WIFI_BAND_CAPABILITIES BandCapabilities;
-    WIFI_PHY_CAPABILITIES PhyCapabilities;
+    WX_TLV StationTlv;
+    WX_TLV BandTlv;
+    WX_TLV PhyTlv;
+    FAST_MUTEX EngineMutex;
+    EX_RUNDOWN_REF EngineRundown;
+    PVOID volatile Engine;
+    BOOLEAN EngineFailed;
     NETADAPTER_INIT *CreatingAdapterInit;
     WIFI_ADAPTER_TYPE CreatingAdapterType;
     NETADAPTER StationAdapter;
@@ -87,12 +104,17 @@ typedef struct _WX_REQUEST
     UINT BytesNeeded;
     NTSTATUS Status;
     UINT BytesWritten;
+    PNDIS_OID_REQUEST EngineCommand;
+    struct _WX_DEVICE *Dev;
     KEVENT Done;
 } WX_REQUEST;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(WX_REQUEST, WxGetRequest);
 
 static EVT_WDFCX_DEVICE_POST_PREPARE_HARDWARE WxEvtPostPrepareHardware;
+static EVT_NET_ADAPTER_PRE_PROCESS_OID_REQUEST WxPreprocessOid;
+static EVT_WDF_OBJECT_CONTEXT_CLEANUP WxDeviceCleanup;
+static EVT_WDF_OBJECT_CONTEXT_CLEANUP WxAdapterCleanup;
 
 static
 WDFOBJECT
@@ -136,6 +158,133 @@ WxTlvAppend(
     RtlCopyMemory(Buffer + *Length + sizeof(UINT16), &ValueLength, sizeof(ValueLength));
     RtlCopyMemory(Buffer + *Length + sizeof(UINT16) * 2, Value, ValueLength);
     *Length += sizeof(UINT16) * 2 + ValueLength;
+}
+
+static
+VOID
+WxTlvFree(
+    _Inout_ WX_TLV *Tlv)
+{
+    if (Tlv->Buffer != NULL)
+        ExFreePoolWithTag(Tlv->Buffer, WX_TAG);
+    RtlZeroMemory(Tlv, sizeof(*Tlv));
+}
+
+static
+VOID
+WxTlvPut(
+    _Inout_ WX_TLV *Tlv,
+    _In_reads_bytes_opt_(Size) const void *Data,
+    _In_ ULONG Size)
+{
+    PUCHAR Buffer;
+    ULONG Capacity;
+
+    if (Tlv->Failed || Size == 0)
+        return;
+    if (Data == NULL || Size > MAXUSHORT)
+    {
+        Tlv->Failed = TRUE;
+        return;
+    }
+
+    if (Tlv->Capacity - Tlv->Length < Size)
+    {
+        Capacity = max(Tlv->Capacity * 2, Tlv->Length + Size + 256);
+        Buffer = (PUCHAR)ExAllocatePoolZero(NonPagedPoolNx, Capacity, WX_TAG);
+        if (Buffer == NULL)
+        {
+            Tlv->Failed = TRUE;
+            return;
+        }
+        if (Tlv->Length != 0)
+            RtlCopyMemory(Buffer, Tlv->Buffer, Tlv->Length);
+        if (Tlv->Buffer != NULL)
+            ExFreePoolWithTag(Tlv->Buffer, WX_TAG);
+        Tlv->Buffer = Buffer;
+        Tlv->Capacity = Capacity;
+    }
+
+    RtlCopyMemory(Tlv->Buffer + Tlv->Length, Data, Size);
+    Tlv->Length += Size;
+}
+
+static
+VOID
+WxTlvPut8(
+    _Inout_ WX_TLV *Tlv,
+    _In_ UINT8 Value)
+{
+    WxTlvPut(Tlv, &Value, sizeof(Value));
+}
+
+static
+VOID
+WxTlvPut16(
+    _Inout_ WX_TLV *Tlv,
+    _In_ UINT16 Value)
+{
+    WxTlvPut(Tlv, &Value, sizeof(Value));
+}
+
+static
+VOID
+WxTlvPut32(
+    _Inout_ WX_TLV *Tlv,
+    _In_ UINT32 Value)
+{
+    WxTlvPut(Tlv, &Value, sizeof(Value));
+}
+
+static
+ULONG
+WxTlvOpen(
+    _Inout_ WX_TLV *Tlv,
+    _In_ UINT16 Type)
+{
+    ULONG Offset = Tlv->Length;
+
+    WxTlvPut16(Tlv, Type);
+    WxTlvPut16(Tlv, 0);
+    return Offset;
+}
+
+static
+VOID
+WxTlvClose(
+    _Inout_ WX_TLV *Tlv,
+    _In_ ULONG Offset)
+{
+    ULONG Length;
+    UINT16 Value;
+
+    if (Tlv->Failed)
+        return;
+    Length = Tlv->Length - Offset - 2 * sizeof(UINT16);
+    if (Length > MAXUSHORT)
+    {
+        Tlv->Failed = TRUE;
+        return;
+    }
+    Value = (UINT16)Length;
+    RtlCopyMemory(Tlv->Buffer + Offset + sizeof(UINT16), &Value, sizeof(Value));
+}
+
+static
+VOID
+WxTlvAddList(
+    _Inout_ WX_TLV *Tlv,
+    _In_ UINT16 Type,
+    _In_reads_bytes_opt_(Size) const void *Data,
+    _In_ ULONG Size)
+{
+    ULONG Offset;
+
+    if (Data == NULL || Size == 0)
+        return;
+    Offset = WxTlvOpen(Tlv, Type);
+    WxTlvPut(Tlv, Data, Size);
+    WxTlvClose(Tlv, Offset);
 }
 
 static
@@ -249,6 +398,263 @@ WxSendCommand(
 }
 
 static
+NDIS_STATUS
+WxNtToNdisStatus(
+    _In_ NTSTATUS Status)
+{
+    if (NT_SUCCESS(Status))
+        return NDIS_STATUS_SUCCESS;
+    if (Status == STATUS_BUFFER_TOO_SMALL || Status == STATUS_BUFFER_OVERFLOW)
+        return NDIS_STATUS_BUFFER_TOO_SHORT;
+    return (NDIS_STATUS)Status;
+}
+
+static
+PVOID
+WxAcquireEngine(
+    _In_ WX_DEVICE *Dev)
+{
+    PVOID Engine;
+
+    if (!ExAcquireRundownProtection(&Dev->EngineRundown))
+        return NULL;
+    Engine = InterlockedCompareExchangePointer((PVOID volatile *)&Dev->Engine, NULL, NULL);
+    if (Engine == NULL)
+        ExReleaseRundownProtection(&Dev->EngineRundown);
+    return Engine;
+}
+
+static
+NDIS_STATUS
+NTAPI
+WxEngineSendCommand(
+    _In_ NDIS_HANDLE TransportContext,
+    _Inout_ PNDIS_OID_REQUEST Command)
+{
+    WX_DEVICE *Dev = (WX_DEVICE *)TransportContext;
+    WDF_OBJECT_ATTRIBUTES Attributes;
+    WX_REQUEST *Request;
+    WDFOBJECT Object;
+    ULONG InputLength = Command->DATA.METHOD_INFORMATION.InputBufferLength;
+    ULONG OutputLength = Command->DATA.METHOD_INFORMATION.OutputBufferLength;
+    ULONG BufferSize = max(InputLength, OutputLength);
+    PUCHAR Buffer;
+    NTSTATUS Status;
+
+    if (Command->RequestType != NdisRequestMethod || InputLength < sizeof(WDI_MESSAGE_HEADER))
+        return NDIS_STATUS_INVALID_PARAMETER;
+
+    Buffer = (PUCHAR)ExAllocatePoolZero(NonPagedPoolNx, BufferSize, WX_TAG);
+    if (Buffer == NULL)
+        return NDIS_STATUS_RESOURCES;
+    RtlCopyMemory(Buffer, Command->DATA.METHOD_INFORMATION.InformationBuffer, InputLength);
+
+    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&Attributes, WX_REQUEST);
+    Attributes.ParentObject = Dev->Device;
+    Status = WdfObjectCreate(&Attributes, &Object);
+    if (!NT_SUCCESS(Status))
+    {
+        ExFreePoolWithTag(Buffer, WX_TAG);
+        return NDIS_STATUS_RESOURCES;
+    }
+
+    Request = WxGetRequest(Object);
+    Request->Buffer = Buffer;
+    Request->InputLength = InputLength;
+    Request->OutputLength = BufferSize;
+    Request->MessageId = (UINT16)(Command->DATA.METHOD_INFORMATION.Oid & 0xFFFF);
+    Request->Status = STATUS_PENDING;
+    Request->EngineCommand = Command;
+    Request->Dev = Dev;
+    KeInitializeEvent(&Request->Done, NotificationEvent, FALSE);
+
+    Dev->Config.SendCommand(Dev->Device, (WIFIREQUEST)Object);
+    return NDIS_STATUS_PENDING;
+}
+
+static
+VOID
+WxBuildInterfaceTlv(
+    _In_ WX_DEVICE *Dev,
+    _Inout_ WX_TLV *Tlv)
+{
+    static const UCHAR Zero[6] = { 0 };
+    const WIFI_DEVICE_CAPABILITIES *Caps = &Dev->DeviceCapabilities;
+    ULONG Outer;
+    ULONG Inner;
+
+    Outer = WxTlvOpen(Tlv, WDI_TLV_INTERFACE_ATTRIBUTES);
+    Inner = WxTlvOpen(Tlv, WDI_TLV_INTERFACE_CAPABILITIES);
+    WxTlvPut32(Tlv, 1500);
+    WxTlvPut32(Tlv, 0);
+    WxTlvPut16(Tlv, 0);
+    WxTlvPut(Tlv, Zero, sizeof(Zero));
+    WxTlvPut32(Tlv, 0);
+    WxTlvPut32(Tlv, 0);
+    WxTlvPut8(Tlv, Caps->HardwareRadioState);
+    WxTlvPut8(Tlv, Caps->SoftwareRadioState);
+    WxTlvPut8(Tlv, 0);
+    WxTlvPut8(Tlv, 0);
+    WxTlvPut8(Tlv, Caps->ActionFramesSupported);
+    WxTlvPut8(Tlv, Caps->NumRxStreams);
+    WxTlvPut8(Tlv, Caps->NumTxStreams);
+    WxTlvPut8(Tlv, 0);
+    WxTlvPut8(Tlv, 0);
+    WxTlvPut8(Tlv, Caps->Support_eCSA);
+    WxTlvPut8(Tlv, Caps->MACAddressRandomization);
+    WxTlvPut(Tlv, &Caps->MACAddressRandomizationMask, sizeof(Caps->MACAddressRandomizationMask));
+    WxTlvPut32(Tlv, (UINT32)Caps->BluetoothCoexistenceSupport);
+    WxTlvPut8(Tlv, Caps->SupportsNonWdiOidRequests);
+    WxTlvPut8(Tlv, Caps->FastTransitionSupported);
+    WxTlvPut8(Tlv, Caps->MU_MIMOSupported);
+    WxTlvPut8(Tlv, 0);
+    WxTlvPut8(Tlv, Caps->BSSTransitionSupported);
+    WxTlvPut8(Tlv, 0);
+    WxTlvPut8(Tlv, Caps->SAEAuthenticationSupported);
+    WxTlvPut8(Tlv, Caps->MBOSupported);
+    WxTlvPut8(Tlv, Caps->BeaconReportsImplemented);
+    WxTlvClose(Tlv, Inner);
+    WxTlvClose(Tlv, Outer);
+}
+
+static
+VOID
+WxEnsureEngine(
+    _In_ WX_DEVICE *Dev,
+    _In_ NETADAPTER Adapter)
+{
+    NDIS_WDI_ENGINE_TRANSPORT Transport;
+    NDIS_HANDLE NdisHandle;
+    WX_TLV Capabilities;
+    PVOID Engine = NULL;
+    NDIS_STATUS Status;
+
+    if (KeGetCurrentIrql() != PASSIVE_LEVEL ||
+        InterlockedCompareExchangePointer((PVOID volatile *)&Dev->Engine, NULL, NULL) != NULL ||
+        Dev->EngineFailed)
+    {
+        return;
+    }
+
+    ExAcquireFastMutex(&Dev->EngineMutex);
+    if (Dev->Engine == NULL && !Dev->EngineFailed)
+    {
+        RtlZeroMemory(&Capabilities, sizeof(Capabilities));
+        WxBuildInterfaceTlv(Dev, &Capabilities);
+        WxTlvPut(&Capabilities, Dev->StationTlv.Buffer, Dev->StationTlv.Length);
+        WxTlvPut(&Capabilities, Dev->BandTlv.Buffer, Dev->BandTlv.Length);
+        WxTlvPut(&Capabilities, Dev->PhyTlv.Buffer, Dev->PhyTlv.Length);
+
+        RtlZeroMemory(&Transport, sizeof(Transport));
+        Transport.Size = sizeof(Transport);
+        Transport.WdiVersion = Dev->Config.WdiVersion;
+        Transport.Context = Dev;
+        Transport.SendCommand = WxEngineSendCommand;
+
+        NdisHandle = ((PFN_NETADAPTERWDMGETNDISHANDLE)NetFunctions[NetAdapterWdmGetNdisHandleTableIndex])(
+            NetDriverGlobals, Adapter);
+        Status = Capabilities.Failed ? NDIS_STATUS_RESOURCES
+                                     : NdisWdiEngineCreate(NdisHandle, &Transport, WX_DEFAULT_PORT_ID,
+                                                           Capabilities.Buffer, Capabilities.Length, &Engine);
+        WxTlvFree(&Capabilities);
+        if (Status != NDIS_STATUS_SUCCESS)
+        {
+            DbgPrint("WifiCx: WDI engine creation failed 0x%08lx\n", Status);
+            Dev->EngineFailed = TRUE;
+        }
+        else
+        {
+            InterlockedExchangePointer((PVOID volatile *)&Dev->Engine, Engine);
+        }
+    }
+    ExReleaseFastMutex(&Dev->EngineMutex);
+}
+
+static
+VOID
+WxDestroyEngine(
+    _In_ WX_DEVICE *Dev)
+{
+    PVOID Engine;
+
+    ExWaitForRundownProtectionRelease(&Dev->EngineRundown);
+    Engine = InterlockedExchangePointer((PVOID volatile *)&Dev->Engine, NULL);
+    if (Engine != NULL)
+        NdisWdiEngineDestroy(Engine);
+}
+
+static
+BOOLEAN
+WxIsDot11Oid(
+    _In_ NDIS_OID Oid)
+{
+    return (Oid & 0xFF000000U) == 0x0D000000U || (Oid & 0xFF000000U) == 0x0E000000U;
+}
+
+static
+VOID
+NTAPI
+WxPreprocessOid(
+    _In_ NETADAPTER Adapter,
+    _In_ NDIS_OID_REQUEST *Request,
+    _In_ WDFCONTEXT DispatchContext)
+{
+    WDFOBJECT Parent = WxNetAdapterGetParent(Adapter);
+    WX_DEVICE *Dev = Parent != NULL ? WxTryGetDevice((WDFDEVICE)Parent) : NULL;
+    NDIS_STATUS Status;
+    PVOID Engine;
+
+    if (Dev != NULL && Dev->StationAdapter == Adapter && WxIsDot11Oid(Request->DATA.QUERY_INFORMATION.Oid))
+    {
+        WxEnsureEngine(Dev, Adapter);
+        Engine = WxAcquireEngine(Dev);
+        if (Engine != NULL)
+        {
+            Status = NdisWdiEngineOidRequest(Engine, Request);
+            ExReleaseRundownProtection(&Dev->EngineRundown);
+            if (Status != NDIS_STATUS_PENDING)
+            {
+                ((PFN_NETADAPTERCOMPLETEOIDREQUEST)NetFunctions[NetAdapterCompleteOidRequestTableIndex])(
+                    NetDriverGlobals, Adapter, Request, Status);
+            }
+            return;
+        }
+    }
+
+    ((PFN_NETADAPTERDISPATCHPREPROCESSEDOIDREQUEST)NetFunctions[NetAdapterDispatchPreprocessedOidRequestTableIndex])(
+        NetDriverGlobals, Adapter, Request, DispatchContext);
+}
+
+static
+VOID
+WxAdapterCleanup(
+    _In_ WDFOBJECT Object)
+{
+    WX_ADAPTER *Context = WxGetAdapter(Object);
+    WX_DEVICE *Dev = WxTryGetDevice(Context->Device);
+
+    if (Dev == NULL || Dev->StationAdapter != (NETADAPTER)Object)
+        return;
+    WxDestroyEngine(Dev);
+    Dev->StationAdapter = NULL;
+}
+
+static
+VOID
+WxDeviceCleanup(
+    _In_ WDFOBJECT Object)
+{
+    WX_DEVICE *Dev = WxTryGetDevice((WDFDEVICE)Object);
+
+    if (Dev == NULL)
+        return;
+    WxDestroyEngine(Dev);
+    WxTlvFree(&Dev->StationTlv);
+    WxTlvFree(&Dev->BandTlv);
+    WxTlvFree(&Dev->PhyTlv);
+}
+
+static
 NTSTATUS
 WxInitializeAdapterState(
     _In_ WX_DEVICE *Dev)
@@ -289,6 +695,7 @@ WxEvtPostPrepareHardware(
     WX_DEVICE *Dev = WxTryGetDevice(Device);
     WDF_OBJECT_ATTRIBUTES Attributes;
     NETADAPTER_INIT *AdapterInit;
+    NETADAPTEREXT_INIT *ExtensionInit;
     WX_ADAPTER_INIT *InitContext;
     NTSTATUS Status;
 
@@ -314,6 +721,19 @@ WxEvtPostPrepareHardware(
         return Status;
     }
     InitContext->Type = WIFI_ADAPTER_EXTENSIBLE_STATION;
+
+    ExtensionInit = ((PFN_NETADAPTEREXTENSIONINITALLOCATE)NetFunctions[NetAdapterExtensionInitAllocateTableIndex])(
+        NetDriverGlobals, AdapterInit);
+    if (ExtensionInit == NULL)
+    {
+        NetAdapterInitFree(AdapterInit);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    ((PFN_NETADAPTEREXTENSIONINITSETOIDREQUESTPREPROCESSCALLBACK)
+        NetFunctions[NetAdapterExtensionInitSetOidRequestPreprocessCallbackTableIndex])(
+        NetDriverGlobals, ExtensionInit, WxPreprocessOid);
+    ExReInitializeRundownProtection(&Dev->EngineRundown);
+    Dev->EngineFailed = FALSE;
 
     Dev->CreatingAdapterInit = AdapterInit;
     Dev->CreatingAdapterType = InitContext->Type;
@@ -380,7 +800,16 @@ WxDeviceGetOsWdiVersion(
         return STATUS_SUCCESS;                                                            \
     } while (0)
 
-/* TODO: deep-copy the arrays the capability structures point to */
+static
+NTSTATUS
+WxTlvResult(
+    _Inout_ WX_TLV *Tlv)
+{
+    if (!Tlv->Failed)
+        return STATUS_SUCCESS;
+    WxTlvFree(Tlv);
+    return STATUS_INSUFFICIENT_RESOURCES;
+}
 
 static
 NTSTATUS
@@ -402,8 +831,22 @@ WxDeviceSetStationCapabilities(
     _In_ WDFDEVICE Device,
     _In_ CONST WIFI_STATION_CAPABILITIES *Capabilities)
 {
+    WX_DEVICE *Dev = WxTryGetDevice(Device);
+    ULONG Offset;
+
     UNREFERENCED_PARAMETER(DriverGlobals);
-    WX_STORE_CAPABILITIES(StationCapabilities, Capabilities);
+
+    if (Dev == NULL || Capabilities == NULL)
+        return STATUS_INVALID_PARAMETER;
+
+    WxTlvFree(&Dev->StationTlv);
+    Offset = WxTlvOpen(&Dev->StationTlv, WDI_TLV_STATION_ATTRIBUTES);
+    WxTlvAddList(&Dev->StationTlv, WDI_TLV_UNICAST_ALGORITHM_LIST, Capabilities->UnicastAlgorithmsList,
+                 Capabilities->NumSupportedUnicastAlgorithms * sizeof(DOT11_AUTH_CIPHER_PAIR));
+    WxTlvAddList(&Dev->StationTlv, WDI_TLV_MULTICAST_DATA_ALGORITHM_LIST, Capabilities->MulticastDataAlgorithmsList,
+                 Capabilities->NumSupportedMulticastDataAlgorithms * sizeof(DOT11_AUTH_CIPHER_PAIR));
+    WxTlvClose(&Dev->StationTlv, Offset);
+    return WxTlvResult(&Dev->StationTlv);
 }
 
 static
@@ -415,6 +858,7 @@ WxDeviceSetWiFiDirectCapabilities(
     _In_ CONST WIFI_WIFIDIRECT_CAPABILITIES *Capabilities)
 {
     UNREFERENCED_PARAMETER(DriverGlobals);
+    /* TODO: deep-copy the arrays the Wi-Fi Direct capabilities point to */
     WX_STORE_CAPABILITIES(WifiDirectCapabilities, Capabilities);
 }
 
@@ -426,8 +870,33 @@ WxDeviceSetBandCapabilities(
     _In_ WDFDEVICE Device,
     _In_ CONST WIFI_BAND_CAPABILITIES *Capabilities)
 {
+    WX_DEVICE *Dev = WxTryGetDevice(Device);
+    ULONG Outer;
+    ULONG Inner;
+    ULONG i;
+
     UNREFERENCED_PARAMETER(DriverGlobals);
-    WX_STORE_CAPABILITIES(BandCapabilities, Capabilities);
+
+    if (Dev == NULL || Capabilities == NULL || (Capabilities->NumBands != 0 && Capabilities->BandInfoList == NULL))
+        return STATUS_INVALID_PARAMETER;
+
+    WxTlvFree(&Dev->BandTlv);
+    for (i = 0; i < Capabilities->NumBands; i++)
+    {
+        const WIFI_BAND_INFO *Band = &Capabilities->BandInfoList[i];
+
+        Outer = WxTlvOpen(&Dev->BandTlv, WDI_TLV_BAND_INFO);
+        Inner = WxTlvOpen(&Dev->BandTlv, WDI_TLV_BAND_CAPABILITIES);
+        WxTlvPut32(&Dev->BandTlv, (UINT32)Band->BandID);
+        WxTlvPut8(&Dev->BandTlv, Band->BandState);
+        WxTlvClose(&Dev->BandTlv, Inner);
+        WxTlvAddList(&Dev->BandTlv, WDI_TLV_CHANNEL_LIST, Band->ValidChannelTypes,
+                     Band->NumValidChannelTypes * sizeof(WDI_CHANNEL_MAPPING_ENTRY));
+        WxTlvAddList(&Dev->BandTlv, WDI_TLV_PHY_TYPE_LIST, Band->ValidPhyTypeList,
+                     Band->NumValidPhyTypes * sizeof(WDI_PHY_TYPE));
+        WxTlvClose(&Dev->BandTlv, Outer);
+    }
+    return WxTlvResult(&Dev->BandTlv);
 }
 
 static
@@ -438,8 +907,26 @@ WxDeviceSetPhyCapabilities(
     _In_ WDFDEVICE Device,
     _In_ CONST WIFI_PHY_CAPABILITIES *Capabilities)
 {
+    WX_DEVICE *Dev = WxTryGetDevice(Device);
+    ULONG Outer;
+    ULONG Inner;
+    ULONG i;
+
     UNREFERENCED_PARAMETER(DriverGlobals);
-    WX_STORE_CAPABILITIES(PhyCapabilities, Capabilities);
+
+    if (Dev == NULL || Capabilities == NULL || (Capabilities->NumPhyTypes != 0 && Capabilities->PhyInfoList == NULL))
+        return STATUS_INVALID_PARAMETER;
+
+    WxTlvFree(&Dev->PhyTlv);
+    for (i = 0; i < Capabilities->NumPhyTypes; i++)
+    {
+        Outer = WxTlvOpen(&Dev->PhyTlv, WDI_TLV_PHY_INFO);
+        Inner = WxTlvOpen(&Dev->PhyTlv, WDI_TLV_PHY_CAPABILITIES);
+        WxTlvPut32(&Dev->PhyTlv, (UINT32)Capabilities->PhyInfoList[i].PhyType);
+        WxTlvClose(&Dev->PhyTlv, Inner);
+        WxTlvClose(&Dev->PhyTlv, Outer);
+    }
+    return WxTlvResult(&Dev->PhyTlv);
 }
 
 static
@@ -463,6 +950,7 @@ WxDeviceInitialize(
     }
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&Attributes, WX_DEVICE);
+    Attributes.EvtCleanupCallback = WxDeviceCleanup;
     Status = WdfObjectAllocateContext(Device, &Attributes, (PVOID *)&Dev);
     if (!NT_SUCCESS(Status))
         return Status;
@@ -471,6 +959,8 @@ WxDeviceInitialize(
     RtlCopyMemory(&Dev->Config, Config, sizeof(WIFI_DEVICE_CONFIG));
     KeInitializeSpinLock(&Dev->TaskLock);
     InitializeListHead(&Dev->Tasks);
+    ExInitializeFastMutex(&Dev->EngineMutex);
+    ExInitializeRundownProtection(&Dev->EngineRundown);
     return STATUS_SUCCESS;
 }
 
@@ -484,8 +974,10 @@ WxDeviceReceiveIndication(
     _In_ WDFMEMORY Data)
 {
     WX_DEVICE *Dev = WxTryGetDevice(Device);
+    NDIS_STATUS_INDICATION Indication;
     WDI_MESSAGE_HEADER *Header;
     PLIST_ENTRY Entry;
+    PVOID Engine;
     size_t Length;
     KIRQL OldIrql;
 
@@ -500,6 +992,8 @@ WxDeviceReceiveIndication(
 
     if (Header->TransactionId != 0)
     {
+        BOOLEAN Matched = FALSE;
+
         KeAcquireSpinLock(&Dev->TaskLock, &OldIrql);
         for (Entry = Dev->Tasks.Flink; Entry != &Dev->Tasks; Entry = Entry->Flink)
         {
@@ -509,14 +1003,28 @@ WxDeviceReceiveIndication(
             {
                 Task->Status = Header->Status;
                 KeSetEvent(&Task->Done, IO_NO_INCREMENT, FALSE);
+                Matched = TRUE;
                 break;
             }
         }
         KeReleaseSpinLock(&Dev->TaskLock, OldIrql);
-        return;
+        if (Matched)
+            return;
     }
 
-    /* TODO: route unsolicited indications to the WDI engine */
+    Engine = WxAcquireEngine(Dev);
+    if (Engine == NULL)
+        return;
+
+    RtlZeroMemory(&Indication, sizeof(Indication));
+    Indication.Header.Type = NDIS_OBJECT_TYPE_STATUS_INDICATION;
+    Indication.Header.Revision = NDIS_STATUS_INDICATION_REVISION_1;
+    Indication.Header.Size = NDIS_SIZEOF_STATUS_INDICATION_REVISION_1;
+    Indication.StatusCode = WDI_DEFINE_INDICATION(MessageId);
+    Indication.StatusBuffer = Header;
+    Indication.StatusBufferSize = (ULONG)Length;
+    NdisWdiEngineIndicateStatus(Engine, &Indication);
+    ExReleaseRundownProtection(&Dev->EngineRundown);
 }
 
 static
@@ -540,6 +1048,7 @@ WxAdapterInitialize(
         return STATUS_INVALID_DEVICE_STATE;
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&Attributes, WX_ADAPTER);
+    Attributes.EvtCleanupCallback = WxAdapterCleanup;
     Status = WdfObjectAllocateContext(Adapter, &Attributes, (PVOID *)&Context);
     if (!NT_SUCCESS(Status))
         return Status;
@@ -606,12 +1115,31 @@ WxRequestComplete(
     _In_ UINT BytesWritten)
 {
     WX_REQUEST *Context = WxGetRequest((WDFOBJECT)Request);
+    struct _WX_DEVICE *Dev;
+    PVOID Engine;
 
     UNREFERENCED_PARAMETER(DriverGlobals);
 
-    Context->Status = NtStatus;
-    Context->BytesWritten = BytesWritten;
-    KeSetEvent(&Context->Done, IO_NO_INCREMENT, FALSE);
+    if (Context->EngineCommand == NULL)
+    {
+        Context->Status = NtStatus;
+        Context->BytesWritten = BytesWritten;
+        KeSetEvent(&Context->Done, IO_NO_INCREMENT, FALSE);
+        return;
+    }
+
+    Dev = Context->Dev;
+    Engine = WxAcquireEngine(Dev);
+    if (Engine != NULL)
+    {
+        if (BytesWritten > Context->OutputLength)
+            BytesWritten = Context->OutputLength;
+        NdisWdiEngineCommandComplete(Engine, Context->EngineCommand, WxNtToNdisStatus(NtStatus),
+                                     Context->Buffer, BytesWritten, Context->BytesNeeded);
+        ExReleaseRundownProtection(&Dev->EngineRundown);
+    }
+    ExFreePoolWithTag(Context->Buffer, WX_TAG);
+    WdfObjectDelete((WDFOBJECT)Request);
 }
 
 static
