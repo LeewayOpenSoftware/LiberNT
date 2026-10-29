@@ -37,7 +37,11 @@ static WCHAR BmTitle[BM_DESCRIPTION_CHARS];
 static PVOID BmStore;
 static ULONG BmStoreSize;
 static FW_VOLUME_SCAN BmScan;
+static BM_ENTRY BmTools[BM_MAX_TOOLS];
+static CHAR BmToolNames[BM_MAX_TOOLS][BM_NAME_CHARS];
+static PCSTR BmToolMenuNames[BM_MAX_TOOLS];
 static ULONG BmCount;
+static ULONG BmToolCount;
 static ULONG BmSelected;
 static ULONG BmLiberNTEntry = MAXULONG;
 
@@ -160,16 +164,27 @@ BmFinishScan(VOID)
 
 static
 VOID
+BmMenuName(
+    _In_z_ PCWSTR Description,
+    _Out_writes_z_(BM_NAME_CHARS) PCHAR Name)
+{
+    ULONG i;
+
+    for (i = 0; i < BM_NAME_CHARS - 1 && Description[i] != UNICODE_NULL; i++)
+        Name[i] = Description[i] <= 0x7F ? (CHAR)Description[i] : '?';
+
+    Name[i] = ANSI_NULL;
+}
+
+static
+VOID
 BmBuildMenu(VOID)
 {
-    ULONG i, j;
+    ULONG i;
 
     for (i = 0; i < BmCount; i++)
     {
-        for (j = 0; j < BM_NAME_CHARS - 1 && BmEntries[i].Description[j] != UNICODE_NULL; j++)
-            BmNames[i][j] = BmEntries[i].Description[j] <= 0x7F ? (CHAR)BmEntries[i].Description[j] : '?';
-
-        BmNames[i][j] = ANSI_NULL;
+        BmMenuName(BmEntries[i].Description, BmNames[i]);
         BmMenuNames[i] = BmNames[i];
         BmMenuIcons[i] = !BmEntries[i].FirmwareDevice ? UiMenuIconLiberNT :
                          BmLogos[i].Pixels ? UiMenuIconImage : UiMenuIconDesktop;
@@ -228,28 +243,50 @@ BmStartSelectedApplication(
 static
 VOID
 BmStartEntry(
-    _In_ ULONG Index,
-    _In_ BOOLEAN AskStartup)
+    _In_ PBM_ENTRY Entry,
+    _In_ PBM_STARTUP Startup)
 {
-    BM_STARTUP Startup;
-
-    RtlZeroMemory(&Startup, sizeof(Startup));
-    if (AskStartup && !BmEntries[Index].FirmwareDevice && !BmChooseStartupSettings(TRUE, &Startup))
-        return;
-
     FbGuiVtbl.UnInitialize();
     if (!UiKeepFirmwareScreen)
         GuiShowFirmwareLogo();
-    BmStartSelectedApplication(&BmEntries[Index], &Startup);
+    BmStartSelectedApplication(Entry, Startup);
     GuiInitialize();
+}
+
+static
+BOOLEAN
+BmChooseStartup(
+    _In_ BOOLEAN Graphical,
+    _Out_ PBM_STARTUP Startup,
+    _Out_ PBM_ENTRY *Entry)
+{
+    ULONG Tool;
+
+    if (!BmChooseStartupSettings(Graphical, BmToolMenuNames, BmToolCount, Startup, &Tool))
+        return FALSE;
+
+    if (Tool < BmToolCount)
+    {
+        *Entry = &BmTools[Tool];
+        return TRUE;
+    }
+
+    if (BmLiberNTEntry >= BmCount)
+        return FALSE;
+
+    *Entry = &BmEntries[BmLiberNTEntry];
+    return TRUE;
 }
 
 static
 VOID
 BmStartupOptions(VOID)
 {
-    if (BmLiberNTEntry < BmCount)
-        BmStartEntry(BmLiberNTEntry, TRUE);
+    BM_STARTUP Startup;
+    PBM_ENTRY Entry;
+
+    if (BmChooseStartup(TRUE, &Startup, &Entry))
+        BmStartEntry(Entry, &Startup);
 }
 
 static
@@ -328,6 +365,7 @@ VOID
 BmRunGuiMenu(
     _In_ LONG Timeout)
 {
+    BM_STARTUP Startup;
     ULONG Item = BmSelected;
 
     BmBuildMenu();
@@ -372,7 +410,8 @@ BmRunGuiMenu(
         }
 
         BmSelected = Item;
-        BmStartEntry(BmSelected, FALSE);
+        RtlZeroMemory(&Startup, sizeof(Startup));
+        BmStartEntry(&BmEntries[BmSelected], &Startup);
     }
 }
 
@@ -382,7 +421,8 @@ BmRunTextMenu(
     _In_ LONG Timeout)
 {
     BM_STARTUP Startup;
-    ULONG i, Index;
+    PBM_ENTRY Entry;
+    ULONG i;
 
     for (i = 0; i < BmCount; i++)
         BmTextNames[i] = BmEntries[i].Description;
@@ -409,24 +449,23 @@ BmRunTextMenu(
                 return;
 
             case BmUiActionAdvanced:
-                if (BmLiberNTEntry >= BmCount || !BmChooseStartupSettings(FALSE, &Startup))
+                if (!BmChooseStartup(FALSE, &Startup, &Entry))
                 {
                     Timeout = -1;
                     BmUiShutdown();
                     continue;
                 }
-                Index = BmLiberNTEntry;
                 break;
 
             default:
-                Index = BmSelected;
+                Entry = &BmEntries[BmSelected];
                 break;
         }
 
         Timeout = -1;
         BmUiShutdown();
         GuiShowFirmwareLogo();
-        BmStartSelectedApplication(&BmEntries[Index], &Startup);
+        BmStartSelectedApplication(Entry, &Startup);
     }
 }
 
@@ -475,7 +514,7 @@ BlMain(VOID)
 {
     BM_STARTUP Startup;
     PVOID Store;
-    ULONG Size, Default = 0, i;
+    ULONG Size, Default = 0, DefaultTool = MAXULONG, i;
     LONG Timeout;
 
     Store = BmReadStore(BmStorePath, RTL_NUMBER_OF(BmStorePath), &Size);
@@ -500,6 +539,13 @@ BlMain(VOID)
             if (_wcsicmp(BmEntries[i].Id, BM_LIBERNT_ENTRY) == 0)
                 BmLiberNTEntry = i;
         }
+
+        BmToolCount = BmEnumerateToolEntries(BmTools, RTL_NUMBER_OF(BmTools), &DefaultTool);
+        for (i = 0; i < BmToolCount; i++)
+        {
+            BmMenuName(BmTools[i].Description, BmToolNames[i]);
+            BmToolMenuNames[i] = BmToolNames[i];
+        }
     }
 
     if (BmCount == 0)
@@ -510,7 +556,13 @@ BlMain(VOID)
 
     BmSelected = Default;
     Timeout = BmGetTimeout();
-    if (Timeout == 0)
+    if (DefaultTool < BmToolCount)
+    {
+        RtlZeroMemory(&Startup, sizeof(Startup));
+        BmStartSelectedApplication(&BmTools[DefaultTool], &Startup);
+        Timeout = -1;
+    }
+    else if (Timeout == 0)
     {
         RtlZeroMemory(&Startup, sizeof(Startup));
         BmStartSelectedApplication(&BmEntries[Default], &Startup);
