@@ -46,7 +46,6 @@ ULONG CcFastReadResourceMiss;
 ULONG CcFastReadWait;
 
 static KEVENT CcNtLazyWriterEvent;
-static KEVENT CcNtLazyWriteGate;
 static LIST_ENTRY CcNtDeferredWrites;
 static KSPIN_LOCK CcNtDeferredLock;
 static LIST_ENTRY CcNtLazyWaiters;
@@ -112,6 +111,9 @@ CcNtProcessDeferredWrites(VOID)
         PCC_NT_DEFERRED_WRITE Deferred = NULL;
         KIRQL OldIrql;
 
+        if (ReadPointerNoFence((PVOID const volatile *)&CcNtDeferredWrites.Flink) == &CcNtDeferredWrites)
+            return;
+
         KeAcquireSpinLock(&CcNtDeferredLock, &OldIrql);
 
         if (!IsListEmpty(&CcNtDeferredWrites))
@@ -171,35 +173,42 @@ CcDeferWrite(
 }
 
 static
+BOOLEAN
+CcNtReferenceDirtyMap(
+    _In_ PCC_MAP Map)
+{
+    PCC_NT_MAP Candidate = CONTAINING_RECORD(Map, CC_NT_MAP, Map);
+    PCC_NT_MAP_BUCKET Bucket = CcNtMapBucket(Candidate->Pointers);
+    BOOLEAN Live;
+
+    KeAcquireSpinLockAtDpcLevel(&Bucket->Lock);
+    Live = !IsListEmpty(&Candidate->Link);
+    if (Live)
+        InterlockedIncrement(&Candidate->ReferenceCount);
+    KeReleaseSpinLockFromDpcLevel(&Bucket->Lock);
+
+    return Live;
+}
+
+static
 PCC_NT_MAP
 CcNtNextDirtyMap(VOID)
 {
-    PCC_NT_MAP Found = NULL;
+    BOOLEAN Accepted;
     PCC_MAP Map;
-    KIRQL OldIrql;
     ULONG Tries;
-
-    KeAcquireSpinLock(&CcNtMapListLock, &OldIrql);
 
     for (Tries = 0; Tries < 16; Tries++)
     {
-        PCC_NT_MAP Candidate;
-
-        Map = CcDirtyNextMap(&CcNtCache);
+        Map = CcDirtyNextMapAccept(&CcNtCache, CcNtReferenceDirtyMap, &Accepted);
         if (Map == NULL)
             break;
 
-        Candidate = CONTAINING_RECORD(Map, CC_NT_MAP, Map);
-        if (!IsListEmpty(&Candidate->Link))
-        {
-            InterlockedIncrement(&Candidate->ReferenceCount);
-            Found = Candidate;
-            break;
-        }
+        if (Accepted)
+            return CONTAINING_RECORD(Map, CC_NT_MAP, Map);
     }
 
-    KeReleaseSpinLock(&CcNtMapListLock, OldIrql);
-    return Found;
+    return NULL;
 }
 
 NTSTATUS
@@ -223,7 +232,7 @@ CcRosFlushDirtyPages(
             break;
 
         KeEnterCriticalRegion();
-        KeWaitForSingleObject(&CcNtLazyWriteGate, Executive, KernelMode, FALSE, NULL);
+        KeWaitForSingleObject(&NtMap->LazyWriteGate, Executive, KernelMode, FALSE, NULL);
         if (NtMap->Callbacks.AcquireForLazyWrite == NULL ||
             NtMap->Callbacks.AcquireForLazyWrite(NtMap->LazyWriteContext, Wait))
         {
@@ -232,7 +241,7 @@ CcRosFlushDirtyPages(
             if (NtMap->Callbacks.ReleaseFromLazyWrite != NULL)
                 NtMap->Callbacks.ReleaseFromLazyWrite(NtMap->LazyWriteContext);
         }
-        KeSetEvent(&CcNtLazyWriteGate, IO_NO_INCREMENT, FALSE);
+        KeSetEvent(&NtMap->LazyWriteGate, IO_NO_INCREMENT, FALSE);
         KeLeaveCriticalRegion();
 
         if (CalledFromLazy && Flushed != 0)
@@ -349,14 +358,12 @@ CcInitializeCacheManager(VOID)
     CcNtCache.BcbCreated = CcNtBcbCreated;
     CcNtCache.BcbDeleting = CcNtBcbDeleting;
 
-    KeInitializeSpinLock(&CcNtMapListLock);
-    InitializeListHead(&CcNtMapList);
+    CcNtInitializeMapTable();
     InitializeListHead(&CcNtDeferredWrites);
     KeInitializeSpinLock(&CcNtDeferredLock);
     InitializeListHead(&CcNtLazyWaiters);
     KeInitializeSpinLock(&CcNtLazyWaitLock);
     KeInitializeEvent(&CcNtLazyWriterEvent, SynchronizationEvent, FALSE);
-    KeInitializeEvent(&CcNtLazyWriteGate, SynchronizationEvent, TRUE);
 
     InitializeObjectAttributes(&ObjectAttributes, NULL, OBJ_KERNEL_HANDLE, NULL, NULL);
     if (!NT_SUCCESS(PsCreateSystemThread(&Handle, THREAD_ALL_ACCESS, &ObjectAttributes, NULL, NULL, CcNtLazyWriter,
@@ -403,6 +410,7 @@ ExpKdbgExtFileCache(
     PCHAR Argv[])
 {
     PLIST_ENTRY Entry;
+    ULONG Index;
 
     UNREFERENCED_PARAMETER(Argc);
     UNREFERENCED_PARAMETER(Argv);
@@ -410,14 +418,17 @@ ExpKdbgExtFileCache(
     KdbpPrint("views %lu hits %I64d misses %I64d reclaims %I64d dirty %I64d\n", CcNtCache.ViewCount,
               CcNtCache.ViewHits, CcNtCache.ViewMisses, CcNtCache.ViewReclaims, CcNtCache.TotalDirtyPages);
 
-    for (Entry = CcNtMapList.Flink; Entry != &CcNtMapList; Entry = Entry->Flink)
+    for (Index = 0; Index < CC_NT_MAP_BUCKETS; Index++)
     {
-        PCC_NT_MAP NtMap = CONTAINING_RECORD(Entry, CC_NT_MAP, Link);
+        for (Entry = CcNtMapBuckets[Index].List.Flink; Entry != &CcNtMapBuckets[Index].List; Entry = Entry->Flink)
+        {
+            PCC_NT_MAP NtMap = CONTAINING_RECORD(Entry, CC_NT_MAP, Link);
 
-        KdbpPrint("%p size %I64d views %lu dirty %I64d ", NtMap, (LONGLONG)NtMap->Map.FileSize,
-                  NtMap->Map.ViewsAttached, NtMap->Map.DirtyPages);
-        KdbpPrintUnicodeString(&NtMap->FileObject->FileName);
-        KdbpPrint("\n");
+            KdbpPrint("%p size %I64d views %lu dirty %I64d ", NtMap, (LONGLONG)NtMap->Map.FileSize,
+                      NtMap->Map.ViewsAttached, NtMap->Map.DirtyPages);
+            KdbpPrintUnicodeString(&NtMap->FileObject->FileName);
+            KdbpPrint("\n");
+        }
     }
 
     return TRUE;
