@@ -265,6 +265,86 @@ Ndis6DriverUnload(
  * ============================================================================ */
 
 NDIS_STATUS
+Ndis6RegisterLwmMiniportDriver(
+    _In_ PCUNICODE_STRING ServiceName,
+    _In_opt_ NDIS_HANDLE MiniportDriverContext,
+    _In_ PNDIS_MINIPORT_DRIVER_CHARACTERISTICS MiniportDriverCharacteristics,
+    _Out_ PNDIS_HANDLE NdisMiniportDriverHandle)
+{
+    static const WCHAR ServicesKey[] = L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\";
+    PNDIS6_DRIVER_BLOCK Block;
+    NDIS_STATUS Status;
+    KIRQL OldIrql;
+    ULONG CharacteristicsSize;
+    ULONG PathLength;
+
+    *NdisMiniportDriverHandle = NULL;
+
+    if (ServiceName->Length == 0 ||
+        (ServiceName->Length & (sizeof(WCHAR) - 1)) != 0 ||
+        ServiceName->Length > MAXUSHORT - sizeof(ServicesKey))
+    {
+        return NDIS_STATUS_INVALID_PARAMETER;
+    }
+
+    Status = Ndis6ValidateMiniportDriverCharacteristics(MiniportDriverCharacteristics, &CharacteristicsSize);
+    if (Status != NDIS_STATUS_SUCCESS)
+        return Status;
+
+    Ndis6DriverInit();
+
+    Block = (PNDIS6_DRIVER_BLOCK)ExAllocatePoolWithTag(
+        NonPagedPool, sizeof(NDIS6_DRIVER_BLOCK), NDIS6_DRIVER_TAG);
+    if (Block == NULL)
+        return NDIS_STATUS_RESOURCES;
+
+    RtlZeroMemory(Block, sizeof(*Block));
+    Block->Signature             = NDIS6_DRIVER_BLOCK_SIGNATURE;
+    Block->MiniportDriverContext = MiniportDriverContext;
+    Block->IsLwm                 = TRUE;
+    RtlCopyMemory(&Block->Characteristics, MiniportDriverCharacteristics, CharacteristicsSize);
+
+    PathLength = sizeof(ServicesKey) - sizeof(WCHAR) + ServiceName->Length;
+    Block->RegistryPath.Length        = (USHORT)PathLength;
+    Block->RegistryPath.MaximumLength = (USHORT)(PathLength + sizeof(WCHAR));
+    Block->RegistryPath.Buffer        = (PWSTR)ExAllocatePoolWithTag(
+        PagedPool, Block->RegistryPath.MaximumLength, NDIS6_DRIVER_TAG);
+    if (Block->RegistryPath.Buffer == NULL)
+    {
+        ExFreePoolWithTag(Block, NDIS6_DRIVER_TAG);
+        return NDIS_STATUS_RESOURCES;
+    }
+
+    RtlCopyMemory(Block->RegistryPath.Buffer, ServicesKey, sizeof(ServicesKey) - sizeof(WCHAR));
+    RtlCopyMemory((PUCHAR)Block->RegistryPath.Buffer + sizeof(ServicesKey) - sizeof(WCHAR),
+                  ServiceName->Buffer,
+                  ServiceName->Length);
+    Block->RegistryPath.Buffer[PathLength / sizeof(WCHAR)] = L'\0';
+
+    if (Block->Characteristics.SetOptionsHandler != NULL)
+    {
+        *NdisMiniportDriverHandle = (NDIS_HANDLE)Block;
+        Status = Block->Characteristics.SetOptionsHandler(
+            (NDIS_HANDLE)Block,
+            MiniportDriverContext);
+        if (Status != NDIS_STATUS_SUCCESS)
+        {
+            *NdisMiniportDriverHandle = NULL;
+            ExFreePoolWithTag(Block->RegistryPath.Buffer, NDIS6_DRIVER_TAG);
+            ExFreePoolWithTag(Block, NDIS6_DRIVER_TAG);
+            return Status;
+        }
+    }
+
+    KeAcquireSpinLock(&g_Ndis6DriverListLock, &OldIrql);
+    InsertTailList(&g_Ndis6DriverList, &Block->ListEntry);
+    KeReleaseSpinLock(&g_Ndis6DriverListLock, OldIrql);
+
+    *NdisMiniportDriverHandle = (NDIS_HANDLE)Block;
+    return NDIS_STATUS_SUCCESS;
+}
+
+NDIS_STATUS
 Ndis6RegisterMiniportDriverInternal(
     _In_     PDRIVER_OBJECT                          DriverObject,
     _In_     PUNICODE_STRING                         RegistryPath,

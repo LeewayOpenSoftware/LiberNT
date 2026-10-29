@@ -787,7 +787,7 @@ Ndis6CreateLogicalAdapter(
 NDIS_STATUS
 Ndis6CreateWdfLogicalAdapter(
     _In_ PNDIS6_DRIVER_BLOCK DriverBlock,
-    _In_ PNDIS6_WDF_ADD_DEVICE_INFO AddDeviceInfo,
+    _In_ NDIS_WDF_ADD_DEVICE_INFO * AddDeviceInfo,
     _Out_ PLOGICAL_ADAPTER* AdapterOut)
 {
     PNDIS6_WDF_CX_DRIVER CxDriver;
