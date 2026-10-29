@@ -704,6 +704,7 @@ struct _LX_THREAD
     BOOLEAN VforkExited;
     volatile UCHAR SeccompMode;
     PLX_SECCOMP_FILTER Seccomp;
+    PVOID volatile SeccompNotif;
 };
 
 typedef struct _LX_CALL
@@ -1360,6 +1361,10 @@ VOID LxSeccompRelease(_Inout_ PLX_THREAD Thread);
 ULONG LxSeccompFilterCount(_In_ PLX_THREAD Thread);
 BOOLEAN LxSeccompCheck(_Inout_ PLX_CALL Call, _Out_ PLONG64 Result);
 LONG64 LxSeccompPrctl(_Inout_ PLX_CALL Call, _In_ BOOLEAN Set, _In_ ULONG64 Mode, _In_ ULONG64 Program);
+ULONG LxSeccompFormatActions(_In_ BOOLEAN Logged, _Out_writes_(Size) PSTR Buffer, _In_ ULONG Size);
+LONG LxSeccompWriteActionsLogged(_In_ PLX_PROCESS Process, _In_reads_bytes_(Length) PCSTR Data, _In_ ULONG Length);
+PLX_FILE LxAnonFileCreate(_In_ const LX_FILE_OPS *Ops, _In_ ULONG Flags, _In_ PCSTR Name, _In_ SIZE_T ObjectSize);
+LONG LxAnonStat(_In_ PLX_FILE File, _Out_ PLX_STAT Stat);
 BOOLEAN LxSignalDeliverFault(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame, _In_ LONG Signal, _In_ PLX_SIGINFO Info);
 VOID LxThreadAttach(_In_ PLX_THREAD Thread);
 BOOLEAN LxThreadDetach(_In_ PLX_THREAD Thread);

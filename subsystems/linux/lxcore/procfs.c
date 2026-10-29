@@ -2881,6 +2881,59 @@ LxWritePrintkDevkmsg(
 
 static
 VOID
+LxGenSeccompActions(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text,
+    _In_ BOOLEAN Logged)
+{
+    CHAR Buffer[128];
+
+    UNREFERENCED_PARAMETER(Self);
+    UNREFERENCED_PARAMETER(Synth);
+    LxSeccompFormatActions(Logged, Buffer, sizeof(Buffer));
+    LxTextPrintf(Text, "%s\n", Buffer);
+}
+
+static
+VOID
+LxGenSeccompActionsAvail(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    LxGenSeccompActions(Self, Synth, Text, FALSE);
+}
+
+static
+VOID
+LxGenSeccompActionsLogged(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    LxGenSeccompActions(Self, Synth, Text, TRUE);
+}
+
+static
+LONG
+LxWriteSeccompActionsLogged(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    PLX_THREAD Current = LxCurrentThread();
+
+    UNREFERENCED_PARAMETER(File);
+    if (Current == NULL)
+        return -LX_ESRCH;
+    if (Length == 0)
+        return 0;
+    return LxSeccompWriteActionsLogged(Current->Process, Data, Length);
+}
+
+static
+VOID
 LxGenTainted(
     _In_ PLX_PROCESS Self,
     _In_ PLX_SYNTH Synth,
@@ -3072,6 +3125,8 @@ static const LX_TABLE_ENTRY LxProcSysTable[] =
     { "kernel/random/entropy_avail", 0444, "256\n", NULL, NULL },
     { "kernel/random/poolsize", 0444, "256\n", NULL, NULL },
     { "kernel/random/uuid", 0444, NULL, LxGenUuid, NULL },
+    { "kernel/seccomp/actions_avail", 0444, NULL, LxGenSeccompActionsAvail, NULL },
+    { "kernel/seccomp/actions_logged", 0644, NULL, LxGenSeccompActionsLogged, LxWriteSeccompActionsLogged },
     { "kernel/sysrq", 0644, "176\n", NULL, LxWriteAccept },
     { "kernel/tainted", 0644, NULL, LxGenTainted, LxWriteTainted },
     { "kernel/threads-max", 0644, "63429\n", NULL, LxWriteAccept },

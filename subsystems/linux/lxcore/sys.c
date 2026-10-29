@@ -2581,6 +2581,7 @@ LxVforkExec(
     Thread->Affinity = Borrowed->Affinity;
     Thread->UserAffinity = Borrowed->UserAffinity;
     LxNsThreadInherit(Thread, Borrowed);
+    LxSeccompInherit(Thread, Borrowed);
     KeInitializeEvent(&Request->Done, NotificationEvent, FALSE);
     Request->Vfork = TRUE;
     Thread->Exec = Request;
@@ -2669,6 +2670,7 @@ LxSharedVmExec(
     Thread->Affinity = Current->Affinity;
     Thread->UserAffinity = Current->UserAffinity;
     LxNsThreadInherit(Thread, Current);
+    LxSeccompInherit(Thread, Current);
     KeInitializeEvent(&Request->Done, NotificationEvent, FALSE);
     Request->Vfork = TRUE;
     Thread->Exec = Request;
