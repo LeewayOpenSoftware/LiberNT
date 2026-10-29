@@ -2044,6 +2044,7 @@ CURSORICON_LoadImageW(
     else if(hinst)
     {
         DWORD size = MAX_PATH;
+        DWORD LastError = GetLastError();
         /* Get the module name string */
         while (TRUE)
         {
@@ -2072,6 +2073,7 @@ CURSORICON_LoadImageW(
             ustrModule.Buffer[ret] = UNICODE_NULL;
             ustrModule.Length = (USHORT)(ret * sizeof(WCHAR));
             ustrModule.MaximumLength = (USHORT)(size * sizeof(WCHAR));
+            SetLastError(LastError);
             break;
         }
     }
