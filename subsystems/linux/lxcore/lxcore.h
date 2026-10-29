@@ -397,6 +397,7 @@ struct _LX_NS
 typedef struct _LX_FS_STATE
 {
     volatile LONG RefCount;
+    FAST_MUTEX Lock;
     PSTR Cwd;
     PSTR Root;
 } LX_FS_STATE, *PLX_FS_STATE;
@@ -1040,6 +1041,7 @@ LONG LxProcessSetCwd(_In_ PLX_PROCESS Process, _In_ PCSTR Path);
 VOID LxNsInitialize(VOID);
 VOID LxNsThreadInherit(_Inout_ PLX_THREAD Thread, _In_opt_ PLX_THREAD Parent);
 VOID LxNsThreadRelease(_Inout_ PLX_THREAD Thread);
+LONG LxNsShareFs(_Inout_ PLX_THREAD Thread, _In_ PLX_THREAD Parent);
 LONG LxProcessChroot(_In_ PLX_PROCESS Process, _In_ PCSTR Path);
 PSTR LxPathVisible(_In_ PLX_PROCESS Viewer, _In_ PCSTR Path);
 PSTR LxFileCurrentPath(_In_ PLX_FILE File);

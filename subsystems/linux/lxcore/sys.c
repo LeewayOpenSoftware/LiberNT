@@ -2342,7 +2342,10 @@ LxForkProcess(
         LxProcessDereference(ListParent);
         return Error;
     }
-    Error = LxPidAssign(Child, Thread, Request->SetTid, Request->SetTidCount);
+    if (Request->Flags & LX_CLONE_FS)
+        Error = LxNsShareFs(Thread, Call->Thread);
+    if (Error == 0)
+        Error = LxPidAssign(Child, Thread, Request->SetTid, Request->SetTidCount);
     if (Error != 0)
     {
         LxThreadFree(Thread);

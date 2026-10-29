@@ -820,6 +820,7 @@ LxFsStateCreate(
     if (Fs == NULL)
         return NULL;
     Fs->RefCount = 1;
+    ExInitializeFastMutex(&Fs->Lock);
     Fs->Cwd = LxStrDup(Cwd);
     Fs->Root = (Root != NULL) ? LxStrDup(Root) : NULL;
     if ((Fs->Cwd == NULL) || ((Root != NULL) && (Fs->Root == NULL)))
@@ -862,6 +863,42 @@ LxNsThreadInherit(
     }
 }
 
+LONG
+LxNsShareFs(
+    _Inout_ PLX_THREAD Thread,
+    _In_ PLX_THREAD Parent)
+{
+    PLX_PROCESS Process = Parent->Process;
+    PLIST_ENTRY Entry;
+
+    ExAcquireFastMutex(&Process->Lock);
+    if (Parent->Fs == NULL)
+    {
+        PLX_FS_STATE Fs = LxFsStateCreate(Process->Cwd, Process->Root);
+
+        if (Fs == NULL)
+        {
+            ExReleaseFastMutex(&Process->Lock);
+            return -LX_ENOMEM;
+        }
+        for (Entry = Process->Threads.Flink; Entry != &Process->Threads; Entry = Entry->Flink)
+        {
+            PLX_THREAD Sibling = CONTAINING_RECORD(Entry, LX_THREAD, Link);
+
+            if ((Sibling != Parent) && (Sibling->Fs == NULL))
+            {
+                InterlockedIncrement(&Fs->RefCount);
+                Sibling->Fs = Fs;
+            }
+        }
+        Parent->Fs = Fs;
+    }
+    InterlockedIncrement(&Parent->Fs->RefCount);
+    Thread->Fs = Parent->Fs;
+    ExReleaseFastMutex(&Process->Lock);
+    return 0;
+}
+
 VOID
 LxNsThreadRelease(
     _Inout_ PLX_THREAD Thread)
@@ -893,14 +930,21 @@ PSTR
 LxProcessRoot(
     _In_ PLX_PROCESS Process)
 {
-    PLX_FS_STATE Fs = LxCurrentFs(Process);
+    PLX_FS_STATE Fs;
     PSTR Root;
 
     ExAcquireFastMutex(&Process->Lock);
+    Fs = LxCurrentFs(Process);
     if (Fs != NULL)
+    {
+        ExAcquireFastMutex(&Fs->Lock);
         Root = LxStrDup((Fs->Root != NULL) ? Fs->Root : "/");
+        ExReleaseFastMutex(&Fs->Lock);
+    }
     else
+    {
         Root = LxStrDup((Process->Root != NULL) ? Process->Root : "/");
+    }
     ExReleaseFastMutex(&Process->Lock);
     return Root;
 }
@@ -909,11 +953,21 @@ PSTR
 LxProcessCwd(
     _In_ PLX_PROCESS Process)
 {
-    PLX_FS_STATE Fs = LxCurrentFs(Process);
+    PLX_FS_STATE Fs;
     PSTR Cwd;
 
     ExAcquireFastMutex(&Process->Lock);
-    Cwd = LxStrDup((Fs != NULL) ? Fs->Cwd : Process->Cwd);
+    Fs = LxCurrentFs(Process);
+    if (Fs != NULL)
+    {
+        ExAcquireFastMutex(&Fs->Lock);
+        Cwd = LxStrDup(Fs->Cwd);
+        ExReleaseFastMutex(&Fs->Lock);
+    }
+    else
+    {
+        Cwd = LxStrDup(Process->Cwd);
+    }
     ExReleaseFastMutex(&Process->Lock);
     return Cwd;
 }
@@ -923,16 +977,19 @@ LxProcessSetCwd(
     _In_ PLX_PROCESS Process,
     _In_ PCSTR Path)
 {
-    PLX_FS_STATE Fs = LxCurrentFs(Process);
+    PLX_FS_STATE Fs;
     PSTR Copy = LxStrDup(Path), Old;
 
     if (Copy == NULL)
         return -LX_ENOMEM;
     ExAcquireFastMutex(&Process->Lock);
+    Fs = LxCurrentFs(Process);
     if (Fs != NULL)
     {
+        ExAcquireFastMutex(&Fs->Lock);
         Old = Fs->Cwd;
         Fs->Cwd = Copy;
+        ExReleaseFastMutex(&Fs->Lock);
     }
     else
     {
@@ -949,16 +1006,19 @@ LxProcessChroot(
     _In_ PLX_PROCESS Process,
     _In_ PCSTR Path)
 {
-    PLX_FS_STATE Fs = LxCurrentFs(Process);
+    PLX_FS_STATE Fs;
     PSTR Copy = (strcmp(Path, "/") == 0) ? NULL : LxStrDup(Path), Old;
 
     if ((strcmp(Path, "/") != 0) && (Copy == NULL))
         return -LX_ENOMEM;
     ExAcquireFastMutex(&Process->Lock);
+    Fs = LxCurrentFs(Process);
     if (Fs != NULL)
     {
+        ExAcquireFastMutex(&Fs->Lock);
         Old = Fs->Root;
         Fs->Root = Copy;
+        ExReleaseFastMutex(&Fs->Lock);
     }
     else
     {
@@ -1058,10 +1118,12 @@ LxNsRebaseProcesses(
 
             if ((Thread->Fs != NULL) && (ThreadNs == MntNs))
             {
+                ExAcquireFastMutex(&Thread->Fs->Lock);
                 LxRebaseString(&Thread->Fs->Cwd, Root, NewRoot, PutOld, FALSE);
                 if (Thread->Fs->Cwd == NULL)
                     Thread->Fs->Cwd = LxStrDup("/");
                 LxRebaseString(&Thread->Fs->Root, Root, NewRoot, PutOld, TRUE);
+                ExReleaseFastMutex(&Thread->Fs->Lock);
             }
         }
         ExReleaseFastMutex(&Process->Lock);
@@ -1106,12 +1168,10 @@ LxNsUnshareFs(
     _In_ PLX_THREAD Thread)
 {
     PLX_PROCESS Process = Thread->Process;
-    PLX_FS_STATE Fs;
+    PLX_FS_STATE Fs, Old;
     PSTR Cwd, Root;
 
-    if (!LxNsNeedThreadScope(Process))
-        return 0;
-    if ((Thread->Fs != NULL) && (Thread->Fs->RefCount == 1))
+    if ((Thread->Fs == NULL) ? !LxNsNeedThreadScope(Process) : (Thread->Fs->RefCount == 1))
         return 0;
     Cwd = LxProcessCwd(Process);
     Root = LxProcessRoot(Process);
@@ -1126,9 +1186,12 @@ LxNsUnshareFs(
     LxFree(Root);
     if (Fs == NULL)
         return -LX_ENOMEM;
-    if (Thread->Fs != NULL)
-        LxFsStateDereference(Thread->Fs);
+    ExAcquireFastMutex(&Process->Lock);
+    Old = Thread->Fs;
     Thread->Fs = Fs;
+    ExReleaseFastMutex(&Process->Lock);
+    if (Old != NULL)
+        LxFsStateDereference(Old);
     return 0;
 }
 
