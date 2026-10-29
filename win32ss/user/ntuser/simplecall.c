@@ -1053,6 +1053,9 @@ NtUserCallHwndLock(
             break;
 
         case HWNDLOCK_ROUTINE_SETFOREGROUNDWINDOW:
+        {
+            PUSER_MESSAGE_QUEUE ForegroundBefore = IntGetFocusMessageQueue();
+
             TRACE("co_IntSetForegroundWindow 1 0x%p\n", hWnd);
             if (Window->head.rpdesk != gpdeskInputDesktop)
             {
@@ -1060,8 +1063,11 @@ NtUserCallHwndLock(
                 break;
             }
             Ret = co_IntSetForegroundWindow(Window);
+            if (Ret && IntGetFocusMessageQueue() != ForegroundBefore && IntGetFocusMessageQueue() != NULL)
+                IntGetSysCursorInfo()->bClipped = FALSE;
             TRACE("co_IntSetForegroundWindow 2 0x%p\n", hWnd);
             break;
+        }
 
         case HWNDLOCK_ROUTINE_SETFOREGROUNDWINDOWMOUSE:
             TRACE("co_IntSetForegroundWindow M 1 0x%p\n", hWnd);
