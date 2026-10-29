@@ -3885,6 +3885,7 @@ HRESULT WINAPI SHGetDataFromIDListA(LPSHELLFOLDER psf, LPCITEMIDLIST pidl,
                                     int nFormat, LPVOID dest, int len)
 {
     LPSTR filename, shortname;
+    FileStructW *pFileStructW;
     WIN32_FIND_DATAA * pfd;
 
     TRACE_(shell)("sf=%p pidl=%p 0x%04x %p 0x%04x stub\n",psf,pidl,nFormat,dest,len);
@@ -3910,6 +3911,17 @@ HRESULT WINAPI SHGetDataFromIDListA(LPSHELLFOLDER psf, LPCITEMIDLIST pidl,
         pfd->nFileSizeLow = _ILGetFileSize ( pidl, NULL, 0);
 
         filename = _ILGetTextPointer(pidl);
+        pFileStructW = _ILGetFileStructW(pidl);
+
+        if (pFileStructW)
+        {
+            if (!WideCharToMultiByte(CP_ACP, 0, pFileStructW->wszName, -1, pfd->cFileName, sizeof(pfd->cFileName), NULL, NULL))
+                pfd->cFileName[sizeof(pfd->cFileName) - 1] = '\0';
+            if (filename && strcmp(filename, pfd->cFileName))
+                lstrcpynA(pfd->cAlternateFileName, filename, sizeof(pfd->cAlternateFileName));
+            return S_OK;
+        }
+
         shortname = _ILGetSTextPointer(pidl);
 
         if (filename)
@@ -3945,6 +3957,7 @@ HRESULT WINAPI SHGetDataFromIDListW(LPSHELLFOLDER psf, LPCITEMIDLIST pidl,
                                     int nFormat, LPVOID dest, int len)
 {
     LPSTR filename, shortname;
+    FileStructW *pFileStructW;
     WIN32_FIND_DATAW * pfd = dest;
 
     TRACE_(shell)("sf=%p pidl=%p 0x%04x %p 0x%04x stub\n",psf,pidl,nFormat,dest,len);
@@ -3971,6 +3984,18 @@ HRESULT WINAPI SHGetDataFromIDListW(LPSHELLFOLDER psf, LPCITEMIDLIST pidl,
         pfd->nFileSizeLow = _ILGetFileSize ( pidl, NULL, 0);
 
         filename = _ILGetTextPointer(pidl);
+        pFileStructW = _ILGetFileStructW(pidl);
+
+        if (pFileStructW)
+        {
+            lstrcpynW(pfd->cFileName, pFileStructW->wszName, MAX_PATH);
+            if (filename && !MultiByteToWideChar(CP_ACP, 0, filename, -1, pfd->cAlternateFileName, 14))
+                pfd->cAlternateFileName[0] = '\0';
+            if (!wcscmp(pfd->cAlternateFileName, pfd->cFileName))
+                pfd->cAlternateFileName[0] = '\0';
+            return S_OK;
+        }
+
         shortname = _ILGetSTextPointer(pidl);
 
         if (!filename)
@@ -4578,7 +4603,7 @@ LPITEMIDLIST _ILCreateGuidFromStrW(LPCWSTR szGUID)
 LPITEMIDLIST _ILCreateFromFindDataW( const WIN32_FIND_DATAW *wfd )
 {
     char    buff[MAX_PATH + 14 +1]; /* see WIN32_FIND_DATA */
-    DWORD   len, len1, wlen, alen;
+    DWORD   wlen, alen;
     LPITEMIDLIST pidl;
     PIDLTYPE type;
 
@@ -4587,10 +4612,10 @@ LPITEMIDLIST _ILCreateFromFindDataW( const WIN32_FIND_DATAW *wfd )
 
     TRACE("(%s, %s)\n",debugstr_w(wfd->cAlternateFileName), debugstr_w(wfd->cFileName));
 
-    /* prepare buffer with both names */
-    len = WideCharToMultiByte(CP_ACP,0,wfd->cFileName,-1,buff,MAX_PATH,NULL,NULL);
-    len1 = WideCharToMultiByte(CP_ACP,0,wfd->cAlternateFileName,-1, buff+len, sizeof(buff)-len, NULL, NULL);
-    alen = len + len1;
+    if (wfd->cAlternateFileName[0])
+        alen = WideCharToMultiByte(CP_ACP,0,wfd->cAlternateFileName,-1,buff,sizeof(buff),NULL,NULL);
+    else
+        alen = WideCharToMultiByte(CP_ACP,0,wfd->cFileName,-1,buff,MAX_PATH,NULL,NULL);
 
     type = (wfd->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? PT_FOLDER : PT_VALUE;
 
