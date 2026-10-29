@@ -40,6 +40,7 @@ IPAutomaticMetric(
         return 75;
     if (Interface->Wireless)
     {
+        Speed /= 2;
         for (i = 0; i < RTL_NUMBER_OF(Wireless); i++)
         {
             if (Speed >= Wireless[i].Speed)
