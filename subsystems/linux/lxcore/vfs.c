@@ -1193,8 +1193,6 @@ LxMountAdd(
     PLX_MOUNT Existing, Mount = NULL;
     LONG Error;
 
-    UNREFERENCED_PARAMETER(Data);
-
     Existing = LxMountFind(Ns, Target, &Relative);
     if ((Existing != NULL) && (Relative[0] == '\0') && (strcmp(Existing->FsType, FsType) == 0) &&
         (Existing->Kind != LxFsProc) && (Existing->Kind != LxFsCgroup) && (Ns == Ns->Instance->RootNs[LxNsMnt]))
@@ -1208,9 +1206,22 @@ LxMountAdd(
         (strcmp(FsType, "securityfs") == 0) || (strcmp(FsType, "pstore") == 0) || (strcmp(FsType, "bpf") == 0) ||
         (strcmp(FsType, "efivarfs") == 0) || (strcmp(FsType, "binfmt_misc") == 0) || (strcmp(FsType, "autofs") == 0))
     {
-        Error = LxInstanceTmpfs(Ns, Target, FsType, Flags, 01777, &Mount);
+        LX_TMPFS_OPTIONS Options;
+        BOOLEAN Tmpfs = (strcmp(FsType, "tmpfs") == 0);
+
+        RtlZeroMemory(&Options, sizeof(Options));
+        Options.Mode = 01777;
+        Options.Uid = Process->Fsuid;
+        Options.Gid = Process->Fsgid;
+        Error = Tmpfs ? LxTmpfsParseOptions(Process, Data, &Options) : 0;
         if (Error == 0)
+            Error = LxInstanceTmpfs(Ns, Target, FsType, Flags, Options.Mode, &Mount);
+        if (Error == 0)
+        {
+            if (Tmpfs)
+                LxTmpfsApplyOptions(Mount->Tmpfs, &Options);
             LxMountPropagate(Mount);
+        }
         return Error;
     }
     if (strcmp(FsType, "proc") == 0)

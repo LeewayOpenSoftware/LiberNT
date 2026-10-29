@@ -2118,7 +2118,7 @@ LX_SYSCALL(LxSysMount)
 {
     PLX_PROCESS Process = Call->Process;
     ULONG Flags = (ULONG)Call->Args[3];
-    PSTR Source = NULL, Type = NULL;
+    PSTR Source = NULL, Type = NULL, Data = NULL;
     LX_NODE Target;
     LONG64 Result;
     LONG Error;
@@ -2193,11 +2193,14 @@ LX_SYSCALL(LxSysMount)
         Result = LxCopyStringFromUser(Call->Args[2], &Type, 63);
     if ((Result == 0) && (Type == NULL))
         Result = -LX_EINVAL;
+    if ((Result == 0) && (Call->Args[4] != 0))
+        Result = LxCopyStringFromUser(Call->Args[4], &Data, LX_PAGE_SIZE - 1);
     if (Result == 0)
-        Result = LxMountAdd(Process, Target.Path, (Source != NULL) ? Source : "none", Type, Flags, NULL);
+        Result = LxMountAdd(Process, Target.Path, (Source != NULL) ? Source : "none", Type, Flags, Data);
 
     LxFree(Source);
     LxFree(Type);
+    LxFree(Data);
     LxNodeFree(&Target);
     return Result;
 }

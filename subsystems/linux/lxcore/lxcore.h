@@ -458,6 +458,17 @@ typedef struct _LX_NODE
     PSTR LinkTarget;
 } LX_NODE, *PLX_NODE;
 
+typedef struct _LX_TMPFS_OPTIONS
+{
+    ULONG Mode;
+    ULONG Uid;
+    ULONG Gid;
+    ULONG64 Blocks;
+    ULONG64 Inodes;
+    BOOLEAN SeenBlocks;
+    BOOLEAN SeenInodes;
+} LX_TMPFS_OPTIONS, *PLX_TMPFS_OPTIONS;
+
 #define LX_LOOKUP_FOLLOW    0x00000001
 #define LX_LOOKUP_DIRECTORY 0x00000002
 #define LX_LOOKUP_CREATE    0x00000004
@@ -1215,6 +1226,8 @@ LONG LxSynthStat(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node, _Out_ PLX_STAT St
 LONG LxSynthMkdir(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node);
 VOID LxTmpfsInitialize(VOID);
 PLX_TMPFS LxTmpfsCreate(_In_ ULONG Mode);
+LONG LxTmpfsParseOptions(_In_ PLX_PROCESS Process, _In_opt_ PCSTR Data, _Inout_ PLX_TMPFS_OPTIONS Options);
+VOID LxTmpfsApplyOptions(_In_ PLX_TMPFS Fs, _In_ PLX_TMPFS_OPTIONS Options);
 VOID LxTmpfsReference(_In_ PLX_TMPFS Fs);
 VOID LxTmpfsDereference(_In_ PLX_TMPFS Fs);
 VOID LxTmpfsMountReference(_In_ PLX_TMPFS Fs);
