@@ -1524,6 +1524,7 @@ LONG LxArchPtraceSetRegset(_Inout_ PCONTEXT Context, _Inout_ PULONG64 Tls, _Inou
 LONG LxArchPtraceSyscallNumber(_In_ PKTRAP_FRAME TrapFrame, _In_ LONG Recorded);
 LONG64 LxArchPtraceSyscallReturn(_In_ PCONTEXT Context);
 BOOLEAN LxArchPersonalityAllowed(_In_ ULONG Personality);
+ULONG LxArchExecPersonality(_In_ ULONG Personality);
 BOOLEAN LxArchPtraceSingleStep(_Inout_ PCONTEXT Context, _In_ BOOLEAN Enable);
 VOID LxArchApplySpeculation(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame);
 LONG64 LxSpecCtrlGet(_In_ PLX_THREAD Thread, _In_ ULONG64 Which);

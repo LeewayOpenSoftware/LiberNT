@@ -3496,6 +3496,11 @@ LX_SYSCALL(LxSysMmap)
         {
             Flags |= LX_VMA_NOMAYWRITE;
         }
+        if ((Prot & LX_PROT_READ) && (Call->Process->Personality & LX_PER_READ_IMPLIES_EXEC) &&
+            !((File != NULL) && (File->Mount != NULL) && (File->Mount->Flags & LX_MS_NOEXEC)))
+        {
+            Prot |= LX_PROT_EXEC;
+        }
         Result = LxMmMap(Call->Process, Call->Args[0], Call->Args[1], Prot, Flags, Zero ? NULL : File, Call->Args[5]);
     }
     if (File != NULL)
@@ -3508,9 +3513,20 @@ LX_SYSCALL(LxSysMunmap)
     return LxMmUnmap(Call->Process, Call->Args[0], Call->Args[1]);
 }
 
+static
+ULONG
+LxReadImpliesExec(
+    _In_ PLX_PROCESS Process,
+    _In_ ULONG Prot)
+{
+    if ((Prot & LX_PROT_READ) && (Process->Personality & LX_PER_READ_IMPLIES_EXEC))
+        Prot |= LX_PROT_EXEC;
+    return Prot;
+}
+
 LX_SYSCALL(LxSysMprotect)
 {
-    return LxMmProtect(Call->Process, Call->Args[0], Call->Args[1], (ULONG)Call->Args[2]);
+    return LxMmProtect(Call->Process, Call->Args[0], Call->Args[1], LxReadImpliesExec(Call->Process, (ULONG)Call->Args[2]));
 }
 
 LX_SYSCALL(LxSysPkeyAlloc)
@@ -3538,7 +3554,7 @@ LX_SYSCALL(LxSysPkeyMprotect)
             return -LX_ENOMEM;
         return -LX_EINVAL;
     }
-    return LxMmProtect(Call->Process, Call->Args[0], Call->Args[1], (ULONG)Call->Args[2]);
+    return LxMmProtect(Call->Process, Call->Args[0], Call->Args[1], LxReadImpliesExec(Call->Process, (ULONG)Call->Args[2]));
 }
 
 LONG

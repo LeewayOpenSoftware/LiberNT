@@ -533,6 +533,13 @@ LxArchPersonalityAllowed(
     return (Personality & 0xFF) != LX_PER_LINUX32;
 }
 
+ULONG
+LxArchExecPersonality(
+    _In_ ULONG Personality)
+{
+    return Personality & ~LX_PER_READ_IMPLIES_EXEC;
+}
+
 LONG
 LxArchPtraceSyscallNumber(
     _In_ PKTRAP_FRAME TrapFrame,
