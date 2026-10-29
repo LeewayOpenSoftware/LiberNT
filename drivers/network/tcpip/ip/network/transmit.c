@@ -107,6 +107,7 @@ BOOLEAN PrepareNextFragment(
             FragOfs &= ~IPv4_MF_MASK;
 
         Header = IFC->Header;
+        FragOfs |= WN2H(Header->FlagsFragOfs) & IPv4_DF_MASK;
         Header->FlagsFragOfs = WH2N(FragOfs);
         Header->TotalLength = WH2N((USHORT)(DataSize + IFC->HeaderSize));
 
@@ -156,7 +157,8 @@ NTSTATUS SendFragments(
 
     /* Every non-final fragment must carry at least one 8-byte block. A smaller
      * MTU would allocate an empty buffer or underflow the fragment length. */
-    if (PathMTU <= IPPacket->HeaderSize || PathMTU - IPPacket->HeaderSize < 8)
+    if (PathMTU <= IPPacket->HeaderSize || PathMTU - IPPacket->HeaderSize < 8 ||
+        ((WN2H(((PIPv4_HEADER)IPPacket->Header)->FlagsFragOfs) & IPv4_DF_MASK) && IPPacket->TotalSize > PathMTU))
     {
         IPPacket->Free(IPPacket);
         return STATUS_INVALID_BUFFER_SIZE;

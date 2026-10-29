@@ -365,6 +365,7 @@ VOID IPUnregisterInterface(
         IF->EntityRegistered = FALSE;
     }
     RdiscStop(IF);
+    PmtuFlushInterface(IF);
     RouterRemoveRoutesForInterface(IF);
     NBDestroyNeighborsForInterface(IF);
 

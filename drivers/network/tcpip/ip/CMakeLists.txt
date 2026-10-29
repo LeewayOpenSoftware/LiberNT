@@ -18,6 +18,7 @@ list(APPEND SOURCE
     network/ip.c
     network/loopback.c
     network/neighbor.c
+    network/pmtu.c
     network/ports.c
     network/rdisc.c
     network/receive.c

@@ -86,5 +86,9 @@ VOID RdiscStop(PIP_INTERFACE Interface);
 VOID RdiscTimeout(VOID);
 VOID RdiscReceive(PIP_INTERFACE Interface, PIP_PACKET IPPacket);
 VOID RdiscStartup(VOID);
+VOID PmtuStartup(VOID);
+VOID PmtuReceive(PIP_INTERFACE Interface, PIP_PACKET IPPacket);
+VOID PmtuFlushInterface(PIP_INTERFACE Interface);
+VOID ICMPSendFragmentationNeeded(PIP_INTERFACE Interface, PIP_PACKET IPPacket, ULONG Mtu);
 
 /* EOF */
