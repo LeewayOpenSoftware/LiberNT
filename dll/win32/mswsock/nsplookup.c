@@ -1018,33 +1018,22 @@ NSP_AaaaQueryThread(LPVOID Parameter)
     return 0;
 }
 
+static
 INT
-NSP_GetHostByNameHeapAllocW(_In_ PWSHANDLEINTERN data,
-                            _In_ DWORD dwControlFlags,
-                            _Out_ PWSHOSTINFOINTERN hostinfo)
+NSP_QueryFamilies(_In_ PWSHANDLEINTERN data,
+                  _In_ DWORD dwQueryFlags,
+                  _In_ BOOL Aaaa,
+                  _Inout_ PWSHOSTINFOINTERN hostinfo,
+                  _Inout_ PWCHAR *Aliases,
+                  _Inout_ int *AliasIndex,
+                  _Out_ DNS_STATUS *status4,
+                  _Out_ DNS_STATUS *status6)
 {
     HANDLE hHeap = GetProcessHeap();
-    DNS_STATUS status4 = DNS_INFO_NO_RECORDS, status6 = DNS_INFO_NO_RECORDS;
-    DWORD dwQueryFlags = DNS_QUERY_STANDARD;
-    PWCHAR Aliases[WS2_INTERNAL_MAX_ALIAS] = { 0 };
-    PNSP_NBNS_QUERY Nbns = NULL;
-    HANDLE NbnsThread = NULL;
-    BOOL SingleLabel;
-    int AliasIndex = 0, i;
-    INT result;
 
-    if (data->hostnameW == NULL)
-        return ERROR_INVALID_PARAMETER;
-
-    if (NSP_IsLocalHostName(data->hostnameW))
-        return NSP_GetLocalHostAddresses(data, hostinfo);
-
-    SingleLabel = !wcschr(data->hostnameW, L'.');
-    if (SingleLabel && (data->families & NSP_FAMILY_INET))
-        NbnsThread = NSP_NbnsStart(data->hostnameW, &Nbns);
-
-    if ((data->families & NSP_FAMILY_INET6) &&
-        (data->families == NSP_FAMILY_INET6 || SingleLabel || NSP_HasGlobalIpv6()))
+    *status4 = DNS_INFO_NO_RECORDS;
+    *status6 = DNS_INFO_NO_RECORDS;
+    if (Aaaa)
     {
         PNSP_AAAA_QUERY Query = HeapAlloc(hHeap, HEAP_ZERO_MEMORY, sizeof(*Query));
         HANDLE Thread = NULL;
@@ -1060,13 +1049,13 @@ NSP_GetHostByNameHeapAllocW(_In_ PWSHANDLEINTERN data,
         if (!Thread)
             NSP_AaaaQueryThread(Query);
         else if (data->families & NSP_FAMILY_INET)
-            status4 = NSP_QueryAddresses(data, dwQueryFlags, DNS_TYPE_A, hostinfo, Aliases, &AliasIndex);
+            *status4 = NSP_QueryAddresses(data, dwQueryFlags, DNS_TYPE_A, hostinfo, Aliases, AliasIndex);
         if (Thread)
         {
             WaitForSingleObject(Thread, INFINITE);
             CloseHandle(Thread);
         }
-        status6 = Query->status;
+        *status6 = Query->status;
 
         for (k = Query->hostinfo.addressCount; k > 0; k--)
         {
@@ -1088,8 +1077,8 @@ NSP_GetHostByNameHeapAllocW(_In_ PWSHANDLEINTERN data,
         }
         for (k = 0; k < (DWORD)Query->AliasIndex; k++)
         {
-            if (AliasIndex < WS2_INTERNAL_MAX_ALIAS - 1)
-                Aliases[AliasIndex++] = Query->Aliases[k];
+            if (*AliasIndex < WS2_INTERNAL_MAX_ALIAS - 1)
+                Aliases[(*AliasIndex)++] = Query->Aliases[k];
             else
                 HeapFree(hHeap, 0, Query->Aliases[k]);
         }
@@ -1099,7 +1088,51 @@ NSP_GetHostByNameHeapAllocW(_In_ PWSHANDLEINTERN data,
     }
     else if (data->families & NSP_FAMILY_INET)
     {
-        status4 = NSP_QueryAddresses(data, dwQueryFlags, DNS_TYPE_A, hostinfo, Aliases, &AliasIndex);
+        *status4 = NSP_QueryAddresses(data, dwQueryFlags, DNS_TYPE_A, hostinfo, Aliases, AliasIndex);
+    }
+
+    return ERROR_SUCCESS;
+}
+
+INT
+NSP_GetHostByNameHeapAllocW(_In_ PWSHANDLEINTERN data,
+                            _In_ DWORD dwControlFlags,
+                            _Out_ PWSHOSTINFOINTERN hostinfo)
+{
+    HANDLE hHeap = GetProcessHeap();
+    DNS_STATUS status4 = DNS_INFO_NO_RECORDS, status6 = DNS_INFO_NO_RECORDS;
+    DWORD dwQueryFlags = DNS_QUERY_STANDARD;
+    PWCHAR Aliases[WS2_INTERNAL_MAX_ALIAS] = { 0 };
+    PNSP_NBNS_QUERY Nbns = NULL;
+    HANDLE NbnsThread = NULL;
+    BOOL SingleLabel;
+    int AliasIndex = 0, i;
+    INT result, error;
+
+    if (data->hostnameW == NULL)
+        return ERROR_INVALID_PARAMETER;
+
+    if (NSP_IsLocalHostName(data->hostnameW))
+        return NSP_GetLocalHostAddresses(data, hostinfo);
+
+    SingleLabel = !wcschr(data->hostnameW, L'.');
+    error = NSP_QueryFamilies(data, SingleLabel ? DNS_QUERY_NO_MULTICAST : dwQueryFlags,
+                              (data->families & NSP_FAMILY_INET6) &&
+                              (data->families == NSP_FAMILY_INET6 || NSP_HasGlobalIpv6()),
+                              hostinfo, Aliases, &AliasIndex, &status4, &status6);
+    if (!error && SingleLabel && !hostinfo->addressCount)
+    {
+        if (data->families & NSP_FAMILY_INET)
+            NbnsThread = NSP_NbnsStart(data->hostnameW, &Nbns);
+        error = NSP_QueryFamilies(data, DNS_QUERY_MULTICAST_ONLY, (data->families & NSP_FAMILY_INET6) != 0,
+                                  hostinfo, Aliases, &AliasIndex, &status4, &status6);
+    }
+    if (error)
+    {
+        NSP_NbnsFinish(NbnsThread, Nbns, FALSE, hostinfo);
+        for (i = 0; i < AliasIndex; i++)
+            HeapFree(hHeap, 0, Aliases[i]);
+        return error;
     }
 
     NSP_NbnsFinish(NbnsThread, Nbns, !hostinfo->addressCount, hostinfo);

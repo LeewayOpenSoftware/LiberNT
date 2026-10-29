@@ -1071,6 +1071,8 @@ DnsIntResolve(LPCWSTR Name, WORD Type, DWORD Options, PDNS_RECORDW *Result)
         return DNS_ERROR_RCODE_NAME_ERROR;
 
     ResolverStartWinsock();
+    if (Options & DNS_QUERY_MULTICAST_ONLY)
+        return wcschr(Name, L'.') ? ERROR_INVALID_NAME : ResolverLlmnrQuery(Name, Type, Result);
     Config = RtlAllocateHeap(RtlGetProcessHeap(), 0, sizeof(*Config));
     if (!Config)
         return ERROR_OUTOFMEMORY;
