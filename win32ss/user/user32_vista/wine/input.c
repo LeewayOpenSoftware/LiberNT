@@ -30,6 +30,7 @@
 #define COM_NO_WINDOWS_H
 #include <windef.h>
 #include <wingdi.h>
+#define _USER32_
 #include <winuser.h>
 #include <winbase.h>
 #include <reactos/usertouch.h>
@@ -66,6 +67,7 @@ typedef struct tagTOUCHINPUT {
 } TOUCHINPUT, *PTOUCHINPUT;
 typedef TOUCHINPUT const * PCTOUCHINPUT;
 
+#if (WINVER < 0x0601)
 DECLARE_HANDLE(HGESTUREINFO);
 
 #define GF_BEGIN    0x00000001
@@ -90,6 +92,7 @@ typedef struct tagGESTUREINFO {
     UINT      cbExtraArgs;
 } GESTUREINFO, *PGESTUREINFO;
 typedef GESTUREINFO const * PCGESTUREINFO;
+#endif
 
 #if (WINVER < 0x0602)
 typedef enum tagPOINTER_BUTTON_CHANGE_TYPE
