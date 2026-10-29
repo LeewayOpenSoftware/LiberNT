@@ -1024,6 +1024,7 @@ LX_SYSCALL(LxSysRtSigtimedwait)
     LX_SIGINFO Info;
     ULONG64 Signal;
     LONG64 Result;
+    BOOLEAN Interrupted = FALSE;
 
     if (Call->Args[3] != sizeof(ULONG64))
         return -LX_EINVAL;
@@ -1060,7 +1061,7 @@ LX_SYSCALL(LxSysRtSigtimedwait)
             return (LONG64)Signal;
         }
 
-        if (LxSignalPending(Call->Thread))
+        if (Interrupted || LxSignalPending(Call->Thread))
             return -LX_EINTR;
 
         Now = (LONG64)KeQueryInterruptTime();
@@ -1072,6 +1073,7 @@ LX_SYSCALL(LxSysRtSigtimedwait)
         Result = LxWaitHead(&Call->Process->SignalPoll, LxSigwaitReady, &Wait, &Interval);
         if ((Result < 0) && (Result != -LX_EAGAIN) && (Result != -LX_EINTR))
             return Result;
+        Interrupted = (Result == -LX_EINTR);
     }
 }
 

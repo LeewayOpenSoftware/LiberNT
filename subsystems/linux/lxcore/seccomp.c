@@ -781,7 +781,8 @@ LxSeccompNotify(
 
             ExAcquireFastMutex(&Listener->Lock);
             if (Match->WaitKillable && (Notif->State == LxNotifSent) &&
-                !((Call->Thread->Pending | Call->Thread->Process->Pending) & Kill))
+                !((Call->Thread->Pending | Call->Thread->Process->Pending) & Kill) &&
+                !PsIsThreadTerminating(PsGetCurrentThread()))
             {
                 ExReleaseFastMutex(&Listener->Lock);
                 Killable = TRUE;
