@@ -270,9 +270,11 @@ AfdReportConnectedSource(
     _In_ PIRP Irp,
     _In_ PIO_STACK_LOCATION IrpSp)
 {
+    static const USHORT Zero[8];
     PTDI_ADDRESS_INFO Info = Irp->UserBuffer;
     ULONG Length = IrpSp->Parameters.DeviceIoControl.OutputBufferLength;
     PTDI_ADDRESS_IP Ip;
+    PTDI_ADDRESS_IP6 Ip6;
 
     if (Length < FIELD_OFFSET(TDI_ADDRESS_INFO, Address.Address[0].Address) + sizeof(TDI_ADDRESS_IP))
         return;
@@ -288,6 +290,18 @@ AfdReportConnectedSource(
             Ip = (PTDI_ADDRESS_IP)Info->Address.Address[0].Address;
             if (Ip->in_addr == 0)
                 Ip->in_addr = FCB->ConnectedSourceAddress;
+        }
+        else if (Length >= FIELD_OFFSET(TDI_ADDRESS_INFO, Address.Address[0].Address) + sizeof(TDI_ADDRESS_IP6) &&
+                 Info->Address.TAAddressCount != 0 &&
+                 Info->Address.Address[0].AddressType == TDI_ADDRESS_TYPE_IP6 &&
+                 Info->Address.Address[0].AddressLength >= sizeof(TDI_ADDRESS_IP6))
+        {
+            Ip6 = (PTDI_ADDRESS_IP6)Info->Address.Address[0].Address;
+            if (RtlCompareMemory(Ip6->sin6_addr, Zero, sizeof(Zero)) == sizeof(Zero))
+            {
+                RtlCopyMemory(Ip6->sin6_addr, FCB->ConnectedSource6, sizeof(Ip6->sin6_addr));
+                Ip6->sin6_scope_id = FCB->ConnectedSourceScope;
+            }
         }
     }
     _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
@@ -355,8 +369,8 @@ AfdGetSockName( PDEVICE_OBJECT DeviceObject, PIRP Irp,
         Status = AfdQuerySockName( FCB->AddressFile.Object, Irp, IrpSp );
     }
 
-    if (NT_SUCCESS(Status) && (FCB->Flags & AFD_ENDPOINT_CONNECTIONLESS) &&
-        FCB->RemoteAddress && FCB->ConnectedSourceAddress)
+    if (NT_SUCCESS(Status) && (FCB->Flags & AFD_ENDPOINT_CONNECTIONLESS) && FCB->RemoteAddress &&
+        (FCB->ConnectedSourceAddress || FCB->ConnectedSource6[0] || FCB->ConnectedSource6[7]))
     {
         AfdReportConnectedSource(FCB, Irp, IrpSp);
     }

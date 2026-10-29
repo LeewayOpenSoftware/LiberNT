@@ -258,6 +258,8 @@ typedef struct _AFD_FCB {
     LARGE_INTEGER DisconnectTimeout;
     PTRANSPORT_ADDRESS LocalAddress, RemoteAddress;
     ULONG ConnectedSourceAddress;
+    USHORT ConnectedSource6[8];
+    ULONG ConnectedSourceScope;
     PTDI_CONNECTION_INFORMATION AddressFrom, ConnectCallInfo, ConnectReturnInfo;
     PVOID RecvControl;
     PVOID SendDatagramBuffer;
