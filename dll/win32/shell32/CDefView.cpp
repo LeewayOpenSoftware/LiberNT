@@ -5394,13 +5394,84 @@ HRESULT STDMETHODCALLTYPE CDefView::GetViewModeAndIconSize(FOLDERVIEWMODE *mode,
     return S_OK;
 }
 
+static HBITMAP
+StretchIconBitmap(HBITMAP bitmap, INT srcCx, INT srcCy, INT dstCx, INT dstCy, BOOL isMask)
+{
+    HDC screen, sourceDC, destDC;
+    BITMAPINFO info;
+    HBITMAP result;
+    HGDIOBJ oldSource, oldDest;
+    VOID *bits;
+
+    screen = GetDC(NULL);
+    sourceDC = CreateCompatibleDC(screen);
+    destDC = CreateCompatibleDC(screen);
+    ZeroMemory(&info, sizeof(info));
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = dstCx;
+    info.bmiHeader.biHeight = -dstCy;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = isMask ? 1 : 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    result = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (result)
+    {
+        oldSource = SelectObject(sourceDC, bitmap);
+        oldDest = SelectObject(destDC, result);
+        SetStretchBltMode(destDC, isMask ? BLACKONWHITE : HALFTONE);
+        SetBrushOrgEx(destDC, 0, 0, NULL);
+        StretchBlt(destDC, 0, 0, dstCx, dstCy, sourceDC, 0, 0, srcCx, srcCy, SRCCOPY);
+        SelectObject(destDC, oldDest);
+        SelectObject(sourceDC, oldSource);
+    }
+    DeleteDC(destDC);
+    DeleteDC(sourceDC);
+    ReleaseDC(NULL, screen);
+    return result;
+}
+
+static INT
+AddIconScaled(HIMAGELIST dest, HIMAGELIST srcList, HIMAGELIST fallback, INT index, INT cx)
+{
+    INT srcCx = 0, srcCy = 0;
+    HICON icon;
+    ICONINFO info;
+    HBITMAP colorBitmap, maskBitmap;
+    INT result = -1;
+
+    ImageList_GetIconSize(srcList, &srcCx, &srcCy);
+    icon = ImageList_GetIcon(srcList, index, ILD_TRANSPARENT);
+    if (!icon && fallback)
+    {
+        icon = ImageList_GetIcon(fallback, index, ILD_TRANSPARENT);
+        ImageList_GetIconSize(fallback, &srcCx, &srcCy);
+    }
+    if (!icon)
+        return -1;
+    if (GetIconInfo(icon, &info))
+    {
+        colorBitmap = StretchIconBitmap(info.hbmColor, srcCx, srcCy, cx, cx, FALSE);
+        maskBitmap = StretchIconBitmap(info.hbmMask, srcCx, srcCy, cx, cx, TRUE);
+        if (colorBitmap && maskBitmap)
+            result = ImageList_Add(dest, colorBitmap, maskBitmap);
+        if (colorBitmap)
+            DeleteObject(colorBitmap);
+        if (maskBitmap)
+            DeleteObject(maskBitmap);
+        DeleteObject(info.hbmColor);
+        DeleteObject(info.hbmMask);
+    }
+    DestroyIcon(icon);
+    return result;
+}
+
 HIMAGELIST CDefView::CreateSizedViewImageList(INT cx)
 {
     HIMAGELIST bigList, smallList, srcList, newList;
     INT count, i;
 
     Shell_GetImageLists(&bigList, &smallList);
-    srcList = SIC_GetImageList(SHIL_JUMBO);
+    srcList = SIC_GetImageList(SHIL_EXTRALARGE);
     if (!srcList)
         srcList = bigList;
     count = ImageList_GetImageCount(smallList);
@@ -5409,15 +5480,8 @@ HIMAGELIST CDefView::CreateSizedViewImageList(INT cx)
         return NULL;
     for (i = 0; i < count; i++)
     {
-        HICON icon = ImageList_GetIcon(srcList, i, ILD_TRANSPARENT);
-        INT index;
+        INT index = AddIconScaled(newList, srcList, bigList, i, cx);
 
-        if (!icon)
-            icon = ImageList_GetIcon(bigList, i, ILD_TRANSPARENT);
-        if (!icon)
-            break;
-        index = ImageList_AddIcon(newList, icon);
-        DestroyIcon(icon);
         if (index != i)
         {
             ImageList_Destroy(newList);
@@ -5429,27 +5493,21 @@ HIMAGELIST CDefView::CreateSizedViewImageList(INT cx)
 
 void CDefView::SyncViewImageList()
 {
-    HIMAGELIST smallList;
+    HIMAGELIST smallList, bigList, srcList;
     INT have, need, i;
 
     if (!m_himlView || !m_himlViewOwned)
         return;
-    Shell_GetImageLists(NULL, &smallList);
+    Shell_GetImageLists(&bigList, &smallList);
+    srcList = SIC_GetImageList(SHIL_EXTRALARGE);
+    if (!srcList)
+        srcList = bigList;
     need = ImageList_GetImageCount(smallList);
     have = ImageList_GetImageCount(m_himlView);
     for (i = have; i < need; i++)
     {
-        HIMAGELIST srcList = SIC_GetImageList(SHIL_JUMBO);
-        HICON icon;
-        INT index;
+        INT index = AddIconScaled(m_himlView, srcList, bigList, i, m_himlViewSize);
 
-        if (!srcList)
-            srcList = smallList;
-        icon = ImageList_GetIcon(srcList, i, ILD_TRANSPARENT);
-        if (!icon)
-            break;
-        index = ImageList_AddIcon(m_himlView, icon);
-        DestroyIcon(icon);
         if (index == -1)
             break;
     }
@@ -5502,6 +5560,12 @@ void CDefView::ApplyViewIconSize()
     hHeader = ListView_GetHeader(m_ListView.m_hWnd);
     if (hHeader)
         ::ShowWindow(hHeader, mode == FVM_CONTENT ? SW_HIDE : SW_SHOW);
+    if (mode == FVM_ICON && !IsComputerTileView())
+    {
+        m_ListView.SetTextBkColor(CLR_NONE);
+        m_ListView.Arrange(LVA_DEFAULT);
+    }
+    m_ListView.InvalidateRect(NULL, TRUE);
 }
 
 INT CDefView::GetZoomStep() const
