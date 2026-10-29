@@ -2052,6 +2052,9 @@ co_IntSendMessageWithCallBack(HWND hWnd,
 
     ptiSendTo = IntSendTo(Window, Win32Thread, Msg);
 
+    if (!ptiSendTo && !CompletionCallback && CompletionCallbackContext == 1 && !(Msg & 0x80000000))
+        ptiSendTo = Window->head.pti;
+
     if (Msg & 0x80000000 &&
         !ptiSendTo)
     {
