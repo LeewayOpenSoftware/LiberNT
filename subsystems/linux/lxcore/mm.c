@@ -4579,6 +4579,7 @@ LX_SYSCALL(LxSysMremap)
             LxMmUnlock(Process);
             return Result;
         }
+        Vma = LxVmaFind(Process, Old);
     }
 
     if ((Vma->Flags & (LX_VMA_VIEW | LX_MAP_SHARED)) == (LX_VMA_VIEW | LX_MAP_SHARED))
