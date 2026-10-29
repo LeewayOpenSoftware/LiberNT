@@ -2169,7 +2169,7 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
 
    // Change or update, set send non-client paint flag.
    if ( !Entry->bSilent && Window->style & WS_VISIBLE &&
-       (WinPos.flags & SWP_STATECHANGED || (!(Window->state2 & WNDS2_WIN31COMPAT) && WinPos.flags & SWP_NOREDRAW ) ) )
+       ((WinPos.flags & (SWP_STATECHANGED | SWP_NOREDRAW)) == SWP_STATECHANGED || (!(Window->state2 & WNDS2_WIN31COMPAT) && WinPos.flags & SWP_NOREDRAW ) ) )
    {
       TRACE("Set WNDS_SENDNCPAINT %p\n",Window);
       Window->state |= WNDS_SENDNCPAINT;
@@ -2179,7 +2179,7 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
     * Request a full non-client repaint when the frame geometry changes.
     * Otherwise, copied bits can retain parts of the old frame. CORE-20769.
     */
-   if (!Entry->bSilent && (Window->style & WS_VISIBLE) &&
+   if (!Entry->bSilent && (Window->style & WS_VISIBLE) && !(WinPos.flags & SWP_NOREDRAW) &&
        ((WinPos.flags & SWP_FRAMECHANGED) ||
         (OldWindowRect.right - OldWindowRect.left) != (NewWindowRect.right - NewWindowRect.left) ||
         (OldWindowRect.bottom - OldWindowRect.top) != (NewWindowRect.bottom - NewWindowRect.top)))
