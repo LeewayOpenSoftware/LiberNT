@@ -42,4 +42,8 @@ DWORD
 WINAPI
 RegisterWinsockHelper(VOID);
 
+DWORD
+WINAPI
+RegisterIpv6Helper(VOID);
+
 #endif /* PRECOMP_H */
