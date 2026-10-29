@@ -4045,6 +4045,7 @@ static BOOL FASTCALL MENU_ButtonDown(MTRACKER* pmt, PMENU PtMenu, UINT Flags)
           /* If the popup menu is not already "popped" */
           if (!(item->fState & MF_MOUSESELECT))
           {
+              PtMenu->TimeToHide = FALSE;
               pmt->CurrentMenu = MENU_ShowSubPopup(pmt->OwnerWnd, PtMenu, FALSE, Flags);
           }
 
