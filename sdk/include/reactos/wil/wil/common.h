@@ -658,7 +658,8 @@ The above example is used within WIL to decide whether or not the library contai
 desktop APIs.  Building this functionality as `#IFDEF`s within functions would create ODR violations, whereas
 doing it with global function pointers and header initialization allows a runtime determination. */
 #define WI_HEADER_INITIALIZATION_FUNCTION(name, fn)
-#elif defined(_M_IX86) || defined(_M_IA64) || defined(_M_AMD64) || defined(_M_ARM) || defined(_M_ARM64)
+#elif defined(_M_IX86) || defined(_M_IA64) || defined(_M_AMD64) || defined(_M_ARM) || defined(_M_ARM64) || \
+    (defined(__REACTOS__) && defined(_M_RISCV64))
 #if defined(_MSC_VER)
 #ifdef _M_IX86
 #define WI_HEADER_INITIALIZATION_FUNCTION(name, fn) \
