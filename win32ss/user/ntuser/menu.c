@@ -3494,7 +3494,8 @@ static BOOL FASTCALL MENU_ShowPopup(PWND pwndOwner, PMENU menu, UINT id, UINT fl
         UserSetProp(pWnd, AtomDwmTransition,
                     (HANDLE)(ULONG_PTR)DWM_TRANSITION_PACK(MenuTransitionSeq, 0, 255, 150), FALSE);
     }
-    co_WinPosSetWindowPos( pWnd, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    co_WinPosSetWindowPos( pWnd, 0, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    co_WinPosSetWindowPos( pWnd, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
 
     co_IntUpdateWindows(pWnd, RDW_ALLCHILDREN, FALSE);
 
