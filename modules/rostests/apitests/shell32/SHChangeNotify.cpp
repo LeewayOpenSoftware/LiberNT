@@ -383,6 +383,7 @@ static DWORD WINAPI StageThreadFunc(LPVOID arg)
     ++s_iStep;
     assert(s_iStep == NUM_STEP);
     C_ASSERT(NUM_STEP == 8);
+    s_iStep = -1;
     if (s_iStage + 1 < NUM_STAGE)
     {
         ::PostMessage(s_hSubWnd, WM_COMMAND, IDRETRY, 0); // Next stage
@@ -393,8 +394,6 @@ static DWORD WINAPI StageThreadFunc(LPVOID arg)
         ::PostMessage(s_hSubWnd, WM_COMMAND, IDNO, 0);
         ::PostMessage(s_hMainWnd, WM_COMMAND, IDNO, 0);
     }
-
-    s_iStep = -1;
 
     return 0;
 }

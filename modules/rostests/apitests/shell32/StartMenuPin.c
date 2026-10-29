@@ -185,7 +185,8 @@ START_TEST(StartMenuPin)
     ok(SUCCEEDED(hr), "MenuBand registration: %08lx\n", hr);
     if (menuband) IShellMenu_Release(menuband);
     REQUIRE(CoCreateInstance(&CLSID_StartMenuPin, NULL, CLSCTX_INPROC_SERVER, &IID_IStartMenuPinnedList, (void **)&pins));
-    if (!GetTempPathW(ARRAYSIZE(temp), temp) || !GetTempFileNameW(temp, L"pin", 0, directory))
+    if (!GetTempPathW(ARRAYSIZE(temp), temp) || !GetLongPathNameW(temp, temp, ARRAYSIZE(temp)) ||
+        !GetTempFileNameW(temp, L"pin", 0, directory))
     {
         ok(FALSE, "Creating temporary name failed: %lu\n", GetLastError());
         goto cleanup;
