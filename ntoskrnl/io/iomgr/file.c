@@ -854,7 +854,8 @@ IopParseDevice(IN PVOID ParseObject,
         }
 
         /* Check if this is a secure FSD */
-        if ((DeviceObject->Characteristics & FILE_DEVICE_SECURE_OPEN) &&
+        if ((CheckMode != KernelMode) &&
+            (DeviceObject->Characteristics & FILE_DEVICE_SECURE_OPEN) &&
             ((OpenPacket->RelatedFileObject) || (RemainingName->Length)) &&
             (!VolumeOpen))
         {
