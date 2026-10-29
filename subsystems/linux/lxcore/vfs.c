@@ -2180,6 +2180,29 @@ LxMountNsRelease(
     LxMountSweepTmpfs(Instance);
 }
 
+static
+PSTR
+LxPathRebaseOld(
+    _In_ PCSTR Path,
+    _In_ PCSTR Root,
+    _In_ PCSTR PutOld)
+{
+    SIZE_T RootLength = (strcmp(Root, "/") == 0) ? 0 : strlen(Root);
+    PCSTR Rest;
+
+    if ((RootLength != 0) &&
+        ((strncmp(Path, Root, RootLength) != 0) || ((Path[RootLength] != '\0') && (Path[RootLength] != '/'))))
+    {
+        return LxStrDup(Path);
+    }
+    Rest = Path + RootLength;
+    if (strcmp(Rest, "/") == 0)
+        Rest = "";
+    if (strcmp(PutOld, "/") == 0)
+        return (RootLength != 0) ? LxStrPrintf("%s%s", Root, Rest) : LxStrDup((Rest[0] != '\0') ? Rest : "/");
+    return LxStrPrintf("%s%s%s", (RootLength != 0) ? Root : "", PutOld, Rest);
+}
+
 PSTR
 LxPathRebase(
     _In_ PCSTR Path,
@@ -2199,17 +2222,7 @@ LxPathRebase(
             return LxStrDup((Rest[0] != '\0') ? Rest : "/");
         return LxStrPrintf("%s%s", Root, Rest);
     }
-    if ((RootLength != 0) &&
-        ((strncmp(Path, Root, RootLength) != 0) || ((Path[RootLength] != '\0') && (Path[RootLength] != '/'))))
-    {
-        return LxStrDup(Path);
-    }
-    Rest = Path + RootLength;
-    if (strcmp(Rest, "/") == 0)
-        Rest = "";
-    if (strcmp(PutOld, "/") == 0)
-        return (RootLength != 0) ? LxStrPrintf("%s%s", Root, Rest) : LxStrDup((Rest[0] != '\0') ? Rest : "/");
-    return LxStrPrintf("%s%s%s", (RootLength != 0) ? Root : "", PutOld, Rest);
+    return LxPathRebaseOld(Path, Root, PutOld);
 }
 
 LONG
@@ -2267,7 +2280,10 @@ LxMountPivotRoot(
 
         if (Mount->Detached)
             continue;
-        Rebased = LxPathRebase(Mount->Target, Root, NewPath, OldRel);
+        if ((Mount == NewMount) || LxMountIsBelow(Mount, NewMount))
+            Rebased = LxPathRebase(Mount->Target, Root, NewPath, OldRel);
+        else
+            Rebased = LxPathRebaseOld(Mount->Target, Root, OldRel);
         if (Rebased != NULL)
         {
             LxFree(Mount->Target);
