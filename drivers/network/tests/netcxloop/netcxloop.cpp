@@ -17,6 +17,9 @@
 
 static const UCHAR LoopAdapterAddress[6] = { 0x02, 0x00, 0x4C, 0x4F, 0x4F, 0x50 };
 static const UCHAR LoopPeerAddress[6] = { 0x02, 0x00, 0x4C, 0x4F, 0x4F, 0x51 };
+static const UCHAR LoopLightweightAddress[6] = { 0x02, 0x00, 0x4C, 0x4F, 0x4F, 0x52 };
+static const GUID LoopLightweightInterface = { 0x4c4f4f50, 0x4c57, 0x4d00, { 0x80, 0x00, 0x4c, 0x4f, 0x4f, 0x50, 0x4c, 0x57 } };
+static NETADAPTER LoopLightweightAdapter;
 
 typedef struct _LOOP_FRAME
 {
@@ -52,6 +55,7 @@ WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(LOOP_QUEUE, LoopGetQueue);
 
 extern "C" DRIVER_INITIALIZE DriverEntry;
 static EVT_WDF_DRIVER_DEVICE_ADD LoopDeviceAdd;
+static EVT_WDF_DRIVER_UNLOAD LoopDriverUnload;
 static EVT_NET_ADAPTER_CREATE_TXQUEUE LoopCreateTxQueue;
 static EVT_NET_ADAPTER_CREATE_RXQUEUE LoopCreateRxQueue;
 static EVT_NET_ADAPTER_SET_RECEIVE_FILTER LoopSetReceiveFilter;
@@ -477,55 +481,24 @@ LoopSetReceiveFilter(
 
 static
 NTSTATUS
-LoopDeviceAdd(
-    _In_ WDFDRIVER Driver,
-    _Inout_ PWDFDEVICE_INIT DeviceInit)
+LoopStartAdapter(
+    _In_ NETADAPTER NetAdapter,
+    _In_reads_(6) UCHAR const *LinkLayerAddress)
 {
-    WDFDEVICE Device;
-    NETADAPTER_INIT *AdapterInit;
-    NETADAPTER NetAdapter;
-    NET_ADAPTER_DATAPATH_CALLBACKS Datapath;
     NET_ADAPTER_LINK_LAYER_CAPABILITIES LinkLayer;
     NET_ADAPTER_LINK_LAYER_ADDRESS Address;
     NET_ADAPTER_TX_CAPABILITIES TxCapabilities;
     NET_ADAPTER_RX_CAPABILITIES RxCapabilities;
     NET_ADAPTER_RECEIVE_FILTER_CAPABILITIES ReceiveFilter;
     NET_ADAPTER_LINK_STATE LinkState;
-    WDF_OBJECT_ATTRIBUTES Attributes;
-    LOOP_ADAPTER *Adapter;
-    NTSTATUS Status;
 
-    UNREFERENCED_PARAMETER(Driver);
-
-    Status = NetDeviceInitConfig(DeviceInit);
-    if (!NT_SUCCESS(Status))
-        return Status;
-
-    Status = WdfDeviceCreate(&DeviceInit, WDF_NO_OBJECT_ATTRIBUTES, &Device);
-    if (!NT_SUCCESS(Status))
-        return Status;
-
-    AdapterInit = NetAdapterInitAllocate(Device);
-    if (!AdapterInit)
-        return STATUS_INSUFFICIENT_RESOURCES;
-
-    NET_ADAPTER_DATAPATH_CALLBACKS_INIT(&Datapath, LoopCreateTxQueue, LoopCreateRxQueue);
-    NetAdapterInitSetDatapathCallbacks(AdapterInit, &Datapath);
-
-    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&Attributes, LOOP_ADAPTER);
-    Status = NetAdapterCreate(AdapterInit, &Attributes, &NetAdapter);
-    NetAdapterInitFree(AdapterInit);
-    if (!NT_SUCCESS(Status))
-        return Status;
-
-    Adapter = LoopGetAdapter(NetAdapter);
-    KeInitializeSpinLock(&Adapter->Lock);
+    KeInitializeSpinLock(&LoopGetAdapter(NetAdapter)->Lock);
 
     NET_ADAPTER_LINK_LAYER_CAPABILITIES_INIT(&LinkLayer, LOOP_LINK_SPEED, LOOP_LINK_SPEED);
     NetAdapterSetLinkLayerCapabilities(NetAdapter, &LinkLayer);
     NetAdapterSetLinkLayerMtuSize(NetAdapter, LOOP_MTU);
 
-    NET_ADAPTER_LINK_LAYER_ADDRESS_INIT(&Address, sizeof(LoopAdapterAddress), LoopAdapterAddress);
+    NET_ADAPTER_LINK_LAYER_ADDRESS_INIT(&Address, 6, LinkLayerAddress);
     NetAdapterSetPermanentLinkLayerAddress(NetAdapter, &Address);
     NetAdapterSetCurrentLinkLayerAddress(NetAdapter, &Address);
 
@@ -553,6 +526,74 @@ LoopDeviceAdd(
     return NetAdapterStart(NetAdapter);
 }
 
+static
+NTSTATUS
+LoopCreateAdapter(
+    _In_ NETADAPTER_INIT *AdapterInit,
+    _In_reads_(6) UCHAR const *LinkLayerAddress,
+    _Out_opt_ NETADAPTER *Created)
+{
+    NET_ADAPTER_DATAPATH_CALLBACKS Datapath;
+    WDF_OBJECT_ATTRIBUTES Attributes;
+    NETADAPTER NetAdapter;
+    NTSTATUS Status;
+
+    NET_ADAPTER_DATAPATH_CALLBACKS_INIT(&Datapath, LoopCreateTxQueue, LoopCreateRxQueue);
+    NetAdapterInitSetDatapathCallbacks(AdapterInit, &Datapath);
+
+    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&Attributes, LOOP_ADAPTER);
+    Status = NetAdapterCreate(AdapterInit, &Attributes, &NetAdapter);
+    NetAdapterInitFree(AdapterInit);
+    if (!NT_SUCCESS(Status))
+        return Status;
+
+    Status = LoopStartAdapter(NetAdapter, LinkLayerAddress);
+    if (NT_SUCCESS(Status) && Created)
+        *Created = NetAdapter;
+    return Status;
+}
+
+static
+NTSTATUS
+LoopDeviceAdd(
+    _In_ WDFDRIVER Driver,
+    _Inout_ PWDFDEVICE_INIT DeviceInit)
+{
+    WDFDEVICE Device;
+    NETADAPTER_INIT *AdapterInit;
+    NTSTATUS Status;
+
+    UNREFERENCED_PARAMETER(Driver);
+
+    Status = NetDeviceInitConfig(DeviceInit);
+    if (!NT_SUCCESS(Status))
+        return Status;
+
+    Status = WdfDeviceCreate(&DeviceInit, WDF_NO_OBJECT_ATTRIBUTES, &Device);
+    if (!NT_SUCCESS(Status))
+        return Status;
+
+    AdapterInit = NetAdapterInitAllocate(Device);
+    if (!AdapterInit)
+        return STATUS_INSUFFICIENT_RESOURCES;
+
+    return LoopCreateAdapter(AdapterInit, LoopAdapterAddress, NULL);
+}
+
+static
+void
+LoopDriverUnload(
+    _In_ WDFDRIVER Driver)
+{
+    UNREFERENCED_PARAMETER(Driver);
+
+    if (LoopLightweightAdapter)
+    {
+        NetAdapterStop(LoopLightweightAdapter);
+        LoopLightweightAdapter = NULL;
+    }
+}
+
 extern "C"
 NTSTATUS
 NTAPI
@@ -562,6 +603,17 @@ DriverEntry(
 {
     WDF_DRIVER_CONFIG Config;
 
+    NETADAPTER_INIT *AdapterInit;
+    NTSTATUS Status;
+
     WDF_DRIVER_CONFIG_INIT(&Config, LoopDeviceAdd);
-    return WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &Config, WDF_NO_HANDLE);
+    Config.EvtDriverUnload = LoopDriverUnload;
+    Status = WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &Config, WDF_NO_HANDLE);
+    if (!NT_SUCCESS(Status))
+        return Status;
+
+    AdapterInit = NetAdapterLightweightInitAllocate(&LoopLightweightInterface);
+    if (AdapterInit)
+        (VOID)LoopCreateAdapter(AdapterInit, LoopLightweightAddress, &LoopLightweightAdapter);
+    return STATUS_SUCCESS;
 }

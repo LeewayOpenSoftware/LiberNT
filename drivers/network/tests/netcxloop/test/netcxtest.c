@@ -18,6 +18,8 @@
 #include <stdio.h>
 
 static const UCHAR AdapterAddress[6] = { 0x02, 0x00, 0x4C, 0x4F, 0x4F, 0x50 };
+static const UCHAR LightweightAddress[6] = { 0x02, 0x00, 0x4C, 0x4F, 0x4F, 0x52 };
+static const WCHAR LightweightInterface[] = L"{4C4F4F50-4C57-4D00-8000-4C4F4F504C57}";
 
 static int Failures;
 static WCHAR DeviceInstanceId[MAX_DEVICE_ID_LEN];
@@ -45,6 +47,60 @@ Check(BOOL Condition, const char *What)
     if (!Condition)
         Failures++;
     Report("NETCXTEST: %s %s", Condition ? "ok" : "FAIL", What);
+}
+
+static
+BOOL
+SetValue(HKEY Root, const WCHAR *Path, const WCHAR *Name, DWORD Type, const void *Data, DWORD Size)
+{
+    HKEY Key;
+    LONG Error;
+
+    Error = RegCreateKeyExW(Root, Path, 0, NULL, 0, KEY_SET_VALUE, NULL, &Key, NULL);
+    if (Error == ERROR_SUCCESS)
+    {
+        if (Name != NULL || Data != NULL)
+            Error = RegSetValueExW(Key, Name, 0, Type, Data, Size);
+        RegCloseKey(Key);
+    }
+    if (Error != ERROR_SUCCESS)
+        Report("NETCXTEST: registry write '%ls' '%ls' error %ld", Path, Name ? Name : L"", Error);
+    return Error == ERROR_SUCCESS;
+}
+
+static
+BOOL
+ProvisionLightweightInterface(void)
+{
+    WCHAR Interface[160];
+    WCHAR Path[256];
+    WCHAR Configuration[128];
+    BYTE Property[8 * sizeof(DWORD) + sizeof(Configuration)];
+    DWORD Header[8] = { 2, 7, 4, 24, 18, 0, 16, 0 };
+    DWORD ConfigurationSize;
+    DWORD IfType = 6;
+    DWORD MediaType = 0;
+    DWORD NetLuidIndex = 0x8100;
+
+    _snwprintf(Interface, ARRAYSIZE(Interface), L"SYSTEM\\CurrentControlSet\\Control\\NetworkSetup2\\Interfaces\\%ls", LightweightInterface);
+    _snwprintf(Configuration, ARRAYSIZE(Configuration), L"Control\\Network\\Interfaces\\%ls\\Configuration", LightweightInterface);
+    ConfigurationSize = (DWORD)((wcslen(Configuration) + 1) * sizeof(WCHAR));
+    Header[5] = ConfigurationSize;
+    memcpy(Property, Header, sizeof(Header));
+    memcpy(Property + sizeof(Header), Configuration, ConfigurationSize);
+
+    _snwprintf(Path, ARRAYSIZE(Path), L"%ls\\Kernel", Interface);
+    if (!SetValue(HKEY_LOCAL_MACHINE, Path, L"IfType", REG_DWORD, &IfType, sizeof(IfType)) ||
+        !SetValue(HKEY_LOCAL_MACHINE, Path, L"MediaType", REG_DWORD, &MediaType, sizeof(MediaType)) ||
+        !SetValue(HKEY_LOCAL_MACHINE, Path, L"NetLuidIndex", REG_DWORD, &NetLuidIndex, sizeof(NetLuidIndex)))
+        return FALSE;
+
+    _snwprintf(Path, ARRAYSIZE(Path), L"%ls\\Properties\\{a111f1f4-5923-47c0-9a68-d0bafb577901}\\0024", Interface);
+    if (!SetValue(HKEY_LOCAL_MACHINE, Path, L"", 0xffff0082, Property, sizeof(Header) + ConfigurationSize))
+        return FALSE;
+
+    _snwprintf(Path, ARRAYSIZE(Path), L"SYSTEM\\CurrentControlSet\\%ls", Configuration);
+    return SetValue(HKEY_LOCAL_MACHINE, Path, NULL, REG_NONE, NULL, 0);
 }
 
 static
@@ -95,7 +151,7 @@ InstallDevice(const WCHAR *InfPath)
 
 static
 BOOL
-FindInterface(MIB_IF_ROW2 *Row)
+FindInterface(const UCHAR *Mac, MIB_IF_ROW2 *Row)
 {
     MIB_IF_TABLE2 *Table;
     BOOL Found = FALSE;
@@ -106,7 +162,7 @@ FindInterface(MIB_IF_ROW2 *Row)
     for (i = 0; i < Table->NumEntries; i++)
     {
         if (Table->Table[i].PhysicalAddressLength == sizeof(AdapterAddress) &&
-            !memcmp(Table->Table[i].PhysicalAddress, AdapterAddress, sizeof(AdapterAddress)))
+            !memcmp(Table->Table[i].PhysicalAddress, Mac, sizeof(AdapterAddress)))
         {
             *Row = Table->Table[i];
             Found = TRUE;
@@ -157,7 +213,7 @@ ReportInterface(const char *When, const MIB_IF_ROW2 *Row)
 
 static
 BOOL
-AddAddress(NET_LUID Luid)
+AddAddress(NET_LUID Luid, const char *Ip)
 {
     MIB_UNICASTIPADDRESS_ROW Address;
     DWORD Status;
@@ -166,7 +222,7 @@ AddAddress(NET_LUID Luid)
     InitializeUnicastIpAddressEntry(&Address);
     Address.InterfaceLuid = Luid;
     Address.Address.Ipv4.sin_family = AF_INET;
-    Address.Address.Ipv4.sin_addr.s_addr = inet_addr("10.231.0.1");
+    Address.Address.Ipv4.sin_addr.s_addr = inet_addr(Ip);
     Address.OnLinkPrefixLength = 24;
     Status = CreateUnicastIpAddressEntry(&Address);
     Report("NETCXTEST: CreateUnicastIpAddressEntry %lu", Status);
@@ -187,7 +243,7 @@ AddAddress(NET_LUID Luid)
 
 static
 int
-PingPeer(int Count)
+PingPeer(const char *Ip, int Count)
 {
     UCHAR Reply[sizeof(ICMP_ECHO_REPLY) + 64 + 8];
     char Data[32];
@@ -207,7 +263,7 @@ PingPeer(int Count)
     {
         PICMP_ECHO_REPLY Echo = (PICMP_ECHO_REPLY)Reply;
 
-        Status = IcmpSendEcho(Icmp, inet_addr("10.231.0.2"), Data, sizeof(Data), NULL, Reply, sizeof(Reply), 1000);
+        Status = IcmpSendEcho(Icmp, inet_addr(Ip), Data, sizeof(Data), NULL, Reply, sizeof(Reply), 1000);
         if (Status && Echo->Status == IP_SUCCESS && Echo->DataSize == sizeof(Data) &&
             !memcmp(Echo->Data, Data, sizeof(Data)))
             Replies++;
@@ -235,13 +291,13 @@ SetDeviceEnabled(BOOL Enable)
 
 static
 BOOL
-WaitForInterface(BOOL Present, MIB_IF_ROW2 *Row)
+WaitForInterface(const UCHAR *Mac, BOOL Present, MIB_IF_ROW2 *Row)
 {
     int i;
 
     for (i = 0; i < 100; i++)
     {
-        if (FindInterface(Row) == Present &&
+        if (FindInterface(Mac, Row) == Present &&
             (!Present || Row->OperStatus == IfOperStatusUp))
             return TRUE;
         if (i % 10 == 9)
@@ -272,9 +328,10 @@ wmain(int argc, WCHAR **argv)
         lstrcatW(InfPath, L"netcxloop.inf");
     }
 
+    Check(ProvisionLightweightInterface(), "lightweight interface provisioned");
     Check(InstallDevice(InfPath), "install");
 
-    for (i = 0; i < 100 && !FindInterface(&Row); i++)
+    for (i = 0; i < 100 && !FindInterface(AdapterAddress, &Row); i++)
     {
         if (i % 10 == 9)
             Report("NETCXTEST: waiting for the interface, %d ms", (i + 1) * 100);
@@ -303,19 +360,33 @@ wmain(int argc, WCHAR **argv)
     Check(Row.Mtu == 1500, "mtu 1500");
     Check(Row.TransmitLinkSpeed == 1000000000ULL, "link speed 1 Gbps");
 
-    Check(AddAddress(Row.InterfaceLuid), "address preferred");
-    Check(PingPeer(4) >= 3, "peer answers echo");
+    Check(AddAddress(Row.InterfaceLuid, "10.231.0.1"), "address preferred");
+    Check(PingPeer("10.231.0.2", 4) >= 3, "peer answers echo");
 
     if (GetIfEntry2(&Row) == NO_ERROR)
         ReportInterface("end", &Row);
     Check(Row.InOctets > 0 && Row.OutOctets > 0, "traffic counted");
 
+    if (WaitForInterface(LightweightAddress, TRUE, &Row))
+    {
+        Check(TRUE, "lightweight interface up");
+        ReportInterface("lightweight", &Row);
+        Check(Row.Type == IF_TYPE_ETHERNET_CSMACD, "lightweight ethernet type");
+        Check(AddAddress(Row.InterfaceLuid, "10.232.0.1"), "lightweight address preferred");
+        Check(PingPeer("10.232.0.2", 2) >= 1, "lightweight peer answers echo");
+    }
+    else
+    {
+        Check(FALSE, "lightweight interface up");
+        ReportInterfaceTable();
+    }
+
     Check(SetDeviceEnabled(FALSE), "disable");
-    Check(WaitForInterface(FALSE, &Row), "interface removed after disable");
+    Check(WaitForInterface(AdapterAddress, FALSE, &Row), "interface removed after disable");
     Check(SetDeviceEnabled(TRUE), "enable");
-    Check(WaitForInterface(TRUE, &Row), "interface up after enable");
-    Check(AddAddress(Row.InterfaceLuid), "address preferred after enable");
-    Check(PingPeer(2) >= 1, "peer answers echo after enable");
+    Check(WaitForInterface(AdapterAddress, TRUE, &Row), "interface up after enable");
+    Check(AddAddress(Row.InterfaceLuid, "10.231.0.1"), "address preferred after enable");
+    Check(PingPeer("10.231.0.2", 2) >= 1, "peer answers echo after enable");
 
     Report("NETCXTEST: DONE %d failures", Failures);
     return Failures ? 1 : 0;
