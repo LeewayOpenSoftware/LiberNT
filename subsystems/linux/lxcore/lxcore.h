@@ -1531,7 +1531,7 @@ LONG LxArchSpecStoreBypassMode(VOID);
 LONG LxArchPtraceGetRegset(_In_ PCONTEXT Context, _In_ ULONG64 Tls, _In_ LONG SyscallNr, _In_ ULONG Type,
                            _Out_writes_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer, _Out_ PULONG Size, _Out_ PULONG Unit);
 LONG LxArchPtraceSetRegset(_Inout_ PCONTEXT Context, _Inout_ PULONG64 Tls, _Inout_ PLONG SyscallNr, _In_ ULONG Type,
-                           _In_reads_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer);
+                           _In_reads_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer, _In_ ULONG Length);
 LONG LxArchPtraceSyscallNumber(_In_ PKTRAP_FRAME TrapFrame, _In_ LONG Recorded);
 LONG64 LxArchPtraceSyscallReturn(_In_ PCONTEXT Context);
 BOOLEAN LxArchPersonalityAllowed(_In_ ULONG Personality);
@@ -1549,6 +1549,7 @@ VOID LxArchSetSyscallResult(_Inout_ PKTRAP_FRAME TrapFrame, _In_ LONG64 Result);
 VOID LxArchRestartSyscall(_Inout_ PKTRAP_FRAME TrapFrame, _In_ ULONG64 Argument);
 BOOLEAN LxArchEmulateInstruction(_In_ PEXCEPTION_RECORD ExceptionRecord, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame, _Inout_ PKTRAP_FRAME TrapFrame);
 VOID LxArchClassifyFault(_In_ PEXCEPTION_RECORD ExceptionRecord, _In_ PKTRAP_FRAME TrapFrame, _Inout_ PLONG Signal, _Inout_ PLONG Code);
+BOOLEAN LxArchHardwareBreakpointHit(_In_ PEXCEPTION_RECORD ExceptionRecord, _In_ PKTRAP_FRAME TrapFrame, _Out_ PULONG64 Address);
 VOID LxArchSetExecContext(_Inout_ PKTRAP_FRAME TrapFrame, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame, _In_ ULONG64 Pc, _In_ ULONG64 Sp);
 VOID LxArchCaptureContext(_In_ PKTRAP_FRAME TrapFrame, _In_opt_ PKEXCEPTION_FRAME ExceptionFrame, _Out_ PCONTEXT Context);
 VOID LxArchSetForkContext(_Inout_ PCONTEXT Context, _In_ ULONG64 StackPointer);

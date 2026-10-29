@@ -400,6 +400,163 @@ LxArchApplySpeculation(
 #define LX_A64_PSTATE_MODE  0x1FULL
 #define LX_A64_PSTATE_DAIF  0x3C0ULL
 
+#define LX_A64_HW_TYPE_EXECUTE  0
+#define LX_A64_HW_TYPE_RW       3
+#define LX_A64_HW_LEN_4         0x0F
+#define LX_A64_HW_PRIVILEGE_EL0 (2UL << 1)
+
+/* FIXME: the NT CONTEXT holds 8 breakpoints and 2 watchpoints, so slots the hardware has beyond those are not offered. */
+static
+ULONG
+LxArchHwSlots(
+    _In_ BOOLEAN Watch)
+{
+    ULONG64 Dfr0 = ARM64_READ_SYSREG(S3_0_C0_C5_0);
+    ULONG Slots = (ULONG)((Dfr0 >> (Watch ? 20 : 12)) & 0xF) + 1;
+
+    return min(Slots, Watch ? ARM64_MAX_WATCHPOINTS : ARM64_MAX_BREAKPOINTS);
+}
+
+static
+ULONG
+LxArchHwLength(
+    _In_ ULONG Mask)
+{
+    ULONG Length = 0;
+
+    while (Mask & 1)
+    {
+        Length++;
+        Mask >>= 1;
+    }
+    return (Mask == 0) ? Length : 0;
+}
+
+static
+LONG
+LxArchHwEncode(
+    _In_ BOOLEAN Watch,
+    _In_ ULONG Current,
+    _In_ BOOLEAN HaveControl,
+    _In_ ULONG Control,
+    _Inout_ PULONG64 Address,
+    _Out_ PULONG Result)
+{
+    ULONG Type, Length, Mask, Offset, Enabled;
+    ULONG64 Aligned;
+
+    if (Current != 0)
+    {
+        Type = (Current >> 3) & 3;
+        Mask = (Current >> 5) & 0xFF;
+        while ((Mask != 0) && !(Mask & 1))
+            Mask >>= 1;
+        Length = LxArchHwLength(Mask);
+        Enabled = Current & 1;
+    }
+    else
+    {
+        Type = Watch ? LX_A64_HW_TYPE_RW : LX_A64_HW_TYPE_EXECUTE;
+        Length = 4;
+        Enabled = 0;
+    }
+    if (HaveControl)
+    {
+        Enabled = Control & 1;
+        if (Enabled)
+        {
+            Type = (Control >> 3) & 3;
+            Mask = (Control >> 5) & 0xFF;
+            if (Mask == 0)
+                return -LX_EINVAL;
+            for (Offset = 0; !(Mask & 1); Offset++)
+                Mask >>= 1;
+            Length = LxArchHwLength(Mask);
+            if ((Length == 0) || (Watch ? (Type == LX_A64_HW_TYPE_EXECUTE) : (Type != LX_A64_HW_TYPE_EXECUTE)))
+                return -LX_EINVAL;
+            *Address += Offset;
+        }
+    }
+    if (*Address > (ULONG64)(ULONG_PTR)MM_HIGHEST_USER_ADDRESS)
+        return -LX_EINVAL;
+    if (Type == LX_A64_HW_TYPE_EXECUTE)
+        Length = 4;
+    Offset = (ULONG)(*Address & ((Type == LX_A64_HW_TYPE_EXECUTE) ? 3 : 7));
+    Aligned = *Address - Offset;
+    *Address = Aligned;
+    *Result = (((((1UL << Length) - 1) << Offset) & 0xFF) << 5) | (Type << 3) | LX_A64_HW_PRIVILEGE_EL0 | Enabled;
+    return 0;
+}
+
+static
+LONG
+LxArchSetHwDebug(
+    _Inout_ PCONTEXT Context,
+    _In_ BOOLEAN Watch,
+    _In_reads_bytes_(Length) PUCHAR Buffer,
+    _In_ ULONG Length)
+{
+    ULONG Count = LxArchHwSlots(Watch), Slot, Offset, Control, Encoded;
+    ULONG64 Address;
+    LONG Error;
+
+    for (Slot = 0, Offset = 8; Offset < Length; Slot++, Offset += 16)
+    {
+        if (Length - Offset < sizeof(ULONG64))
+            return -LX_EINVAL;
+        if (Slot >= Count)
+            return -LX_ENOSPC;
+        RtlCopyMemory(&Address, Buffer + Offset, sizeof(Address));
+        Control = 0;
+        if (Length - Offset >= sizeof(ULONG64) + sizeof(ULONG))
+            RtlCopyMemory(&Control, Buffer + Offset + sizeof(ULONG64), sizeof(Control));
+        Error = LxArchHwEncode(Watch, Watch ? Context->Wcr[Slot] : Context->Bcr[Slot],
+                               Length - Offset >= sizeof(ULONG64) + sizeof(ULONG), Control, &Address, &Encoded);
+        if (Error != 0)
+            return Error;
+        if (Watch)
+        {
+            Context->Wvr[Slot] = Address;
+            Context->Wcr[Slot] = Encoded;
+        }
+        else
+        {
+            Context->Bvr[Slot] = Address;
+            Context->Bcr[Slot] = Encoded;
+        }
+    }
+    return 0;
+}
+
+/* FIXME: a single step that ends on an armed breakpoint address is reported as the breakpoint hit. */
+BOOLEAN
+LxArchHardwareBreakpointHit(
+    _In_ PEXCEPTION_RECORD ExceptionRecord,
+    _In_ PKTRAP_FRAME TrapFrame,
+    _Out_ PULONG64 Address)
+{
+    ULONG Slot;
+
+    if (ExceptionRecord->ExceptionCode != STATUS_SINGLE_STEP)
+        return FALSE;
+    if (ExceptionRecord->NumberParameters >= 2)
+    {
+        *Address = (ULONG64)ExceptionRecord->ExceptionInformation[0];
+        return TRUE;
+    }
+    if (!TrapFrame->DebugRegistersValid)
+        return FALSE;
+    for (Slot = 0; Slot < ARM64_MAX_BREAKPOINTS; Slot++)
+    {
+        if ((TrapFrame->Bcr[Slot] & 1) && (TrapFrame->Bvr[Slot] == (TrapFrame->Pc & ~3ULL)))
+        {
+            *Address = TrapFrame->Pc;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 LONG
 LxArchPtraceGetRegset(
     _In_ PCONTEXT Context,
@@ -443,13 +600,23 @@ LxArchPtraceGetRegset(
             *Unit = sizeof(ULONG64);
             return 0;
 
-        /* TODO: report and program the hardware breakpoint and watchpoint slots once the kernel arms them for EL0. */
         case LX_NT_ARM_HW_BREAK:
         case LX_NT_ARM_HW_WATCH:
-            Words[0] = (ULONG)(ARM64_READ_SYSREG(S3_0_C0_C5_0) & 0xF) << 8;
+        {
+            BOOLEAN Watch = (Type == LX_NT_ARM_HW_WATCH);
+            ULONG Count = LxArchHwSlots(Watch);
+
+            RtlZeroMemory(Buffer, 66 * sizeof(ULONG));
+            Words[0] = ((ULONG)(ARM64_READ_SYSREG(S3_0_C0_C5_0) & 0xF) << 8) | Count;
+            for (Index = 0; Index < Count; Index++)
+            {
+                Registers[1 + 2 * Index] = Watch ? Context->Wvr[Index] : Context->Bvr[Index];
+                Words[4 + 4 * Index] = Watch ? Context->Wcr[Index] : Context->Bcr[Index];
+            }
             *Size = 66 * sizeof(ULONG);
             *Unit = sizeof(ULONG);
             return 0;
+        }
 
         case LX_NT_ARM_SYSTEM_CALL:
             Words[0] = (ULONG)SyscallNr;
@@ -468,7 +635,8 @@ LxArchPtraceSetRegset(
     _Inout_ PULONG64 Tls,
     _Inout_ PLONG SyscallNr,
     _In_ ULONG Type,
-    _In_reads_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer)
+    _In_reads_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer,
+    _In_ ULONG Length)
 {
     PULONG64 Registers = (PULONG64)Buffer;
     PULONG Words = (PULONG)Buffer;
@@ -503,7 +671,7 @@ LxArchPtraceSetRegset(
 
         case LX_NT_ARM_HW_BREAK:
         case LX_NT_ARM_HW_WATCH:
-            return -LX_ENOSPC;
+            return LxArchSetHwDebug(Context, Type == LX_NT_ARM_HW_WATCH, Buffer, Length);
 
         case LX_NT_ARM_SYSTEM_CALL:
             *SyscallNr = (LONG)Words[0];
@@ -638,6 +806,11 @@ LxArchSetExecContext(
         TrapFrame->VfpState->Fpcr = 0;
         TrapFrame->VfpState->Fpsr = 0;
     }
+    TrapFrame->DebugRegistersValid = FALSE;
+    RtlZeroMemory(TrapFrame->Bcr, sizeof(TrapFrame->Bcr));
+    RtlZeroMemory(TrapFrame->Bvr, sizeof(TrapFrame->Bvr));
+    RtlZeroMemory(TrapFrame->Wcr, sizeof(TrapFrame->Wcr));
+    RtlZeroMemory(TrapFrame->Wvr, sizeof(TrapFrame->Wvr));
 }
 
 VOID
@@ -684,6 +857,21 @@ LxArchCaptureContext(
         Context->Fpsr = TrapFrame->VfpState->Fpsr;
         RtlCopyMemory(Context->V, TrapFrame->VfpState->V, sizeof(Context->V));
     }
+
+    if (TrapFrame->DebugRegistersValid)
+    {
+        for (Index = 0; Index < ARM64_MAX_BREAKPOINTS; Index++)
+        {
+            Context->Bcr[Index] = TrapFrame->Bcr[Index];
+            Context->Bvr[Index] = TrapFrame->Bvr[Index];
+        }
+        for (Index = 0; Index < ARM64_MAX_WATCHPOINTS; Index++)
+        {
+            Context->Wcr[Index] = TrapFrame->Wcr[Index];
+            Context->Wvr[Index] = TrapFrame->Wvr[Index];
+        }
+    }
+    Context->ContextFlags |= CONTEXT_DEBUG_REGISTERS;
 }
 
 ULONG
@@ -810,6 +998,24 @@ LxArchRestoreContext(
         TrapFrame->VfpState->Fpcr = Context->Fpcr;
         TrapFrame->VfpState->Fpsr = Context->Fpsr;
         RtlCopyMemory(TrapFrame->VfpState->V, Context->V, sizeof(Context->V));
+    }
+    if ((Context->ContextFlags & CONTEXT_DEBUG_REGISTERS) == CONTEXT_DEBUG_REGISTERS)
+    {
+        BOOLEAN Active = FALSE;
+
+        for (Index = 0; Index < ARM64_MAX_BREAKPOINTS; Index++)
+        {
+            TrapFrame->Bcr[Index] = Context->Bcr[Index];
+            TrapFrame->Bvr[Index] = Context->Bvr[Index];
+            Active |= (Context->Bcr[Index] & 1) != 0;
+        }
+        for (Index = 0; Index < ARM64_MAX_WATCHPOINTS; Index++)
+        {
+            TrapFrame->Wcr[Index] = Context->Wcr[Index];
+            TrapFrame->Wvr[Index] = Context->Wvr[Index];
+            Active |= (Context->Wcr[Index] & 1) != 0;
+        }
+        TrapFrame->DebugRegistersValid = Active;
     }
 }
 

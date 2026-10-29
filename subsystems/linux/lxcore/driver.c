@@ -148,6 +148,8 @@ LxPicoDispatchFault(
     Info.Address = (ExceptionRecord->NumberParameters >= 2) ?
                    (ULONG64)ExceptionRecord->ExceptionInformation[1] :
                    (ULONG64)(ULONG_PTR)ExceptionRecord->ExceptionAddress;
+    if (LxArchHardwareBreakpointHit(ExceptionRecord, TrapFrame, &Info.Address))
+        Info.Code = LX_TRAP_HWBKPT;
 
     if (Thread->Ptrace != NULL)
     {

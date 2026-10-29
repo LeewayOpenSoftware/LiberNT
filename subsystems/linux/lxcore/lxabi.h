@@ -495,6 +495,7 @@ typedef struct _LX_SCHED_ATTR
 #define LX_BUS_MCEERR_AR    4
 #define LX_TRAP_BRKPT       1
 #define LX_TRAP_TRACE       2
+#define LX_TRAP_HWBKPT      4
 #define LX_FPE_INTDIV       1
 #define LX_CLD_EXITED       1
 #define LX_CLD_KILLED       2

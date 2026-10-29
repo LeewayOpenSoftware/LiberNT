@@ -385,13 +385,15 @@ LxArchPtraceSetRegset(
     _Inout_ PULONG64 Tls,
     _Inout_ PLONG SyscallNr,
     _In_ ULONG Type,
-    _In_reads_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer)
+    _In_reads_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer,
+    _In_ ULONG Length)
 {
     PULONG64 Registers = (PULONG64)Buffer;
     ULONG Index;
 
     UNREFERENCED_PARAMETER(Tls);
     UNREFERENCED_PARAMETER(SyscallNr);
+    UNREFERENCED_PARAMETER(Length);
     switch (Type)
     {
         case LX_NT_PRSTATUS:
@@ -476,6 +478,18 @@ LxArchClassifyFault(
     UNREFERENCED_PARAMETER(TrapFrame);
     UNREFERENCED_PARAMETER(Signal);
     UNREFERENCED_PARAMETER(Code);
+}
+
+BOOLEAN
+LxArchHardwareBreakpointHit(
+    _In_ PEXCEPTION_RECORD ExceptionRecord,
+    _In_ PKTRAP_FRAME TrapFrame,
+    _Out_ PULONG64 Address)
+{
+    UNREFERENCED_PARAMETER(ExceptionRecord);
+    UNREFERENCED_PARAMETER(TrapFrame);
+    UNREFERENCED_PARAMETER(Address);
+    return FALSE;
 }
 
 BOOLEAN
