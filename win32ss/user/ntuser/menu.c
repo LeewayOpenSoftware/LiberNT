@@ -4707,7 +4707,7 @@ static INT FASTCALL MENU_TrackMenu(PMENU pmenu, UINT wFlags, INT x, INT y,
                 case WM_RBUTTONDOWN:
                      if (!(wFlags & TPM_RIGHTBUTTON))
                      {
-                        if ( msg.message == WM_RBUTTONDBLCLK ) fInsideMenuLoop = FALSE; // Must exit or loop forever!
+                        if (!pmMouse) fInsideMenuLoop = FALSE;
                         break;
                      }
                     /* fall through */
