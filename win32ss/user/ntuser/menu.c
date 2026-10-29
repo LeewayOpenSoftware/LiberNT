@@ -36,6 +36,7 @@ BOOL fInEndMenu = FALSE;
 #define TF_ENDMENU              0x10000
 #define TF_SUSPENDPOPUP         0x20000
 #define TF_SKIPREMOVE           0x40000
+#define TF_ENDED                0x80000
 
 
 /* maximum allowed depth of any branch in the menu tree.
@@ -94,6 +95,13 @@ typedef struct
   PWND  OwnerWnd;    /* where notifications are sent */
   POINT Pt;
 } MTRACKER;
+
+static MTRACKER *pActiveTracker = NULL;
+static UINT ActiveTrackFlags = 0;
+static BOOL fTrackingExited = FALSE;
+
+static BOOL FASTCALL MENU_ExitTracking(PWND pWnd, PMENU Menu, BOOL bPopup, UINT wFlags);
+static VOID FASTCALL MENU_EndTracking(MTRACKER *pmt, UINT wFlags);
 
 /* Internal MenuTrackMenu() flags */
 #define TPM_INTERNAL            0xF0000000
@@ -3056,7 +3064,20 @@ void MENU_EndMenu( PWND pwnd )
           }
 
           fInEndMenu = TRUE;
-          UserPostMessage( top_popup, WM_CANCELMODE, 0, 0);
+          if (pActiveTracker && pActiveTracker->OwnerWnd->head.pti == PsGetCurrentThreadWin32Thread())
+          {
+             MTRACKER *pmt = pActiveTracker;
+             UINT wFlags = ActiveTrackFlags;
+
+             MENU_EndTracking(pmt, wFlags);
+             MENU_ExitTracking(pmt->OwnerWnd, VerifyMenu(pmt->TopMenu) ? pmt->TopMenu : NULL,
+                               (wFlags & TPM_POPUPMENU) != 0, wFlags);
+             fTrackingExited = TRUE;
+          }
+          else
+          {
+             UserPostMessage( top_popup, WM_CANCELMODE, 0, 0);
+          }
        }
     }
 }
@@ -4489,6 +4510,58 @@ static void FASTCALL MENU_KeyRight(MTRACKER *pmt, UINT Flags, UINT msg)
  *
  * Menu tracking code.
  */
+static VOID FASTCALL MENU_EndTracking(MTRACKER *pmt, UINT wFlags)
+{
+    PTHREADINFO pti = PsGetCurrentThreadWin32Thread();
+
+    if (pmt->TrackFlags & TF_ENDED) return;
+    pmt->TrackFlags |= TF_ENDED;
+
+    MsqSetStateWindow(pti, MSQ_STATE_MENUOWNER, NULL);
+    pti->MessageQueue->QF_flags &= ~QF_CAPTURELOCKED;
+    if (VerifyMenu(pmt->TopMenu) && !(pmt->TopMenu->fFlags & MNF_POPUP) &&
+        pmt->TopMenu->iItem != NO_SELECTED_ITEM && VerifyWnd(pmt->OwnerWnd))
+    {
+        IntNotifyWinEvent(EVENT_OBJECT_FOCUS, pmt->OwnerWnd, IS_SYSTEM_MENU(pmt->TopMenu) ? OBJID_SYSMENU : OBJID_MENU, CHILDID_SELF, 0);
+    }
+    co_UserSetCapture(NULL); /* release the capture */
+
+    /* If dropdown is still painted and the close box is clicked on
+       then the menu will be destroyed as part of the DispatchMessage above.
+       This will then invalidate the menu handle in mt.hTopMenu. We should
+       check for this first.  */
+    if ( VerifyMenu( pmt->TopMenu ) )
+    {
+       if (VerifyWnd(pmt->OwnerWnd))
+       {
+           MENU_HideSubPopups(pmt->OwnerWnd, pmt->TopMenu, FALSE, wFlags);
+
+           if (pmt->TopMenu->fFlags & MNF_POPUP)
+           {
+              PWND pwndTM = ValidateHwndNoErr(pmt->TopMenu->hWnd);
+              if (pwndTM)
+              {
+                 IntNotifyWinEvent(EVENT_SYSTEM_MENUPOPUPEND, pwndTM, OBJID_CLIENT, CHILDID_SELF, 0);
+
+                 co_UserDestroyWindow(pwndTM);
+              }
+              pmt->TopMenu->hWnd = NULL;
+
+              if (!(wFlags & TPM_NONOTIFY))
+              {
+                 co_IntSendMessage( UserHMGetHandle(pmt->OwnerWnd), WM_UNINITMENUPOPUP, (WPARAM)UserHMGetHandle(pmt->TopMenu),
+                                 MAKELPARAM(0, IS_SYSTEM_MENU(pmt->TopMenu) ? MF_SYSMENU : 0));
+              }
+            }
+            MENU_SelectItem( pmt->OwnerWnd, pmt->TopMenu, NO_SELECTED_ITEM, FALSE, 0 );
+            co_IntSendMessage( UserHMGetHandle(pmt->OwnerWnd), WM_MENUSELECT, MAKEWPARAM(0, 0xffff), 0 );
+       }
+
+       /* Reset the variable for hiding menu */
+       pmt->TopMenu->TimeToHide = FALSE;
+    }
+}
+
 static INT FASTCALL MENU_TrackMenu(PMENU pmenu, UINT wFlags, INT x, INT y,
                             PWND pwnd)
 {
@@ -4539,6 +4612,9 @@ static INT FASTCALL MENU_TrackMenu(PMENU pmenu, UINT wFlags, INT x, INT y,
 
     capture_win = IntGetCapture();
 
+    pActiveTracker = &mt;
+    ActiveTrackFlags = wFlags;
+
     while (fInsideMenuLoop)
     {
         BOOL ErrorExit = FALSE;
@@ -4558,6 +4634,12 @@ static INT FASTCALL MENU_TrackMenu(PMENU pmenu, UINT wFlags, INT x, INT y,
             }
             else
             {
+                if (mt.TrackFlags & TF_ENDED)
+                {
+                   ErrorExit = TRUE;
+                   break;
+                }
+
                 /* ReactOS Checks */
                 if (!VerifyWnd(mt.OwnerWnd)                            ||
                     !ValidateHwndNoErr(mt.CurrentMenu->hWnd)           ||
@@ -4573,6 +4655,11 @@ static INT FASTCALL MENU_TrackMenu(PMENU pmenu, UINT wFlags, INT x, INT y,
                   HWND win = mt.CurrentMenu->fFlags & MNF_POPUP ? mt.CurrentMenu->hWnd : NULL;
                   enterIdleSent = TRUE;
                   co_IntSendMessage( UserHMGetHandle(mt.OwnerWnd), WM_ENTERIDLE, MSGF_MENU, (LPARAM) win);
+                  if (mt.TrackFlags & TF_ENDED)
+                  {
+                     ErrorExit = TRUE;
+                     break;
+                  }
                 }
                 co_IntWaitMessage(NULL, 0, 0);
             }
@@ -4794,49 +4881,8 @@ static INT FASTCALL MENU_TrackMenu(PMENU pmenu, UINT wFlags, INT x, INT y,
         else mt.TrackFlags &= ~TF_SKIPREMOVE;
     }
 
-    MsqSetStateWindow(pti, MSQ_STATE_MENUOWNER, NULL);
-    pti->MessageQueue->QF_flags &= ~QF_CAPTURELOCKED;
-    if (VerifyMenu(mt.TopMenu) && !(mt.TopMenu->fFlags & MNF_POPUP) &&
-        mt.TopMenu->iItem != NO_SELECTED_ITEM && VerifyWnd(mt.OwnerWnd))
-    {
-        IntNotifyWinEvent(EVENT_OBJECT_FOCUS, mt.OwnerWnd, IS_SYSTEM_MENU(mt.TopMenu) ? OBJID_SYSMENU : OBJID_MENU, CHILDID_SELF, 0);
-    }
-    co_UserSetCapture(NULL); /* release the capture */
-
-    /* If dropdown is still painted and the close box is clicked on
-       then the menu will be destroyed as part of the DispatchMessage above.
-       This will then invalidate the menu handle in mt.hTopMenu. We should
-       check for this first.  */
-    if ( VerifyMenu( mt.TopMenu ) )
-    {
-       if (VerifyWnd(mt.OwnerWnd))
-       {
-           MENU_HideSubPopups(mt.OwnerWnd, mt.TopMenu, FALSE, wFlags);
-
-           if (mt.TopMenu->fFlags & MNF_POPUP)
-           {
-              PWND pwndTM = ValidateHwndNoErr(mt.TopMenu->hWnd);
-              if (pwndTM)
-              {
-                 IntNotifyWinEvent(EVENT_SYSTEM_MENUPOPUPEND, pwndTM, OBJID_CLIENT, CHILDID_SELF, 0);
-
-                 co_UserDestroyWindow(pwndTM);
-              }
-              mt.TopMenu->hWnd = NULL;
-
-              if (!(wFlags & TPM_NONOTIFY))
-              {
-                 co_IntSendMessage( UserHMGetHandle(mt.OwnerWnd), WM_UNINITMENUPOPUP, (WPARAM)UserHMGetHandle(mt.TopMenu),
-                                 MAKELPARAM(0, IS_SYSTEM_MENU(mt.TopMenu) ? MF_SYSMENU : 0));
-              }
-            }
-            MENU_SelectItem( mt.OwnerWnd, mt.TopMenu, NO_SELECTED_ITEM, FALSE, 0 );
-            co_IntSendMessage( UserHMGetHandle(mt.OwnerWnd), WM_MENUSELECT, MAKEWPARAM(0, 0xffff), 0 );
-       }
-
-       /* Reset the variable for hiding menu */
-       mt.TopMenu->TimeToHide = FALSE;
-    }
+    MENU_EndTracking(&mt, wFlags);
+    pActiveTracker = NULL;
 
     EngSetLastError( ERROR_SUCCESS );
     /* The return value is only used by TrackPopupMenu */
@@ -4873,6 +4919,7 @@ static BOOL FASTCALL MENU_InitTracking(PWND pWnd, PMENU Menu, BOOL bPopup, UINT 
 
     fInsideMenuLoop = TRUE;
     fInEndMenu = FALSE;
+    fTrackingExited = FALSE;
 
     /* Send WM_ENTERMENULOOP and WM_INITMENU message only if TPM_NONOTIFY flag is not specified */
     if (!(wFlags & TPM_NONOTIFY))
@@ -4911,6 +4958,12 @@ static BOOL FASTCALL MENU_InitTracking(PWND pWnd, PMENU Menu, BOOL bPopup, UINT 
 static BOOL FASTCALL MENU_ExitTracking(PWND pWnd, PMENU Menu, BOOL bPopup, UINT wFlags)
 {
     TRACE("Exit Track hwnd=%p bPopup %d\n", UserHMGetHandle(pWnd), bPopup);
+
+    if (fTrackingExited)
+    {
+        fTrackingExited = FALSE;
+        return TRUE;
+    }
 
     IntNotifyWinEvent( EVENT_SYSTEM_MENUEND,
                        pWnd,
