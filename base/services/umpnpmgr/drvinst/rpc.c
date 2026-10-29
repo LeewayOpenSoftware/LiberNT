@@ -147,3 +147,20 @@ DrvInst_EnumJobs(
     HeapFree(GetProcessHeap(), 0, Jobs);
     return ERROR_SUCCESS;
 }
+
+
+DWORD
+__stdcall
+DrvInst_Rollback(
+    _In_ handle_t hBinding,
+    _In_ LPCWSTR pszDeviceInstanceId)
+{
+    if (!IsCallerAdministrator(hBinding))
+        return ERROR_ACCESS_DENIED;
+
+    if (!pszDeviceInstanceId || !pszDeviceInstanceId[0] ||
+        lstrlenW(pszDeviceInstanceId) >= DRVINST_DEVICE_ID_CCH)
+        return ERROR_INVALID_PARAMETER;
+
+    return DrvInstRollbackDevice(pszDeviceInstanceId);
+}

@@ -2,6 +2,7 @@
 @ stdcall DevInstallW(ptr ptr wstr long)
 @ stdcall DrvInstEnumJobs(ptr ptr)
 @ stdcall DrvInstGetJob(int64 ptr)
+@ stdcall DrvInstRollback(wstr)
 @ stdcall DrvInstSubmitDevice(wstr long ptr)
 @ stdcall DrvInstWait(int64 long ptr)
 @ stdcall InstallDevInst(ptr wstr long ptr)
