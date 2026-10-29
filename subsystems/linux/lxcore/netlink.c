@@ -548,7 +548,7 @@ LxNlSnapshot(
         Link->Running = Link->Up;
         Link->Mtu = 65536;
         RtlStringCbCopyA(Link->Name, sizeof(Link->Name), "lo");
-        if (Link->Up)
+        if (Link->Up || NetNs->Net.LoopbackAddressed)
         {
             State->Addresses[State->AddressCount].Index = 1;
             State->Addresses[State->AddressCount].Address = 0x0100007F;
@@ -1048,6 +1048,28 @@ LxNlStringLength(
 
 static
 LONG
+LxNlChangeFlags(
+    _In_opt_ PLX_NS NetNs,
+    _In_ PLX_NL_LINK Link,
+    _In_ ULONG Flags,
+    _In_ ULONG Change)
+{
+    ULONG Current = (Link->Up ? LX_IFF_UP : 0) | (Link->Loopback ? 0 : LX_IFF_MULTICAST);
+    ULONG Wanted = ((Flags & Change) | (Current & ~Change)) & LX_IFF_CHANGEABLE;
+
+    if ((Wanted & ~LX_IFF_UP) != (Current & ~LX_IFF_UP))
+        return -LX_EOPNOTSUPP;
+    if ((Wanted ^ Current) & LX_IFF_UP)
+    {
+        if (LxNlIsRootNs(NetNs) || !Link->Loopback)
+            return -LX_EOPNOTSUPP;
+        NetNs->Net.LoopbackUp = (Wanted & LX_IFF_UP) != 0;
+    }
+    return 0;
+}
+
+static
+LONG
 LxNlSetLink(
     _In_ PLX_NL_SOCKET Socket,
     _In_ PLX_NLMSGHDR Request)
@@ -1055,7 +1077,7 @@ LxNlSetLink(
     ULONG Payload = Request->Length - sizeof(LX_NLMSGHDR);
     PLX_IFINFOMSG Info = (PLX_IFINFOMSG)(Request + 1);
     PUCHAR Attributes = (PUCHAR)(Info + 1);
-    ULONG Length, Offset = 0, NameLength = 0, Current, Change, Wanted, Index;
+    ULONG Length, Offset = 0, NameLength = 0, Index;
     PLX_NS NetNs = Socket->NetNs;
     PCSTR Name = NULL;
     PLX_NL_STATE State;
@@ -1115,22 +1137,52 @@ LxNlSetLink(
     }
     else
     {
-        Current = (Link->Up ? LX_IFF_UP : 0) | (Link->Loopback ? 0 : LX_IFF_MULTICAST);
-        Change = (Info->Change != 0) ? Info->Change : MAXULONG;
-        Wanted = ((Info->Flags & Change) | (Current & ~Change)) & LX_IFF_CHANGEABLE;
-        if ((Wanted & ~LX_IFF_UP) != (Current & ~LX_IFF_UP))
-            Result = -LX_EOPNOTSUPP;
-        else if ((Wanted ^ Current) & LX_IFF_UP)
-        {
-            if (LxNlIsRootNs(NetNs) || !Link->Loopback)
-                Result = -LX_EOPNOTSUPP;
-            else
-                NetNs->Net.LoopbackUp = (Wanted & LX_IFF_UP) != 0;
-        }
+        Result = LxNlChangeFlags(NetNs, Link, Info->Flags, (Info->Change != 0) ? Info->Change : MAXULONG);
     }
 
     LxFreePaged(State);
     return Result;
+}
+
+static
+LONG
+LxNlNewAddress(
+    _In_ PLX_NL_SOCKET Socket,
+    _In_ PLX_NLMSGHDR Request)
+{
+    ULONG Payload = Request->Length - sizeof(LX_NLMSGHDR);
+    PLX_IFADDRMSG Info = (PLX_IFADDRMSG)(Request + 1);
+    PUCHAR Attributes = (PUCHAR)(Info + 1);
+    ULONG Length, Offset = 0, Local = 0, Address = 0;
+    PLX_NS NetNs = Socket->NetNs;
+
+    if (Payload < sizeof(LX_IFADDRMSG))
+        return -LX_EINVAL;
+    Length = Payload - sizeof(LX_IFADDRMSG);
+    while (Offset + 4 <= Length)
+    {
+        USHORT AttributeLength = *(PUSHORT)(Attributes + Offset);
+        USHORT AttributeType = *(PUSHORT)(Attributes + Offset + 2) & 0x3FFF;
+
+        if ((AttributeLength < 4) || (Offset + AttributeLength > Length))
+            return -LX_EINVAL;
+        if ((AttributeType == LX_IFA_LOCAL) && (AttributeLength == 8))
+            Local = *(PULONG)(Attributes + Offset + 4);
+        else if ((AttributeType == LX_IFA_ADDRESS) && (AttributeLength == 8))
+            Address = *(PULONG)(Attributes + Offset + 4);
+        Offset += LX_NL_ALIGN(AttributeLength);
+    }
+    if (Local == 0)
+        Local = Address;
+    if (LxNlIsRootNs(NetNs) || (Info->Family != LX_AF_INET) || (Info->Index != 1) || (Info->PrefixLength != 8) ||
+        (Local != 0x0100007F) || ((Address != 0) && (Address != Local)))
+    {
+        return -LX_EOPNOTSUPP;
+    }
+    if (NetNs->Net.LoopbackUp || NetNs->Net.LoopbackAddressed)
+        return (Request->Flags & LX_NLM_F_EXCL) ? -LX_EEXIST : 0;
+    NetNs->Net.LoopbackAddressed = TRUE;
+    return 0;
 }
 
 static
@@ -1152,6 +1204,8 @@ LxNlRoute(
         return -LX_EOPNOTSUPP;
     if ((Request->Type == LX_RTM_NEWLINK) || (Request->Type == LX_RTM_SETLINK))
         return LxNlSetLink(Builder->Socket, Request);
+    if (Request->Type == LX_RTM_NEWADDR)
+        return LxNlNewAddress(Builder->Socket, Request);
     if ((Request->Type & 3) != 2)
         return -LX_EOPNOTSUPP;
     if ((Request->Type != LX_RTM_GETLINK) && (Request->Type != LX_RTM_GETADDR) && (Request->Type != LX_RTM_GETROUTE))
@@ -1550,7 +1604,7 @@ LxNlAutobind(
             PLX_NL_SOCKET Other = CONTAINING_RECORD(Entry, LX_NL_SOCKET, GlobalLink);
 
             if ((Other != Socket) && Other->Bound && (Other->Protocol == Socket->Protocol) &&
-                (Other->Instance == Socket->Instance) && (Other->PortId == Candidate))
+                (Other->NetNs == Socket->NetNs) && (Other->PortId == Candidate))
             {
                 Used = TRUE;
             }
@@ -1588,7 +1642,7 @@ LxNlBindPort(
             PLX_NL_SOCKET Other = CONTAINING_RECORD(Entry, LX_NL_SOCKET, GlobalLink);
 
             if ((Other != Socket) && Other->Bound && (Other->Protocol == Socket->Protocol) &&
-                (Other->Instance == Socket->Instance) && (Other->PortId == PortId))
+                (Other->NetNs == Socket->NetNs) && (Other->PortId == PortId))
             {
                 Error = -LX_EADDRINUSE;
                 break;
@@ -2288,3 +2342,247 @@ const LX_SOCKET_OPS LxNetlinkSocketOps =
     LxNlSetsockopt,
     LxNlGetsockopt
 };
+
+#define LX_SIOCGIFNAME              0x8910
+#define LX_SIOCGIFCONF              0x8912
+#define LX_SIOCGIFFLAGS             0x8913
+#define LX_SIOCSIFFLAGS             0x8914
+#define LX_SIOCGIFADDR              0x8915
+#define LX_SIOCGIFBRDADDR           0x8919
+#define LX_SIOCGIFNETMASK           0x891B
+#define LX_SIOCGIFMETRIC            0x891D
+#define LX_SIOCGIFMTU               0x8921
+#define LX_SIOCGIFHWADDR            0x8927
+#define LX_SIOCGIFINDEX             0x8933
+#define LX_SIOCGIFTXQLEN            0x8942
+
+typedef struct _LX_IFREQ
+{
+    CHAR Name[16];
+    union
+    {
+        struct
+        {
+            USHORT Family;
+            UCHAR Data[14];
+        } Addr;
+        LONG Value;
+        SHORT Flags;
+        UCHAR Raw[24];
+    } u;
+} LX_IFREQ, *PLX_IFREQ;
+
+C_ASSERT(sizeof(LX_IFREQ) == 40);
+
+typedef struct _LX_IFCONF
+{
+    LONG Length;
+    LONG Padding;
+    ULONG64 Buffer;
+} LX_IFCONF;
+
+static
+VOID
+LxNlPutInet(
+    _Out_ PLX_IFREQ Request,
+    _In_ ULONG Address)
+{
+    RtlZeroMemory(&Request->u, sizeof(Request->u));
+    Request->u.Addr.Family = LX_AF_INET;
+    RtlCopyMemory(&Request->u.Addr.Data[2], &Address, sizeof(Address));
+}
+
+static
+PLX_NL_LINK
+LxNlLinkByIndex(
+    _In_ PLX_NL_STATE State,
+    _In_ ULONG Index)
+{
+    ULONG Item;
+
+    for (Item = 0; Item < State->LinkCount; Item++)
+    {
+        if (State->Links[Item].Index == Index)
+            return &State->Links[Item];
+    }
+    return NULL;
+}
+
+static
+LONG64
+LxNlIfconf(
+    _In_ PLX_NL_STATE State,
+    _In_ ULONG64 Argument)
+{
+    LX_IFCONF Conf;
+    LX_IFREQ Request;
+    ULONG Index, Used = 0;
+    LONG64 Result;
+
+    Result = LxCopyFromUser(&Conf, Argument, sizeof(Conf));
+    if (Result != 0)
+        return Result;
+    for (Index = 0; Index < State->AddressCount; Index++)
+    {
+        PLX_NL_LINK Link = LxNlLinkByIndex(State, State->Addresses[Index].Index);
+
+        if (Link == NULL)
+            continue;
+        if (Conf.Buffer != 0)
+        {
+            if ((Conf.Length < 0) || (Used + sizeof(Request) > (ULONG)Conf.Length))
+                break;
+            RtlZeroMemory(&Request, sizeof(Request));
+            RtlStringCbCopyA(Request.Name, sizeof(Request.Name), Link->Name);
+            LxNlPutInet(&Request, State->Addresses[Index].Address);
+            Result = LxCopyToUser(Conf.Buffer + Used, &Request, sizeof(Request));
+            if (Result != 0)
+                return Result;
+        }
+        Used += sizeof(Request);
+    }
+    Conf.Length = (LONG)Used;
+    return LxCopyToUser(Argument, &Conf, sizeof(Conf));
+}
+
+LONG64
+LxNetDeviceIoctl(
+    _In_ PLX_PROCESS Process,
+    _In_ ULONG Request,
+    _In_ ULONG64 Argument)
+{
+    PLX_NS NetNs = LxProcessNs(Process, LxNsNet);
+    PLX_NL_ADDRESS Address = NULL;
+    PLX_NL_LINK Link = NULL;
+    PLX_NL_STATE State;
+    LX_IFREQ IfReq;
+    ULONG Index;
+    LONG64 Result = 0;
+
+    switch (Request)
+    {
+        case LX_SIOCGIFNAME:
+        case LX_SIOCGIFCONF:
+        case LX_SIOCGIFFLAGS:
+        case LX_SIOCSIFFLAGS:
+        case LX_SIOCGIFADDR:
+        case LX_SIOCGIFBRDADDR:
+        case LX_SIOCGIFNETMASK:
+        case LX_SIOCGIFMETRIC:
+        case LX_SIOCGIFMTU:
+        case LX_SIOCGIFHWADDR:
+        case LX_SIOCGIFINDEX:
+        case LX_SIOCGIFTXQLEN:
+            break;
+        default:
+            return -LX_ENOTTY;
+    }
+
+    if (Request != LX_SIOCGIFCONF)
+    {
+        Result = LxCopyFromUser(&IfReq, Argument, sizeof(IfReq));
+        if (Result != 0)
+            return Result;
+        IfReq.Name[sizeof(IfReq.Name) - 1] = '\0';
+    }
+
+    State = LxAllocPaged(sizeof(*State));
+    if (State == NULL)
+        return -LX_ENOMEM;
+    LxNlSnapshot(State, NetNs);
+
+    if (Request == LX_SIOCGIFCONF)
+    {
+        Result = LxNlIfconf(State, Argument);
+        LxFreePaged(State);
+        return Result;
+    }
+
+    if (Request == LX_SIOCGIFNAME)
+    {
+        Link = (IfReq.u.Value > 0) ? LxNlLinkByIndex(State, (ULONG)IfReq.u.Value) : NULL;
+    }
+    else
+    {
+        for (Index = 0; Index < State->LinkCount; Index++)
+        {
+            if (strcmp(IfReq.Name, State->Links[Index].Name) == 0)
+            {
+                Link = &State->Links[Index];
+                break;
+            }
+        }
+    }
+    if (Link == NULL)
+    {
+        LxFreePaged(State);
+        return -LX_ENODEV;
+    }
+    for (Index = 0; Index < State->AddressCount; Index++)
+    {
+        if (State->Addresses[Index].Index == Link->Index)
+        {
+            Address = &State->Addresses[Index];
+            break;
+        }
+    }
+
+    switch (Request)
+    {
+        case LX_SIOCGIFNAME:
+            RtlStringCbCopyA(IfReq.Name, sizeof(IfReq.Name), Link->Name);
+            break;
+
+        case LX_SIOCGIFINDEX:
+            IfReq.u.Value = (LONG)Link->Index;
+            break;
+
+        case LX_SIOCGIFFLAGS:
+            IfReq.u.Flags = (SHORT)((Link->Up ? LX_IFF_UP : 0) |
+                                    (Link->Loopback ? LX_IFF_LOOPBACK : (LX_IFF_BROADCAST | LX_IFF_MULTICAST)) |
+                                    (Link->Running ? LX_IFF_RUNNING : 0));
+            break;
+
+        case LX_SIOCSIFFLAGS:
+            Result = LxNlChangeFlags(NetNs, Link, (USHORT)IfReq.u.Flags, MAXULONG);
+            break;
+
+        case LX_SIOCGIFMTU:
+            IfReq.u.Value = (LONG)Link->Mtu;
+            break;
+
+        case LX_SIOCGIFMETRIC:
+            IfReq.u.Value = 0;
+            break;
+
+        case LX_SIOCGIFTXQLEN:
+            IfReq.u.Value = 1000;
+            break;
+
+        case LX_SIOCGIFHWADDR:
+            RtlZeroMemory(&IfReq.u, sizeof(IfReq.u));
+            IfReq.u.Addr.Family = Link->Loopback ? LX_ARPHRD_LOOPBACK : LX_ARPHRD_ETHER;
+            if (!Link->Loopback)
+                RtlCopyMemory(IfReq.u.Addr.Data, Link->Mac, min(Link->MacLength, sizeof(IfReq.u.Addr.Data)));
+            break;
+
+        case LX_SIOCGIFADDR:
+        case LX_SIOCGIFNETMASK:
+        case LX_SIOCGIFBRDADDR:
+            if (Address == NULL)
+                Result = -LX_EADDRNOTAVAIL;
+            else if (Request == LX_SIOCGIFADDR)
+                LxNlPutInet(&IfReq, Address->Address);
+            else if (Request == LX_SIOCGIFNETMASK)
+                LxNlPutInet(&IfReq, Address->Mask);
+            else
+                LxNlPutInet(&IfReq, (((Address->Address & 0xFF) == 127) || (Address->Mask == 0xFFFFFFFF)) ?
+                                    0 : (Address->Address | ~Address->Mask));
+            break;
+    }
+
+    LxFreePaged(State);
+    if ((Result == 0) && (Request != LX_SIOCSIFFLAGS))
+        Result = LxCopyToUser(Argument, &IfReq, sizeof(IfReq));
+    return Result;
+}

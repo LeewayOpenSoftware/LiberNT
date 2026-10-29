@@ -675,6 +675,8 @@ LX_SYSCALL(LxSysIoctl)
 
         default:
             Result = (File->Ops->Ioctl != NULL) ? File->Ops->Ioctl(File, Request, Call->Args[2]) : -LX_ENOTTY;
+            if ((Result == -LX_ENOTTY) && LxFileIsSocket(File))
+                Result = LxNetDeviceIoctl(Process, Request, Call->Args[2]);
             break;
     }
 

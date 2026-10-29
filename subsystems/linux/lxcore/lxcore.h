@@ -367,6 +367,7 @@ struct _LX_NS
         struct
         {
             BOOLEAN LoopbackUp;
+            BOOLEAN LoopbackAddressed;
             LONG Sysctl[LX_NET_SYSCTL_COUNT];
         } Net;
         struct
@@ -975,6 +976,7 @@ typedef struct _LX_UNIX_DIAG
 LONG LxUnixDiagCollect(_In_ PLX_NS NetNs, _In_ ULONG64 Ino, _Out_ PLX_UNIX_DIAG *Entries, _Out_ PULONG Count);
 VOID LxUnixDiagFree(_In_opt_ PLX_UNIX_DIAG Entries, _In_ ULONG Count);
 BOOLEAN LxNetlinkIsFile(_In_ PLX_FILE File);
+LONG64 LxNetDeviceIoctl(_In_ PLX_PROCESS Process, _In_ ULONG Request, _In_ ULONG64 Argument);
 ULONG LxNetlinkAddressIndex(_In_ ULONG Address);
 BOOLEAN LxInetIsFile(_In_ PLX_FILE File);
 LONG64 LxInetBind(_In_ PLX_CALL Call, _In_ PLX_FILE File);
