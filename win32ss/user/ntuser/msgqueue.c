@@ -686,7 +686,7 @@ IntCoalesceMouseMove(PTHREADINFO pti)
     pti->MessageQueue->QF_flags &= ~QF_MOUSEMOVED;
 }
 
-VOID FASTCALL
+BOOL FASTCALL
 co_MsqInsertMouseMessage(MSG* Msg, DWORD flags, ULONG_PTR dwExtraInfo, BOOL Hook)
 {
    MSLLHOOKSTRUCT MouseHookData;
@@ -728,12 +728,12 @@ co_MsqInsertMouseMessage(MSG* Msg, DWORD flags, ULONG_PTR dwExtraInfo, BOOL Hook
    if (Hook)
    {
       if (co_HOOK_CallHooks(WH_MOUSE_LL, HC_ACTION, Msg->message, (LPARAM) &MouseHookData))
-         return;
+         return FALSE;
    }
 
    /* Get the desktop window */
    pwndDesktop = UserGetDesktopWindow();
-   if (!pwndDesktop) return;
+   if (!pwndDesktop) return TRUE;
 //   pDesk = pwndDesktop->head.rpdesk;
 
    /* Check if the mouse is captured */
@@ -762,7 +762,7 @@ co_MsqInsertMouseMessage(MSG* Msg, DWORD flags, ULONG_PTR dwExtraInfo, BOOL Hook
        if (MessageQueue->QF_flags & QF_INDESTROY)
        {
           ERR("Mouse is over a Window with a Dead Message Queue!\n");
-          return;
+          return TRUE;
        }
 
        MessageQueue->ptiMouse = pti;
@@ -828,6 +828,8 @@ co_MsqInsertMouseMessage(MSG* Msg, DWORD flags, ULONG_PTR dwExtraInfo, BOOL Hook
        GreMovePointer(hdcScreen, Msg->pt.x, Msg->pt.y);
        CurInfo->ShowingCursor = 0;
    }
+
+   return TRUE;
 }
 
 static LONG64 MsqNextMessageId;
