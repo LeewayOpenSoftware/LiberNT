@@ -1225,7 +1225,7 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
     BOOL bExt = (dwFlags & KEYEVENTF_EXTENDEDKEY) ? TRUE : FALSE;
     BOOL bIsDown = (dwFlags & KEYEVENTF_KEYUP) ? FALSE : TRUE;
     BOOL bPacket = ((dwFlags & KEYEVENTF_UNICODE) && wVk == VK_PACKET) ? TRUE : FALSE;
-    BOOL bWasSimpleDown = FALSE, bPostMsg = TRUE, bIsSimpleDown;
+    BOOL bWasSimpleDown = FALSE, bPostMsg = TRUE, bIsSimpleDown, bStateOnly;
     MSG Msg;
     static BOOL bMenuDownRecently = FALSE;
     BOOL bLangToggled = FALSE;
@@ -1254,6 +1254,7 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
     /* Update key without shifts */
     wVk2 = IntFixVk(wSimpleVk, !bExt);
     bIsSimpleDown = bIsDown || IS_KEY_DOWN(gafAsyncKeyState, wVk2);
+    bStateOnly = (!bIsDown && bIsSimpleDown && wVk2 != wSimpleVk);
 
     if (bIsDown)
     {
@@ -1442,7 +1443,11 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
         /* Post a keyboard message */
         TRACE("Posting keyboard msg %u wParam 0x%x lParam 0x%x\n", Msg.message, Msg.wParam, Msg.lParam);
         if (!Wnd) TRACE("Posting keyboard msg to the focus thread without a window\n");
-        if (!RawInputIsNoLegacy(pti->ppi, RIM_TYPEKEYBOARD))
+        if (bStateOnly)
+        {
+            SET_KEY_DOWN(pti->MessageQueue->afKeyState, wFixedVk & 0xFF, FALSE);
+        }
+        else if (!RawInputIsNoLegacy(pti->ppi, RIM_TYPEKEYBOARD))
         {
             INPUT_MESSAGE_SOURCE KbdSource = { IMDT_KEYBOARD, bInjected ? IMO_INJECTED : IMO_HARDWARE };
             MsqPostMessageEx(pti, &Msg, TRUE, QS_KEY, 0, dwExtraInfo, &KbdSource);
