@@ -2580,6 +2580,29 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
        }
    }
 
+   if (!Entry->bSilent && !(WinPos.flags & SWP_NOREDRAW) && (Window->style & WS_VISIBLE) &&
+       Window->hrgnUpdate != NULL &&
+       Window->spwndParent && !UserIsDesktopWindow(Window->spwndParent) &&
+       (!(WinPos.flags & SWP_NOMOVE) || !(WinPos.flags & SWP_NOSIZE) || (WinPos.flags & SWP_FRAMECHANGED)))
+   {
+      PREGION RgnParent = IntSysCreateRectpRgnIndirect(&Window->rcWindow);
+
+      if (RgnParent)
+      {
+         if (Window->hrgnUpdate != HRGN_WINDOW)
+         {
+            PREGION RgnUpdate = REGION_LockRgn(Window->hrgnUpdate);
+            if (RgnUpdate)
+            {
+               IntGdiCombineRgn(RgnParent, RgnParent, RgnUpdate, RGN_AND);
+               REGION_UnlockRgn(RgnUpdate);
+            }
+         }
+         IntInvalidateWindows(Window->spwndParent, RgnParent, RDW_INVALIDATE | RDW_NOCHILDREN);
+         REGION_Delete(RgnParent);
+      }
+   }
+
    // Fix wine msg test_SetFocus, prevents sending WM_WINDOWPOSCHANGED.
    if ( VisBefore == NULL &&
         VisBeforeJustClient == NULL &&
