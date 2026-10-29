@@ -40,7 +40,7 @@ static VOID RefillSocketBuffer( PAFD_FCB FCB )
         if (FCB->Recv.Content == FCB->Recv.Size)
         {
             /* If there are bytes used, we can solve this problem */
-            if (FCB->Recv.BytesUsed != 0)
+            if (FCB->Recv.BytesUsed != 0 && FCB->Recv.BytesUsed >= FCB->Recv.Size / 2)
             {
                 /* Reposition the unused portion to the beginning of the receive window */
                 RtlMoveMemory(FCB->Recv.Window,
