@@ -350,35 +350,35 @@ if(ARCH STREQUAL "arm64")
         kmArm64/HalArm64Layout.c
         kmArm64/KdArm64Layout.c
         kmArm64/KeArm64.c
-        kmArm64/KeArm64AffinityEx.c
-        kmArm64/KeArm64Apc.c
-        kmArm64/KeArm64Dispatcher.c
-        kmArm64/KeArm64DpcIpi.c
-        kmArm64/KeArm64DpcImportance.c
         kmArm64/KeArm64PmrMigration.c
-        kmArm64/KeArm64WakePlacement.c
         kmArm64/KeArm64Frames.c
         kmArm64/KeArm64Intrinsics.c
-        kmArm64/KeArm64Interrupt.c
-        kmArm64/KeArm64IpiBroadcast.c
         kmArm64/KeArm64IpiPreemption.c
         kmArm64/KeArm64Irql.c
         kmArm64/KeArm64LoaderCache.c
         kmArm64/KeArm64PcrPrcb.c
         kmArm64/KeArm64Profile.c
-        kmArm64/KeArm64ProcessorChange.c
-        kmArm64/KeArm64Smp.c
-        kmArm64/KeArm64SpinLock.c
-        kmArm64/KeArm64ThreadProcess.c
         kmArm64/RtlArm64Context.c
         kmArm64/RtlArm64UnwindLayout.c
-        kmArm64/KeArm64SubNodeSched.c
-        kmArm64/KeArm64Smt.c
-        kmArm64/KeArm64Numa.c)
+        kmArm64/KeArm64DpcIpi.c)
 endif()
 
 if(ARCH STREQUAL "arm64" OR ARCH STREQUAL "riscv64")
     list(APPEND KMTEST_DRV_SOURCE
+        kmArm64/KeArm64AffinityEx.c
+        kmArm64/KeArm64Apc.c
+        kmArm64/KeArm64Dispatcher.c
+        kmArm64/KeArm64DpcImportance.c
+        kmArm64/KeArm64Interrupt.c
+        kmArm64/KeArm64IpiBroadcast.c
+        kmArm64/KeArm64Numa.c
+        kmArm64/KeArm64ProcessorChange.c
+        kmArm64/KeArm64Smp.c
+        kmArm64/KeArm64Smt.c
+        kmArm64/KeArm64SpinLock.c
+        kmArm64/KeArm64SubNodeSched.c
+        kmArm64/KeArm64ThreadProcess.c
+        kmArm64/KeArm64WakePlacement.c
         rtl/Win11NewKM.c
         ntos_mm/MmWin11KM.c
         ntos_mm/MmMdlWin11KM.c
@@ -386,6 +386,7 @@ if(ARCH STREQUAL "arm64" OR ARCH STREQUAL "riscv64")
         ntos_mm/MmSectionWin11KM.c
         ntos_mm/MmPteWin11KM.c)
     set(KMTEST_WIN11_TESTS TRUE)
+    set(KMTEST_SMP_TESTS TRUE)
 endif()
 
 if(ARCH_64BIT)
@@ -439,6 +440,9 @@ if(KMTEST_KSR_APISET)
 endif()
 if(KMTEST_WIN11_TESTS)
     target_compile_definitions(kmtest_drv PRIVATE KMT_WIN11_TESTS)
+endif()
+if(KMTEST_SMP_TESTS)
+    target_compile_definitions(kmtest_drv PRIVATE KMT_SMP_TESTS)
 endif()
 if(KMT_DESTRUCTIVE_BUGCHECK_TESTS)
     target_compile_definitions(kmtest_drv PRIVATE
