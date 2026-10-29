@@ -4766,6 +4766,10 @@ LxVfsSetAttributes(
     {
         Handle = File->Handle;
     }
+    else if ((File == NULL) && (Node != NULL) && (Node->Mount != NULL) && (Node->Mount->Kind == LxFsCgroup))
+    {
+        return LxCgroupSetAttributes(Process, Node, Mode, Uid, Gid);
+    }
     else if ((Node != NULL) && (Node->Mount != NULL) && (Node->Mount->Kind == LxFsNt))
     {
         Error = LxNtOpenHandle(&Node->NtPath, FILE_READ_EA | FILE_WRITE_EA | FILE_READ_ATTRIBUTES, FILE_OPEN, 0, 0, &Handle);

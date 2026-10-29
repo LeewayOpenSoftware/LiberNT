@@ -1475,6 +1475,15 @@ LxSetAttributesFile(
     LX_NODE Node;
     LONG Error;
 
+    if ((File->Handle == NULL) && (File->Mount != NULL) && (File->Mount->Kind == LxFsCgroup) && (File->Path != NULL))
+    {
+        Error = LxLookup(Process, LX_AT_FDCWD, File->Path, 0, &Node);
+        if (Error != 0)
+            return Error;
+        Error = LxVfsSetAttributes(Process, &Node, NULL, Mode, Uid, Gid);
+        LxNodeFree(&Node);
+        return Error;
+    }
     if (((File->Handle == NULL) && (LxTmpfsFileInode(File) == NULL)) || File->NtPipe)
         return 0;
     Error = LxVfsSetAttributes(Process, NULL, File, Mode, Uid, Gid);

@@ -73,6 +73,8 @@ typedef struct _LX_SYNTH
     ULONG Index;
     PLX_CGROUP Cgroup;
     PLX_MOUNT Mount;
+    ULONG Uid;
+    ULONG Gid;
     LX_NS_KIND NsKind;
     CHAR Prefix[128];
     PSTR LinkTarget;
@@ -179,6 +181,15 @@ typedef struct _LX_PID_ENTRY
     PLX_GENERATOR Generator;
     PLX_WRITER Writer;
 } LX_PID_ENTRY, *PLX_PID_ENTRY;
+
+typedef struct _LX_CGROUP_FILE_ATTR
+{
+    LIST_ENTRY Link;
+    ULONG Index;
+    ULONG Uid;
+    ULONG Gid;
+    ULONG Mode;
+} LX_CGROUP_FILE_ATTR, *PLX_CGROUP_FILE_ATTR;
 
 static FAST_MUTEX LxCgroupLock;
 static volatile LONG64 LxCgroupNextId = 1;
@@ -404,7 +415,9 @@ LxCgroupCreateRoot(VOID)
     InitializeListHead(&Root->DeadLink);
     InitializeListHead(&Root->DeadList);
     InitializeListHead(&Root->BpfDevice);
+    InitializeListHead(&Root->FileAttributes);
     LxEventSourceInit(&Root->Events);
+    Root->Mode = 0755;
     Root->PidsLimit = LX_PIDS_MAX;
     Root->Root = Root;
     Root->Id = (ULONG64)InterlockedIncrement64(&LxCgroupNextId);
@@ -432,7 +445,9 @@ LxCgroupCreateChild(
     InitializeListHead(&Child->DeadLink);
     InitializeListHead(&Child->DeadList);
     InitializeListHead(&Child->BpfDevice);
+    InitializeListHead(&Child->FileAttributes);
     LxEventSourceInit(&Child->Events);
+    Child->Mode = 0755;
     Child->PidsLimit = LX_PIDS_MAX;
     Child->Parent = Parent;
     Child->Root = Parent->Root;
@@ -450,6 +465,8 @@ LxCgroupFreeOne(
 {
     while (!IsListEmpty(&Cgroup->Children))
         LxCgroupFreeOne(CONTAINING_RECORD(RemoveHeadList(&Cgroup->Children), LX_CGROUP, Sibling));
+    while (!IsListEmpty(&Cgroup->FileAttributes))
+        LxFree(CONTAINING_RECORD(RemoveHeadList(&Cgroup->FileAttributes), LX_CGROUP_FILE_ATTR, Link));
     LxBpfCgroupRelease(Cgroup);
     LxFree(Cgroup->Name);
     LxFree(Cgroup);
@@ -4615,6 +4632,30 @@ LxCgroupFileAllowed(
 }
 
 static
+VOID
+LxCgroupFileAttributes(
+    _In_ PLX_CGROUP Cgroup,
+    _Inout_ PLX_SYNTH Synth)
+{
+    PLIST_ENTRY Entry;
+
+    ExAcquireFastMutex(&LxCgroupLock);
+    for (Entry = Cgroup->FileAttributes.Flink; Entry != &Cgroup->FileAttributes; Entry = Entry->Flink)
+    {
+        PLX_CGROUP_FILE_ATTR Attr = CONTAINING_RECORD(Entry, LX_CGROUP_FILE_ATTR, Link);
+
+        if (Attr->Index == Synth->Index)
+        {
+            Synth->Uid = Attr->Uid;
+            Synth->Gid = Attr->Gid;
+            Synth->Mode = Attr->Mode;
+            break;
+        }
+    }
+    ExReleaseFastMutex(&LxCgroupLock);
+}
+
+static
 LONG
 LxResolveCgroup(
     _In_ PLX_PROCESS Self,
@@ -4628,11 +4669,13 @@ LxResolveCgroup(
     Cgroup = LxCgroupWalk(((Synth->Mount != NULL) && (Synth->Mount->CgroupRoot != NULL)) ? Synth->Mount->CgroupRoot :
                           Self->Instance->RootCgroup, (PCSTR *)Components, Count, &Consumed);
     Synth->Cgroup = Cgroup;
+    Synth->Uid = Cgroup->Uid;
+    Synth->Gid = Cgroup->Gid;
     if (Consumed == Count)
     {
         Synth->Id = LxCgDir;
         Synth->Type = LX_S_IFDIR;
-        Synth->Mode = 0755;
+        Synth->Mode = Cgroup->Mode;
         return 0;
     }
     if (Consumed + 1 != Count)
@@ -4653,6 +4696,9 @@ LxResolveCgroup(
                            (strstr(LxCgroupFiles[Index], ".effective") != NULL) ||
                            (strcmp(LxCgroupFiles[Index], "cpuset.cpus.isolated") == 0)) ? 0444 : 0644;
             Synth->Index = Index;
+            Synth->Uid = Cgroup->FileUid;
+            Synth->Gid = Cgroup->FileGid;
+            LxCgroupFileAttributes(Cgroup, Synth);
             return 0;
         }
     }
@@ -6258,6 +6304,11 @@ LxSynthStat(
         Stat->Rdev = (5 << 8) | 2;
         Stat->Gid = 5;
     }
+    else if ((Synth.Id == LxCgDir) || (Synth.Id == LxCgFile))
+    {
+        Stat->Uid = Synth.Uid;
+        Stat->Gid = Synth.Gid;
+    }
     if (Synth.Type == LX_S_IFLNK && Synth.LinkTarget != NULL)
         Stat->Size = (LONG64)strlen(Synth.LinkTarget);
 
@@ -6340,6 +6391,90 @@ LxSynthMkdir(
         return -LX_ENOMEM;
     if (Child->Instance == NULL)
         Child->Instance = Process->Instance;
+    Child->Uid = Child->FileUid = Process->Fsuid;
+    Child->Gid = Child->FileGid = Process->Fsgid;
+    return 0;
+}
+
+LONG
+LxCgroupSetAttributes(
+    _In_ PLX_PROCESS Process,
+    _In_ PLX_NODE Node,
+    _In_ ULONG Mode,
+    _In_ ULONG Uid,
+    _In_ ULONG Gid)
+{
+    PLX_CGROUP_FILE_ATTR Attr = NULL, New;
+    PLIST_ENTRY Entry;
+    LX_SYNTH Synth;
+    ULONG Index;
+    LONG Error;
+
+    Error = LxSynthResolve(Process, Node->Mount, Node->Relative, &Synth);
+    if (Error != 0)
+        return Error;
+    LxFree(Synth.LinkTarget);
+    if ((Synth.Id != LxCgDir) && (Synth.Id != LxCgFile))
+        return 0;
+    if ((Uid != MAXULONG) && !((Process->Fsuid == Synth.Uid) && (Uid == Synth.Uid)) &&
+        !LxCapable(Process, LX_CAP_CHOWN))
+    {
+        return -LX_EPERM;
+    }
+    if ((Gid != MAXULONG) && !LxCapable(Process, LX_CAP_CHOWN))
+    {
+        BOOLEAN Allowed = (Process->Fsuid == Synth.Uid) && ((Gid == Synth.Gid) || (Gid == Process->Fsgid));
+
+        for (Index = 0; !Allowed && (Process->Fsuid == Synth.Uid) && (Index < Process->GroupCount); Index++)
+            Allowed = (Process->Groups[Index] == Gid);
+        if (!Allowed)
+            return -LX_EPERM;
+    }
+    if ((Mode != MAXULONG) && (Process->Fsuid != Synth.Uid) && !LxCapable(Process, LX_CAP_FOWNER))
+        return -LX_EPERM;
+
+    New = (Synth.Id == LxCgFile) ? LxAlloc(sizeof(*New)) : NULL;
+    if ((Synth.Id == LxCgFile) && (New == NULL))
+        return -LX_ENOMEM;
+    ExAcquireFastMutex(&LxCgroupLock);
+    if (Synth.Id == LxCgDir)
+    {
+        if (Uid != MAXULONG)
+            Synth.Cgroup->Uid = Uid;
+        if (Gid != MAXULONG)
+            Synth.Cgroup->Gid = Gid;
+        if (Mode != MAXULONG)
+            Synth.Cgroup->Mode = Mode & 07777;
+    }
+    else
+    {
+        for (Entry = Synth.Cgroup->FileAttributes.Flink; Entry != &Synth.Cgroup->FileAttributes; Entry = Entry->Flink)
+        {
+            if (CONTAINING_RECORD(Entry, LX_CGROUP_FILE_ATTR, Link)->Index == Synth.Index)
+            {
+                Attr = CONTAINING_RECORD(Entry, LX_CGROUP_FILE_ATTR, Link);
+                break;
+            }
+        }
+        if (Attr == NULL)
+        {
+            Attr = New;
+            New = NULL;
+            Attr->Index = Synth.Index;
+            Attr->Uid = Synth.Uid;
+            Attr->Gid = Synth.Gid;
+            Attr->Mode = Synth.Mode;
+            InsertTailList(&Synth.Cgroup->FileAttributes, &Attr->Link);
+        }
+        if (Uid != MAXULONG)
+            Attr->Uid = Uid;
+        if (Gid != MAXULONG)
+            Attr->Gid = Gid;
+        if (Mode != MAXULONG)
+            Attr->Mode = Mode & 07777;
+    }
+    ExReleaseFastMutex(&LxCgroupLock);
+    LxFree(New);
     return 0;
 }
 

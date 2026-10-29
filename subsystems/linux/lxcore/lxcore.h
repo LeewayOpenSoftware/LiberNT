@@ -524,6 +524,12 @@ struct _LX_CGROUP
     PLX_INSTANCE Instance;
     PSTR Name;
     CHAR SubtreeControl[64];
+    ULONG Uid;
+    ULONG Gid;
+    ULONG FileUid;
+    ULONG FileGid;
+    ULONG Mode;
+    LIST_ENTRY FileAttributes;
     ULONG Members;
     ULONG Populated;
     ULONG64 Id;
@@ -1224,6 +1230,7 @@ LONG LxSynthQuery(_In_ PLX_PROCESS Process, _In_ PLX_MOUNT Mount, _In_ PCSTR Rel
 LONG LxSynthOpen(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node, _In_ ULONG Flags, _Out_ PLX_FILE *File);
 LONG LxSynthStat(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node, _Out_ PLX_STAT Stat);
 LONG LxSynthMkdir(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node);
+LONG LxCgroupSetAttributes(_In_ PLX_PROCESS Process, _In_ PLX_NODE Node, _In_ ULONG Mode, _In_ ULONG Uid, _In_ ULONG Gid);
 VOID LxTmpfsInitialize(VOID);
 PLX_TMPFS LxTmpfsCreate(_In_ ULONG Mode);
 LONG LxTmpfsParseOptions(_In_ PLX_PROCESS Process, _In_opt_ PCSTR Data, _Inout_ PLX_TMPFS_OPTIONS Options);
