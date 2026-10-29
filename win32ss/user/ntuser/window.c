@@ -806,7 +806,8 @@ LRESULT co_UserFreeWindow(PWND Window,
         (Menu = UserGetMenuObject((HMENU)Window->IDMenu)))
    {
       TRACE("UFW: IDMenu %p\n",Window->IDMenu);
-      IntDestroyMenuObject(Menu, TRUE);
+      if (Menu->hWnd != UserHMGetHandle(Window) || !IntUnlockWindowMenu(Menu))
+         IntDestroyMenuObject(Menu, TRUE);
       Window->IDMenu = 0;
    }
 

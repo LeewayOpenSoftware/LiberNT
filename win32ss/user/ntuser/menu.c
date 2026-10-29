@@ -6065,15 +6065,30 @@ IntSetMenu(
    if (NULL != NewMenu)
    {
       NewMenu->hWnd = UserHMGetHandle(Wnd);
-      IntReleaseMenuObject(NewMenu);
    }
    if (NULL != OldMenu)
    {
+      BOOL Locked = (OldMenu->hWnd == UserHMGetHandle(Wnd));
+
       OldMenu->hWnd = NULL;
       IntReleaseMenuObject(OldMenu);
+      if (Locked)
+         IntUnlockWindowMenu(OldMenu);
    }
 
    return TRUE;
+}
+
+BOOL FASTCALL
+IntUnlockWindowMenu(PMENU Menu)
+{
+   BOOL Destroyed = UserObjectMarkedDestroy(UserHMGetHandle(Menu));
+
+   Menu->hWnd = NULL;
+   IntReleaseMenuObject(Menu);
+   if (Destroyed)
+      IntDestroyMenuObject(Menu, TRUE);
+   return Destroyed;
 }
 
 
