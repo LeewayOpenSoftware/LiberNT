@@ -130,8 +130,8 @@ AddIpv4HostEntries(
 
     PtrRecord.Data.PTR.pNameHost = pszHostName;
 
-    DnsIntCacheAddEntry(&ARecord, TRUE);
-    DnsIntCacheAddEntry(&PtrRecord, TRUE);
+    DnsIntCacheAddEntry(ARecord.pName, DNS_TYPE_A, &ARecord, TRUE);
+    DnsIntCacheAddEntry(PtrRecord.pName, DNS_TYPE_PTR, &PtrRecord, TRUE);
 }
 
 
@@ -184,8 +184,8 @@ AddIpv6HostEntries(
 
     PtrRecord.Data.PTR.pNameHost = pszHostName;
 
-    DnsIntCacheAddEntry(&AAAARecord, TRUE);
-    DnsIntCacheAddEntry(&PtrRecord, TRUE);
+    DnsIntCacheAddEntry(AAAARecord.pName, DNS_TYPE_AAAA, &AAAARecord, TRUE);
+    DnsIntCacheAddEntry(PtrRecord.pName, DNS_TYPE_PTR, &PtrRecord, TRUE);
 }
 
 

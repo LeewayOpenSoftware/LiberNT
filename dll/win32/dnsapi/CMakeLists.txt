@@ -17,6 +17,7 @@ list(APPEND SOURCE
     names.c
     query.c
     record.c
+    resolver.c
     rpc.c
     stubs.c
     precomp.h

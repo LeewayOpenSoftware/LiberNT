@@ -10,6 +10,8 @@
 
 #include "precomp.h"
 #include <winreg.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <iphlpapi.h>
 #include <strsafe.h>
 
@@ -152,36 +154,6 @@ CreateRecordForIpAddress(
  * Reserved             -- Response as it appears on the wire.  Optional.
  */
 
-static PCHAR
-DnsWToC(const WCHAR *WideString)
-{
-    PCHAR AnsiString;
-    int AnsiLen = WideCharToMultiByte(CP_ACP,
-                                      0,
-                                      WideString,
-                                      -1,
-                                      NULL,
-                                      0,
-                                      NULL,
-                                      0);
-    if (AnsiLen == 0)
-        return NULL;
-    AnsiString = RtlAllocateHeap(RtlGetProcessHeap(), 0, AnsiLen);
-    if (AnsiString == NULL)
-    {
-        return NULL;
-    }
-    WideCharToMultiByte(CP_ACP,
-                        0,
-                        WideString,
-                        -1,
-                        AnsiString,
-                        AnsiLen,
-                        NULL,
-                        0);
-
-    return AnsiString;
-}
 
 static PWCHAR
 DnsCToW(const CHAR *NarrowString)
@@ -210,36 +182,6 @@ DnsCToW(const CHAR *NarrowString)
     return WideString;
 }
 
-static PCHAR
-DnsWToUTF8(const WCHAR *WideString)
-{
-    PCHAR AnsiString;
-    int AnsiLen = WideCharToMultiByte(CP_UTF8,
-                                      0,
-                                      WideString,
-                                      -1,
-                                      NULL,
-                                      0,
-                                      NULL,
-                                      0);
-    if (AnsiLen == 0)
-        return NULL;
-    AnsiString = RtlAllocateHeap(RtlGetProcessHeap(), 0, AnsiLen);
-    if (AnsiString == NULL)
-    {
-        return NULL;
-    }
-    WideCharToMultiByte(CP_UTF8,
-                        0,
-                        WideString,
-                        -1,
-                        AnsiString,
-                        AnsiLen,
-                        NULL,
-                        0);
-
-    return AnsiString;
-}
 
 static PWCHAR
 DnsUTF8ToW(const CHAR *NarrowString)
@@ -277,11 +219,9 @@ DnsQuery_CodePage(UINT CodePage,
            PDNS_RECORD *QueryResultSet,
            PVOID *Reserved)
 {
-    UINT i;
     PWCHAR Buffer;
     DNS_STATUS Status;
-    PDNS_RECORD QueryResultWide;
-    PDNS_RECORD ConvertedRecord = 0, LastRecord = 0;
+    PDNS_RECORD QueryResultWide = NULL;
 
     if (Name == NULL)
         return ERROR_INVALID_PARAMETER;
@@ -303,141 +243,17 @@ DnsQuery_CodePage(UINT CodePage,
     }
 
     Status = DnsQuery_W(Buffer, Type, Options, Extra, &QueryResultWide, Reserved);
-
-    while (Status == ERROR_SUCCESS && QueryResultWide)
-    {
-        switch (QueryResultWide->wType)
-        {
-        case DNS_TYPE_A:
-        case DNS_TYPE_WKS:
-        case DNS_TYPE_CNAME:
-        case DNS_TYPE_PTR:
-        case DNS_TYPE_NS:
-        case DNS_TYPE_MB:
-        case DNS_TYPE_MD:
-        case DNS_TYPE_MF:
-        case DNS_TYPE_MG:
-        case DNS_TYPE_MR:
-            ConvertedRecord = RtlAllocateHeap(RtlGetProcessHeap(), 0, sizeof(DNS_RECORD));
-            break;
-
-        case DNS_TYPE_MINFO:
-            ConvertedRecord = RtlAllocateHeap(RtlGetProcessHeap(), 0, sizeof(DNS_TXT_DATA) + QueryResultWide->Data.TXT.dwStringCount);
-            break;
-
-        case DNS_TYPE_NULL:
-            ConvertedRecord = RtlAllocateHeap(RtlGetProcessHeap(), 0, sizeof(DNS_NULL_DATA) + QueryResultWide->Data.Null.dwByteCount);
-            break;
-        }
-        if (ConvertedRecord == NULL)
-        {
-            /* The name */
-            RtlFreeHeap(RtlGetProcessHeap(), 0, Buffer);
-            /* The result*/
-            DnsIntFreeRecordList(QueryResultWide);
-            QueryResultSet = NULL;
-            return ERROR_OUTOFMEMORY;
-        }
-
-        if (CodePage == CP_ACP)
-        {
-            ConvertedRecord->pName = DnsWToC((PWCHAR)QueryResultWide->pName);
-            ConvertedRecord->Flags.S.CharSet = DnsCharSetAnsi;
-        }
-        else
-        {
-            ConvertedRecord->pName = DnsWToUTF8((PWCHAR)QueryResultWide->pName);
-            ConvertedRecord->Flags.S.CharSet = DnsCharSetUtf8;
-        }
-
-        ConvertedRecord->wType = QueryResultWide->wType;
-
-        switch (QueryResultWide->wType)
-        {
-        case DNS_TYPE_A:
-        case DNS_TYPE_WKS:
-            ConvertedRecord->wDataLength = QueryResultWide->wDataLength;
-            memcpy(&ConvertedRecord->Data, &QueryResultWide->Data, QueryResultWide->wDataLength);
-            break;
-
-        case DNS_TYPE_CNAME:
-        case DNS_TYPE_PTR:
-        case DNS_TYPE_NS:
-        case DNS_TYPE_MB:
-        case DNS_TYPE_MD:
-        case DNS_TYPE_MF:
-        case DNS_TYPE_MG:
-        case DNS_TYPE_MR:
-            ConvertedRecord->wDataLength = sizeof(DNS_PTR_DATA);
-            if (CodePage == CP_ACP)
-                ConvertedRecord->Data.PTR.pNameHost = DnsWToC((PWCHAR)QueryResultWide->Data.PTR.pNameHost);
-            else
-                ConvertedRecord->Data.PTR.pNameHost = DnsWToUTF8((PWCHAR)QueryResultWide->Data.PTR.pNameHost);
-            break;
-
-        case DNS_TYPE_MINFO:
-            ConvertedRecord->wDataLength = sizeof(DNS_MINFO_DATA);
-            if (CodePage == CP_ACP)
-            {
-                ConvertedRecord->Data.MINFO.pNameMailbox = DnsWToC((PWCHAR)QueryResultWide->Data.MINFO.pNameMailbox);
-                ConvertedRecord->Data.MINFO.pNameErrorsMailbox = DnsWToC((PWCHAR)QueryResultWide->Data.MINFO.pNameErrorsMailbox);
-            }
-            else
-            {
-                ConvertedRecord->Data.MINFO.pNameMailbox = DnsWToUTF8((PWCHAR)QueryResultWide->Data.MINFO.pNameMailbox);
-                ConvertedRecord->Data.MINFO.pNameErrorsMailbox = DnsWToUTF8((PWCHAR)QueryResultWide->Data.MINFO.pNameErrorsMailbox);
-            }
-            break;
-
-        case DNS_TYPE_MX:
-            ConvertedRecord->wDataLength = sizeof(DNS_MX_DATA);
-            if (CodePage == CP_ACP)
-                ConvertedRecord->Data.MX.pNameExchange = DnsWToC((PWCHAR)QueryResultWide->Data.MX.pNameExchange);
-            else
-                ConvertedRecord->Data.MX.pNameExchange = DnsWToUTF8((PWCHAR)QueryResultWide->Data.MX.pNameExchange);
-            ConvertedRecord->Data.MX.wPreference = QueryResultWide->Data.MX.wPreference;
-            break;
-
-        case DNS_TYPE_HINFO:
-            ConvertedRecord->wDataLength = sizeof(DNS_TXT_DATA) + (sizeof(PCHAR) * QueryResultWide->Data.TXT.dwStringCount);
-            ConvertedRecord->Data.TXT.dwStringCount = QueryResultWide->Data.TXT.dwStringCount;
-
-            if (CodePage == CP_ACP)
-                for (i = 0; i < ConvertedRecord->Data.TXT.dwStringCount; i++)
-                    ConvertedRecord->Data.TXT.pStringArray[i] = DnsWToC((PWCHAR)QueryResultWide->Data.TXT.pStringArray[i]);
-            else
-                for (i = 0; i < ConvertedRecord->Data.TXT.dwStringCount; i++)
-                    ConvertedRecord->Data.TXT.pStringArray[i] = DnsWToUTF8((PWCHAR)QueryResultWide->Data.TXT.pStringArray[i]);
-
-            break;
-
-        case DNS_TYPE_NULL:
-            ConvertedRecord->wDataLength = sizeof(DNS_NULL_DATA) + QueryResultWide->Data.Null.dwByteCount;
-            ConvertedRecord->Data.Null.dwByteCount = QueryResultWide->Data.Null.dwByteCount;
-            memcpy(&ConvertedRecord->Data.Null.Data, &QueryResultWide->Data.Null.Data, QueryResultWide->Data.Null.dwByteCount);
-            break;
-        }
-
-        if (LastRecord)
-        {
-            LastRecord->pNext = ConvertedRecord;
-            LastRecord = LastRecord->pNext;
-        }
-        else
-        {
-            LastRecord = *QueryResultSet = ConvertedRecord;
-        }
-
-        QueryResultWide = QueryResultWide->pNext;
-    }
-
-    if (LastRecord)
-        LastRecord->pNext = 0;
-
-    /* The name */
     RtlFreeHeap(RtlGetProcessHeap(), 0, Buffer);
-    /* The result*/
-    if (QueryResultWide) DnsIntFreeRecordList(QueryResultWide);
+
+    *QueryResultSet = NULL;
+    if (Status == ERROR_SUCCESS && QueryResultWide)
+    {
+        *QueryResultSet = DnsRecordSetCopyEx(QueryResultWide, DnsCharSetUnicode,
+                                             CodePage == CP_ACP ? DnsCharSetAnsi : DnsCharSetUtf8);
+        DnsRecordListFree(QueryResultWide, DnsFreeRecordList);
+        if (!*QueryResultSet)
+            Status = ERROR_OUTOFMEMORY;
+    }
 
     return Status;
 }
@@ -462,6 +278,35 @@ DnsQuery_UTF8(LPCSTR Name,
               PVOID *Reserved)
 {
     return DnsQuery_CodePage(CP_UTF8, Name, Type, Options, Extra, QueryResultSet, Reserved);
+}
+
+static
+BOOL
+IsResolverMarshalledType(WORD Type)
+{
+    switch (Type)
+    {
+    case DNS_TYPE_A:
+    case DNS_TYPE_NS:
+    case DNS_TYPE_MD:
+    case DNS_TYPE_MF:
+    case DNS_TYPE_CNAME:
+    case DNS_TYPE_SOA:
+    case DNS_TYPE_MB:
+    case DNS_TYPE_MG:
+    case DNS_TYPE_MR:
+    case DNS_TYPE_PTR:
+    case DNS_TYPE_MINFO:
+    case DNS_TYPE_MX:
+    case DNS_TYPE_RP:
+    case DNS_TYPE_AFSDB:
+    case DNS_TYPE_RT:
+    case DNS_TYPE_AAAA:
+    case DNS_TYPE_SRV:
+        return TRUE;
+    default:
+        return FALSE;
+    }
 }
 
 DNS_STATUS
@@ -520,6 +365,9 @@ DnsQuery_W(LPCWSTR Name,
         i++;
     }
 
+    if (!IsResolverMarshalledType(Type))
+        return Query_Main(Name, Type, Options, QueryResultSet);
+
     RpcTryExcept
     {
         Status = R_ResolverQuery(NULL,
@@ -536,6 +384,9 @@ DnsQuery_W(LPCWSTR Name,
         DPRINT("Exception returned %lu\n", Status);
     }
     RpcEndExcept;
+
+    if (Status == RPC_S_SERVER_UNAVAILABLE || Status == RPC_S_UNKNOWN_IF || Status == EPT_S_NOT_REGISTERED)
+        Status = Query_Main(Name, Type, Options, QueryResultSet);
 
     return Status;
 }
@@ -577,83 +428,142 @@ CHAR
 }
 
 
-/* This function is far from perfect but it works enough */
-IP4_ADDRESS
-CheckForCurrentHostname(CONST CHAR * Name, PFIXED_INFO network_info)
+static
+BOOL
+IsLocalHostName(LPCWSTR Name)
 {
-    PCHAR TempName;
-    DWORD AdapterAddressesSize, Status;
-    IP4_ADDRESS ret = 0, Address = 0;
-    PIP_ADAPTER_ADDRESSES Addresses = NULL, pip;
+    WCHAR Host[MAX_HOSTNAME_LEN + 1], Domain[MAX_DOMAIN_NAME_LEN + 1], Full[MAX_HOSTNAME_LEN + MAX_DOMAIN_NAME_LEN + 2];
+    PFIXED_INFO Info;
+    ULONG Size = 0;
+    SIZE_T Length = wcslen(Name);
+    WCHAR Query[DNS_MAX_NAME_BUFFER_LENGTH];
     BOOL Found = FALSE;
 
-    if (network_info->DomainName[0])
+    if (!Length || Length >= ARRAYSIZE(Query))
+        return FALSE;
+    StringCchCopyW(Query, ARRAYSIZE(Query), Name);
+    if (Query[Length - 1] == L'.')
+        Query[Length - 1] = UNICODE_NULL;
+
+    if (GetNetworkParams(NULL, &Size) != ERROR_BUFFER_OVERFLOW)
+        return FALSE;
+    Info = RtlAllocateHeap(RtlGetProcessHeap(), 0, Size);
+    if (!Info)
+        return FALSE;
+    if (GetNetworkParams(Info, &Size) == ERROR_SUCCESS)
     {
-        size_t StringLength;
-        size_t TempSize = 2;
-        StringCchLengthA(network_info->HostName, sizeof(network_info->HostName), &StringLength);
-        TempSize += StringLength;
-        StringCchLengthA(network_info->DomainName, sizeof(network_info->DomainName), &StringLength);
-        TempSize += StringLength;
-        TempName = RtlAllocateHeap(RtlGetProcessHeap(), 0, TempSize);
-        StringCchCopyA(TempName, TempSize, network_info->HostName);
-        StringCchCatA(TempName, TempSize, ".");
-        StringCchCatA(TempName, TempSize, network_info->DomainName);
+        MultiByteToWideChar(CP_ACP, 0, Info->HostName, -1, Host, ARRAYSIZE(Host));
+        MultiByteToWideChar(CP_ACP, 0, Info->DomainName, -1, Domain, ARRAYSIZE(Domain));
+        Found = !_wcsicmp(Query, Host);
+        if (!Found && Domain[0] &&
+            SUCCEEDED(StringCchPrintfW(Full, ARRAYSIZE(Full), L"%s.%s", Host, Domain)))
+            Found = !_wcsicmp(Query, Full);
+    }
+    RtlFreeHeap(RtlGetProcessHeap(), 0, Info);
+    return Found;
+}
+
+static
+BOOL
+AppendAddressRecord(LPCWSTR Name, WORD Type, const VOID *Address, PDNS_RECORD **Tail, DWORD Ttl, DWORD Section)
+{
+    PDNS_RECORD Record = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(DNS_RECORD));
+
+    if (!Record)
+        return FALSE;
+    Record->pName = (LPSTR)xstrsave(Name);
+    if (!Record->pName)
+    {
+        RtlFreeHeap(RtlGetProcessHeap(), 0, Record);
+        return FALSE;
+    }
+    Record->wType = Type;
+    Record->Flags.S.Section = Section;
+    Record->Flags.S.CharSet = DnsCharSetUnicode;
+    Record->dwTtl = Ttl;
+    if (Type == DNS_TYPE_A)
+    {
+        Record->wDataLength = sizeof(DNS_A_DATA);
+        CopyMemory(&Record->Data.A.IpAddress, Address, sizeof(IP4_ADDRESS));
     }
     else
     {
-        TempName = RtlAllocateHeap(RtlGetProcessHeap(), 0, 1);
-        TempName[0] = 0;
+        Record->wDataLength = sizeof(DNS_AAAA_DATA);
+        CopyMemory(&Record->Data.AAAA.Ip6Address, Address, sizeof(IP6_ADDRESS));
     }
-    Found = !_stricmp(Name, network_info->HostName) || !_stricmp(Name, TempName);
-    RtlFreeHeap(RtlGetProcessHeap(), 0, TempName);
-    if (!Found)
-    {
-        return 0;
-    }
-    ret = htonl(INADDR_LOOPBACK);
-    /* get adapter info */
-    AdapterAddressesSize = 0;
-    GetAdaptersAddresses(AF_INET,
-                         GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_SKIP_DNS_SERVER |
-                         GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
-                         NULL,
-                         Addresses,
-                         &AdapterAddressesSize);
-    if (!AdapterAddressesSize)
-    {
-        return ret;
-    }
-    Addresses = RtlAllocateHeap(RtlGetProcessHeap(), 0, AdapterAddressesSize);
-    if (!Addresses)
-    {
-        return ret;
-    }
-    Status = GetAdaptersAddresses(AF_INET,
-                                  GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_SKIP_DNS_SERVER |
-                                  GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
-                                  NULL,
-                                  Addresses,
-                                  &AdapterAddressesSize);
-    if (Status)
-    {
-        RtlFreeHeap(RtlGetProcessHeap(), 0, Addresses);
-        return ret;
-    }
-    for (pip = Addresses; pip != NULL; pip = pip->Next) {
-        if (!pip->FirstUnicastAddress)
-            continue;
-        Address = ((LPSOCKADDR_IN)pip->FirstUnicastAddress->Address.lpSockaddr)->sin_addr.S_un.S_addr;
-        if (Address && Address != htonl(INADDR_LOOPBACK))
-        {
-            ret = Address;
-            break;
-        }
-    }
-    RtlFreeHeap(RtlGetProcessHeap(), 0, Addresses);
-    return ret;
+    **Tail = Record;
+    *Tail = &Record->pNext;
+    return TRUE;
 }
 
+static
+DNS_STATUS
+QueryLocalName(LPCWSTR Name, WORD Type, PDNS_RECORD *Result)
+{
+    static const IN6_ADDR Loopback6 = {{IN6ADDR_LOOPBACK_INIT}};
+    PDNS_RECORD *Tail = Result;
+    PIP_ADAPTER_ADDRESSES List, Adapter;
+    ULONG Size = 16384;
+    DWORD Error;
+    IP4_ADDRESS Loopback4 = htonl(INADDR_LOOPBACK);
+
+    if (!_wcsicmp(Name, L"localhost") || !_wcsicmp(Name, L"localhost."))
+    {
+        if (Type == DNS_TYPE_A)
+            return AppendAddressRecord(Name, Type, &Loopback4, &Tail, 1200, DnsSectionQuestion) ? ERROR_SUCCESS : ERROR_OUTOFMEMORY;
+        if (Type == DNS_TYPE_AAAA)
+            return AppendAddressRecord(Name, Type, &Loopback6, &Tail, 1200, DnsSectionQuestion) ? ERROR_SUCCESS : ERROR_OUTOFMEMORY;
+        return DNS_INFO_NO_RECORDS;
+    }
+
+    if ((Type != DNS_TYPE_A && Type != DNS_TYPE_AAAA) || !IsLocalHostName(Name))
+        return ERROR_FILE_NOT_FOUND;
+
+    for (;;)
+    {
+        List = RtlAllocateHeap(RtlGetProcessHeap(), 0, Size);
+        if (!List)
+            return ERROR_OUTOFMEMORY;
+        Error = GetAdaptersAddresses(Type == DNS_TYPE_A ? AF_INET : AF_INET6,
+                                     GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_SKIP_DNS_SERVER |
+                                     GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
+                                     NULL, List, &Size);
+        if (Error != ERROR_BUFFER_OVERFLOW)
+            break;
+        RtlFreeHeap(RtlGetProcessHeap(), 0, List);
+    }
+
+    if (Error == ERROR_SUCCESS)
+    {
+        for (Adapter = List; Adapter; Adapter = Adapter->Next)
+        {
+            PIP_ADAPTER_UNICAST_ADDRESS Unicast;
+
+            if (Adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK || Adapter->OperStatus != IfOperStatusUp)
+                continue;
+            for (Unicast = Adapter->FirstUnicastAddress; Unicast; Unicast = Unicast->Next)
+            {
+                const SOCKADDR *Address = Unicast->Address.lpSockaddr;
+
+                if (Unicast->DadState != IpDadStatePreferred && Unicast->DadState != IpDadStateDeprecated)
+                    continue;
+                if (Type == DNS_TYPE_A && Address->sa_family == AF_INET)
+                    AppendAddressRecord(Name, Type, &((const SOCKADDR_IN *)Address)->sin_addr, &Tail, 0, DnsSectionAnswer);
+                else if (Type == DNS_TYPE_AAAA && Address->sa_family == AF_INET6)
+                    AppendAddressRecord(Name, Type, &((const SOCKADDR_IN6 *)Address)->sin6_addr, &Tail, 0, DnsSectionAnswer);
+            }
+        }
+    }
+    RtlFreeHeap(RtlGetProcessHeap(), 0, List);
+
+    if (!*Result)
+    {
+        if (Type == DNS_TYPE_A)
+            return AppendAddressRecord(Name, Type, &Loopback4, &Tail, 0, DnsSectionAnswer) ? ERROR_SUCCESS : ERROR_OUTOFMEMORY;
+        return AppendAddressRecord(Name, Type, &Loopback6, &Tail, 0, DnsSectionAnswer) ? ERROR_SUCCESS : ERROR_OUTOFMEMORY;
+    }
+    return ERROR_SUCCESS;
+}
 
 DNS_STATUS
 WINAPI
@@ -662,233 +572,18 @@ Query_Main(LPCWSTR Name,
            DWORD Options,
            PDNS_RECORD *QueryResultSet)
 {
-    adns_state astate;
-    int quflags = (Options & DNS_QUERY_NO_RECURSION) == 0 ? adns_qf_search : 0;
-    int adns_error;
-    adns_answer *answer;
-    LPSTR CurrentName;
-    unsigned CNameLoop;
-    PFIXED_INFO network_info;
-    ULONG network_info_blen = 0;
-    DWORD network_info_result;
-    PIP_ADDR_STRING pip;
-    IP4_ADDRESS Address;
-    struct in_addr addr;
-    PCHAR HostWithDomainName;
-    PCHAR AnsiName;
-    size_t NameLen = 0;
+    DNS_STATUS Status;
 
-    if (Name == NULL)
-        return ERROR_INVALID_PARAMETER;
-    if (QueryResultSet == NULL)
+    if (Name == NULL || QueryResultSet == NULL)
         return ERROR_INVALID_PARAMETER;
 
     *QueryResultSet = NULL;
 
-    switch (Type)
-    {
-    case DNS_TYPE_A:
-        /* FIXME: how much instead of MAX_PATH? */
-        NameLen = WideCharToMultiByte(CP_ACP,
-                                      0,
-                                      Name,
-                                      -1,
-                                      NULL,
-                                      0,
-                                      NULL,
-                                      0);
-        AnsiName = RtlAllocateHeap(RtlGetProcessHeap(), 0, NameLen);
-        if (NULL == AnsiName)
-        {
-            return ERROR_OUTOFMEMORY;
-        }
-        WideCharToMultiByte(CP_ACP,
-                            0,
-                            Name,
-                            -1,
-                            AnsiName,
-                            NameLen,
-                            NULL,
-                            0);
-        NameLen--;
+    Status = QueryLocalName(Name, Type, QueryResultSet);
+    if (Status != ERROR_FILE_NOT_FOUND)
+        return Status;
 
-        network_info_result = GetNetworkParams(NULL, &network_info_blen);
-        network_info = (PFIXED_INFO)RtlAllocateHeap(RtlGetProcessHeap(), 0, (size_t)network_info_blen);
-        if (NULL == network_info)
-        {
-            return ERROR_OUTOFMEMORY;
-        }
-
-        network_info_result = GetNetworkParams(network_info, &network_info_blen);
-        if (network_info_result != ERROR_SUCCESS)
-        {
-            RtlFreeHeap(RtlGetProcessHeap(), 0, network_info);
-            return network_info_result;
-        }
-
-        if ((Address = CheckForCurrentHostname(NameLen != 0 ? AnsiName : network_info->HostName, network_info)) != 0)
-        {
-            size_t TempLen = 2, StringLength = 0;
-            RtlFreeHeap(RtlGetProcessHeap(), 0, AnsiName);
-            StringCchLengthA(network_info->HostName, sizeof(network_info->HostName), &StringLength);
-            TempLen += StringLength;
-            StringCchLengthA(network_info->DomainName, sizeof(network_info->DomainName), &StringLength);
-            TempLen += StringLength;
-            HostWithDomainName = (PCHAR)RtlAllocateHeap(RtlGetProcessHeap(), 0, TempLen);
-            StringCchCopyA(HostWithDomainName, TempLen, network_info->HostName);
-            if (network_info->DomainName[0])
-            {
-                StringCchCatA(HostWithDomainName, TempLen, ".");
-                StringCchCatA(HostWithDomainName, TempLen, network_info->DomainName);
-            }
-            RtlFreeHeap(RtlGetProcessHeap(), 0, network_info);
-            *QueryResultSet = (PDNS_RECORD)RtlAllocateHeap(RtlGetProcessHeap(), 0, sizeof(DNS_RECORD));
-
-            if (NULL == *QueryResultSet)
-            {
-                RtlFreeHeap(RtlGetProcessHeap(), 0, HostWithDomainName);
-                return ERROR_OUTOFMEMORY;
-            }
-
-            (*QueryResultSet)->pNext = NULL;
-            (*QueryResultSet)->wType = Type;
-            (*QueryResultSet)->wDataLength = sizeof(DNS_A_DATA);
-            (*QueryResultSet)->Flags.S.Section = DnsSectionAnswer;
-            (*QueryResultSet)->Flags.S.CharSet = DnsCharSetUnicode;
-            (*QueryResultSet)->Data.A.IpAddress = Address;
-
-            (*QueryResultSet)->pName = (LPSTR)DnsCToW(HostWithDomainName);
-
-            RtlFreeHeap(RtlGetProcessHeap(), 0, HostWithDomainName);
-            return (*QueryResultSet)->pName ? ERROR_SUCCESS : ERROR_OUTOFMEMORY;
-        }
-
-        if ((Options & DNS_QUERY_NO_WIRE_QUERY) != 0)
-        {
-            RtlFreeHeap(RtlGetProcessHeap(), 0, AnsiName);
-            RtlFreeHeap(RtlGetProcessHeap(), 0, network_info);
-            return ERROR_FILE_NOT_FOUND;
-        }
-
-        adns_error = adns_init(&astate, adns_if_noenv | adns_if_noerrprint | adns_if_noserverwarn, 0);
-        if (adns_error != adns_s_ok)
-        {
-            RtlFreeHeap(RtlGetProcessHeap(), 0, AnsiName);
-            RtlFreeHeap(RtlGetProcessHeap(), 0, network_info);
-            return DnsIntTranslateAdnsToDNS_STATUS(adns_error);
-        }
-        for (pip = &(network_info->DnsServerList); pip; pip = pip->Next)
-        {
-            addr.s_addr = inet_addr(pip->IpAddress.String);
-            if ((addr.s_addr != INADDR_ANY) && (addr.s_addr != INADDR_NONE))
-                adns_addserver(astate, addr);
-        }
-        if (network_info->DomainName[0])
-        {
-            adns_ccf_search(astate, "LOCALDOMAIN", -1, network_info->DomainName);
-        }
-        RtlFreeHeap(RtlGetProcessHeap(), 0, network_info);
-
-        if (!adns_numservers(astate))
-        {
-            /* There are no servers to query so bail out */
-            adns_finish(astate);
-            RtlFreeHeap(RtlGetProcessHeap(), 0, AnsiName);
-            return ERROR_FILE_NOT_FOUND;
-        }
-
-        /*
-        * adns doesn't resolve chained CNAME records (a CNAME which points to
-        * another CNAME pointing to another... pointing to an A record), according
-        * to a mailing list thread the authors believe that chained CNAME records
-        * are invalid and the DNS entries should be fixed. That's a nice academic
-        * standpoint, but there certainly are chained CNAME records out there,
-        * even some fairly major ones (at the time of this writing
-        * download.mozilla.org is a chained CNAME). Everyone else seems to resolve
-        * these fine, so we should too. So we loop here to try to resolve CNAME
-        * chains ourselves. Of course, there must be a limit to protect against
-        * CNAME loops.
-        */
-
-#define CNAME_LOOP_MAX 16
-
-        CurrentName = AnsiName;
-
-        for (CNameLoop = 0; CNameLoop < CNAME_LOOP_MAX; CNameLoop++)
-        {
-            adns_error = adns_synchronous(astate, CurrentName, adns_r_addr, quflags, &answer);
-
-            if (adns_error != adns_s_ok)
-            {
-                adns_finish(astate);
-
-                if (CurrentName != AnsiName)
-                    RtlFreeHeap(RtlGetProcessHeap(), 0, CurrentName);
-
-                RtlFreeHeap(RtlGetProcessHeap(), 0, AnsiName);
-                return DnsIntTranslateAdnsToDNS_STATUS(adns_error);
-            }
-
-            if (answer && answer->rrs.addr)
-            {
-                if (CurrentName != AnsiName)
-                    RtlFreeHeap(RtlGetProcessHeap(), 0, CurrentName);
-
-                RtlFreeHeap(RtlGetProcessHeap(), 0, AnsiName);
-                *QueryResultSet = (PDNS_RECORD)RtlAllocateHeap(RtlGetProcessHeap(), 0, sizeof(DNS_RECORD));
-
-                if (NULL == *QueryResultSet)
-                {
-                    adns_finish(astate);
-                    return ERROR_OUTOFMEMORY;
-                }
-
-                (*QueryResultSet)->pNext = NULL;
-                (*QueryResultSet)->wType = Type;
-                (*QueryResultSet)->wDataLength = sizeof(DNS_A_DATA);
-                (*QueryResultSet)->Flags.S.Section = DnsSectionAnswer;
-                (*QueryResultSet)->Flags.S.CharSet = DnsCharSetUnicode;
-                (*QueryResultSet)->Data.A.IpAddress = answer->rrs.addr->addr.inet.sin_addr.s_addr;
-
-                adns_finish(astate);
-
-                (*QueryResultSet)->pName = (LPSTR)xstrsave(Name);
-
-                return (*QueryResultSet)->pName ? ERROR_SUCCESS : ERROR_OUTOFMEMORY;
-            }
-
-            if (NULL == answer || adns_s_prohibitedcname != answer->status || NULL == answer->cname)
-            {
-                adns_finish(astate);
-
-                if (CurrentName != AnsiName)
-                    RtlFreeHeap(RtlGetProcessHeap(), 0, CurrentName);
-
-                RtlFreeHeap(RtlGetProcessHeap(), 0, AnsiName);
-                return ERROR_FILE_NOT_FOUND;
-            }
-
-            if (CurrentName != AnsiName)
-                RtlFreeHeap(RtlGetProcessHeap(), 0, CurrentName);
-
-            CurrentName = (LPSTR)xstrsaveA(answer->cname);
-
-            if (!CurrentName)
-            {
-                RtlFreeHeap(RtlGetProcessHeap(), 0, AnsiName);
-                adns_finish(astate);
-                return ERROR_OUTOFMEMORY;
-            }
-        }
-
-        adns_finish(astate);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, AnsiName);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, CurrentName);
-        return ERROR_FILE_NOT_FOUND;
-
-    default:
-        return ERROR_OUTOFMEMORY; /* XXX arty: find a better error code. */
-    }
+    return DnsIntResolve(Name, Type, Options, (PDNS_RECORDW *)QueryResultSet);
 }
 
 void
@@ -915,9 +610,22 @@ DnsIntFreeRecordList(PDNS_RECORD ToDelete)
                 RtlFreeHeap(RtlGetProcessHeap(), 0, ToDelete->Data.PTR.pNameHost);
                 break;
 
-            case DNS_TYPE_MINFO:
             case DNS_TYPE_MX:
                 RtlFreeHeap(RtlGetProcessHeap(), 0, ToDelete->Data.MX.pNameExchange);
+                break;
+
+            case DNS_TYPE_MINFO:
+                RtlFreeHeap(RtlGetProcessHeap(), 0, ToDelete->Data.MINFO.pNameMailbox);
+                RtlFreeHeap(RtlGetProcessHeap(), 0, ToDelete->Data.MINFO.pNameErrorsMailbox);
+                break;
+
+            case DNS_TYPE_SOA:
+                RtlFreeHeap(RtlGetProcessHeap(), 0, ToDelete->Data.SOA.pNamePrimaryServer);
+                RtlFreeHeap(RtlGetProcessHeap(), 0, ToDelete->Data.SOA.pNameAdministrator);
+                break;
+
+            case DNS_TYPE_SRV:
+                RtlFreeHeap(RtlGetProcessHeap(), 0, ToDelete->Data.SRV.pNameTarget);
                 break;
 
             case DNS_TYPE_HINFO:
@@ -925,6 +633,11 @@ DnsIntFreeRecordList(PDNS_RECORD ToDelete)
                     RtlFreeHeap(RtlGetProcessHeap(), 0, ToDelete->Data.TXT.pStringArray[i]);
 
                 RtlFreeHeap(RtlGetProcessHeap(), 0, ToDelete->Data.TXT.pStringArray);
+                break;
+
+            case DNS_TYPE_TEXT:
+                for(i = 0; i < ToDelete->Data.TXT.dwStringCount; i++)
+                    RtlFreeHeap(RtlGetProcessHeap(), 0, ToDelete->Data.TXT.pStringArray[i]);
                 break;
         }
 
