@@ -391,6 +391,7 @@ HRESULT STDMETHODCALLTYPE  CMenuBand::GetBandInfo(
 HRESULT STDMETHODCALLTYPE  CMenuBand::ShowDW(BOOL fShow)
 {
     HRESULT hr = S_OK;
+    HRESULT hrInitMenu = S_OK;
 
     if (m_Show == fShow)
         return S_OK;
@@ -416,6 +417,7 @@ HRESULT STDMETHODCALLTYPE  CMenuBand::ShowDW(BOOL fShow)
         hr = _CallCB(SMC_INITMENU, 0, 0);
         if (FAILED_UNEXPECTEDLY(hr))
             return hr;
+        hrInitMenu = hr;
     }
     else if (m_parentBand)
     {
@@ -437,7 +439,7 @@ HRESULT STDMETHODCALLTYPE  CMenuBand::ShowDW(BOOL fShow)
             hr = m_focusManager->PopMenuBar(this);
     }
 
-    return S_OK;
+    return hrInitMenu;
 }
 
 HRESULT STDMETHODCALLTYPE CMenuBand::CloseDW(DWORD dwReserved)

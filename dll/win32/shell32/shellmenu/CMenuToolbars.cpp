@@ -520,10 +520,7 @@ HRESULT CMenuToolbarBase::GetWindow(HWND *phwnd)
     if (!phwnd)
         return E_FAIL;
 
-    if (m_pager.m_hWnd)
-        *phwnd = m_pager.m_hWnd;
-    else
-        *phwnd = m_hWnd;
+    *phwnd = m_hWnd;
 
     return S_OK;
 }
