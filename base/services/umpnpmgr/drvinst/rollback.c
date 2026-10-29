@@ -32,6 +32,13 @@
 #define CLASS_KEY             L"SYSTEM\\CurrentControlSet\\Control\\Class\\"
 #define SERVICES_KEY          L"SYSTEM\\CurrentControlSet\\Services\\"
 
+static LONG
+OpenPath(
+    _In_ HKEY hRoot,
+    _In_ PCWSTR Path,
+    _In_ REGSAM Sam,
+    _Out_ PHKEY phKey);
+
 /* One snapshot sequence counter for the whole service; ExecuteJob serializes
  * installs, but the counter also feeds future manual paths. */
 static CRITICAL_SECTION SnapshotLock;
@@ -53,6 +60,63 @@ EncodeDeviceId(
         *Encoded++ = (*DeviceInstanceId == L'\\') ? L'!' : *DeviceInstanceId;
     }
     *Encoded = UNICODE_NULL;
+}
+
+/* TRUE when another devnode under Enum names the same service. */
+static BOOL
+IsServiceReferencedElsewhere(
+    _In_ PCWSTR ServiceName,
+    _In_ PCWSTR ExcludeDeviceId)
+{
+    static const WCHAR EnumPath[] = L"SYSTEM\\CurrentControlSet\\Enum";
+    WCHAR EnumName[64], DevName[256], InstName[DRVINST_DEVICE_ID_CCH];
+    WCHAR FullId[768], Service[128];
+    HKEY hEnum = NULL, hDev = NULL, hInst = NULL;
+    DWORD i, j, k, Size, ServiceSize;
+    BOOL Referenced = FALSE;
+
+    if (OpenPath(HKEY_LOCAL_MACHINE, EnumPath, KEY_READ, &hEnum) != ERROR_SUCCESS)
+        return FALSE;
+
+    for (i = 0; !Referenced; i++)
+    {
+        Size = RTL_NUMBER_OF(EnumName);
+        if (RegEnumKeyExW(hEnum, i, EnumName, &Size, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+            break;
+        if (OpenPath(hEnum, EnumName, KEY_READ, &hDev) != ERROR_SUCCESS)
+            continue;
+        for (j = 0; !Referenced; j++)
+        {
+            Size = RTL_NUMBER_OF(DevName);
+            if (RegEnumKeyExW(hDev, j, DevName, &Size, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+                break;
+            if (OpenPath(hDev, DevName, KEY_READ, &hInst) != ERROR_SUCCESS)
+                continue;
+            for (k = 0; !Referenced; k++)
+            {
+                Size = RTL_NUMBER_OF(InstName);
+                if (RegEnumKeyExW(hInst, k, InstName, &Size, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+                    break;
+                _snwprintf(FullId, RTL_NUMBER_OF(FullId), L"%s\\%s\\%s", EnumName, DevName, InstName);
+                FullId[RTL_NUMBER_OF(FullId) - 1] = UNICODE_NULL;
+                if (!lstrcmpW(FullId, ExcludeDeviceId))
+                    continue;
+                ServiceSize = sizeof(Service);
+                if (RegGetValueW(hInst, InstName, L"Service", RRF_RT_REG_SZ, NULL,
+                                 Service, &ServiceSize) == ERROR_SUCCESS &&
+                    !lstrcmpW(Service, ServiceName))
+                    Referenced = TRUE;
+            }
+            RegCloseKey(hInst);
+            hInst = NULL;
+        }
+        RegCloseKey(hDev);
+        hDev = NULL;
+    }
+
+    if (hEnum)
+        RegCloseKey(hEnum);
+    return Referenced;
 }
 
 /* A service or key leaf name taken from the registry must not be able to
@@ -610,6 +674,9 @@ DrvInstRollbackDeviceToSeq(
     ServiceName[0] = UNICODE_NULL;
     ClassPath[0] = UNICODE_NULL;
 
+    if (!DeviceInstanceId[0] || !IsValidDeviceInstanceId(DeviceInstanceId))
+        return ERROR_INVALID_PARAMETER;
+
     Error = OpenPath(HKEY_LOCAL_MACHINE, DRVINST_REG_SNAPSHOTS, KEY_READ, &hSnapshots);
     if (Error != ERROR_SUCCESS)
         goto Cleanup;
@@ -681,13 +748,13 @@ DrvInstRollbackDeviceToSeq(
             hSnap = NULL;
         }
     }
-    if (Error == ERROR_SUCCESS && CurrentDriver[0])
+    if (Error == ERROR_SUCCESS && CurrentDriver[0] && IsSafeKeyName(CurrentDriver))
     {
         Size = sizeof(RestoredDriver);
         if (RegGetValueW(HKEY_LOCAL_MACHINE, Path, L"Driver", RRF_RT_REG_SZ, NULL,
-                         RestoredDriver, &Size) == ERROR_SUCCESS &&
-            lstrcmpW(RestoredDriver, CurrentDriver) != 0 &&
-            IsSafeKeyName(CurrentDriver))
+                         RestoredDriver, &Size) != ERROR_SUCCESS)
+            RestoredDriver[0] = UNICODE_NULL;
+        if (RestoredDriver[0] == UNICODE_NULL || lstrcmpW(RestoredDriver, CurrentDriver) != 0)
         {
             WCHAR Orphan[512];
 
@@ -737,10 +804,22 @@ DrvInstRollbackDeviceToSeq(
                          &Start, &Size) != ERROR_SUCCESS)
             Start = 0xFFFFFFFF;
         if (Start == SERVICE_DEMAND_START || Start == SERVICE_DISABLED)
-            RegDeleteTreeW(HKEY_LOCAL_MACHINE, ServicePath);
+        {
+            if (IsServiceReferencedElsewhere(CurrentService, DeviceInstanceId))
+            {
+                DPRINT1("Keeping service %ls after rollback of %ls (other device uses it)\n",
+                        CurrentService, DeviceInstanceId);
+            }
+            else
+            {
+                RegDeleteTreeW(HKEY_LOCAL_MACHINE, ServicePath);
+            }
+        }
         else if (Start != 0xFFFFFFFF)
+        {
             DPRINT1("Keeping service %ls after rollback of %ls (start %lu)\n",
                     CurrentService, DeviceInstanceId, Start);
+        }
     }
     if (Error != ERROR_SUCCESS)
         goto Cleanup;

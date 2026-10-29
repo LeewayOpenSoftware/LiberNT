@@ -122,6 +122,10 @@ VOID
 DrvInstInitialize(VOID);
 
 BOOL
+IsValidDeviceInstanceId(
+    _In_ PCWSTR DeviceInstanceId);
+
+BOOL
 DrvInstUseWorker(VOID);
 
 BOOL

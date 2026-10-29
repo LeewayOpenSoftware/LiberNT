@@ -41,7 +41,10 @@ DrvInstAcquireInstallLock(
 {
     if (!JobsInitialized)
         return ERROR_SERVICE_NOT_ACTIVE;
-    return WaitForSingleObject(hRunMutex, TimeoutMs) == WAIT_OBJECT_0 ? ERROR_SUCCESS : ERROR_BUSY;
+    {
+        DWORD Wait = WaitForSingleObject(hRunMutex, TimeoutMs);
+        return (Wait == WAIT_OBJECT_0 || Wait == WAIT_ABANDONED) ? ERROR_SUCCESS : ERROR_BUSY;
+    }
 }
 
 VOID
@@ -86,7 +89,7 @@ AllocateJob(VOID)
     return Oldest;
 }
 
-static BOOL
+BOOL
 IsValidDeviceInstanceId(
     _In_ PCWSTR DeviceInstanceId)
 {
