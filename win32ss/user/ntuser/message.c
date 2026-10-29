@@ -2590,6 +2590,8 @@ IntUipiIsAllowed(PPROCESSINFO ppiSender, PPROCESSINFO ppiTarget, PWND Window, UI
         return TRUE;
     if (IntGetProcessIntegrity(ppiSender->peProcess) >= IntUipiGetTargetIntegrity(ppiTarget, Window))
         return TRUE;
+    if (Window && Window->fnid == FNID_DESKTOP)
+        return TRUE;
 
     for (i = 0; i < RTL_NUMBER_OF(gUipiAllowedMessages); i++)
     {
