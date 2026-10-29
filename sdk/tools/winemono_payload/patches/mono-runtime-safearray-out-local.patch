@@ -1,0 +1,22 @@
+--- a/mono/metadata/cominterop.c
++++ b/mono/metadata/cominterop.c
+@@ -4265,15 +4265,15 @@
+ #ifndef DISABLE_JIT
+ 	switch (action) {
+ 	case MARSHAL_ACTION_CONV_IN: {
++		MonoType *int_type = mono_get_int_type ();
++		*conv_arg_type = int_type;
++		conv_arg = mono_mb_add_local (mb, int_type);
++
+ 		if ((t->attrs & (PARAM_ATTRIBUTE_IN | PARAM_ATTRIBUTE_OUT)) == PARAM_ATTRIBUTE_OUT)
+ 			break;
+ 
+ 		/* conv = mono_marshal_safearray_from_array (array, elem_type); */
+ 
+-		MonoType *int_type = mono_get_int_type ();
+-		*conv_arg_type = int_type;
+-		conv_arg = mono_mb_add_local (mb, int_type);
+-
+ 		if (t->byref) {
+ 			mono_mb_emit_ldarg (mb, argnum);
+ 			mono_mb_emit_byte (mb, CEE_LDIND_REF);
