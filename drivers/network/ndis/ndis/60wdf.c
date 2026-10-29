@@ -327,13 +327,51 @@ NdisLWMInitializeNetworkInterface(
     _In_ GUID const * InterfaceGuid,
     _Out_ PNDIS_HANDLE NdisMiniportAdapterHandle)
 {
-    UNREFERENCED_PARAMETER(NdisLwmDriverHandle);
-    UNREFERENCED_PARAMETER(MiniportAdapterContext);
-    UNREFERENCED_PARAMETER(InterfaceGuid);
+    PNDIS6_DRIVER_BLOCK Block = (PNDIS6_DRIVER_BLOCK)NdisLwmDriverHandle;
+    PLOGICAL_ADAPTER Adapter;
+    NDIS_STATUS Status;
 
-    /* TODO: create lightweight miniport interfaces without a PnP device */
+    if (NdisMiniportAdapterHandle == NULL)
+        return NDIS_STATUS_INVALID_PARAMETER;
+
     *NdisMiniportAdapterHandle = NULL;
-    return NDIS_STATUS_NOT_SUPPORTED;
+    if (Block == NULL || Block->Signature != NDIS6_DRIVER_BLOCK_SIGNATURE || !Block->IsLwm ||
+        InterfaceGuid == NULL)
+    {
+        return NDIS_STATUS_INVALID_PARAMETER;
+    }
+
+    Status = Ndis6CreateLwmInstance(Block, InterfaceGuid, MiniportAdapterContext, &Adapter);
+    if (Status == NDIS_STATUS_SUCCESS)
+        *NdisMiniportAdapterHandle = (NDIS_HANDLE)Adapter;
+    return Status;
+}
+
+static
+VOID
+NTAPI
+Ndis6LwmStartWorker(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _In_opt_ PVOID Context)
+{
+    PLOGICAL_ADAPTER Adapter = Context;
+    PNDIS6_ADAPTER_EXT Ext = NDIS6_EXT(Adapter);
+    extern VOID Ndis6BindAllProtocolsToAdapter(PLOGICAL_ADAPTER);
+
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    if (Ndis6AttachFiltersToAdapter(Adapter) == NDIS_STATUS_SUCCESS)
+    {
+        Ndis6BindAllProtocolsToAdapter(Adapter);
+        if (Ndis6RestartDriverStack(Adapter) == NDIS_STATUS_SUCCESS)
+            ndisQueueProtocolBinding();
+    }
+    else
+    {
+        DbgPrint("NDIS6: mandatory filter attach failed on a lightweight miniport\n");
+    }
+
+    KeSetEvent(&Ext->LwmStartDoneEvent, IO_NO_INCREMENT, FALSE);
 }
 
 NDIS_STATUS
@@ -341,10 +379,31 @@ NTAPI
 NdisLWMStartNetworkInterface(
     _In_ NDIS_HANDLE NdisMiniportAdapterHandle)
 {
-    UNREFERENCED_PARAMETER(NdisMiniportAdapterHandle);
+    PLOGICAL_ADAPTER Adapter = NdisMiniportAdapterHandle;
+    PNDIS6_ADAPTER_EXT Ext;
 
-    /* TODO: start lightweight miniport interfaces */
-    return NDIS_STATUS_NOT_SUPPORTED;
+    if (Adapter == NULL || !Adapter->IsNdis6)
+        return NDIS_STATUS_INVALID_PARAMETER;
+
+    Ext = NDIS6_EXT(Adapter);
+    if (Ext == NULL || Ext->DriverBlock == NULL || !Ext->DriverBlock->IsLwm)
+        return NDIS_STATUS_INVALID_PARAMETER;
+
+    if (Ext->Initialized || !Ext->RegistrationAttrsValid || !Ext->GeneralAttrsValid)
+        return NDIS_STATUS_INVALID_DEVICE_REQUEST;
+
+    if (Ext->LwmStartWorkItem == NULL)
+    {
+        Ext->LwmStartWorkItem = IoAllocateWorkItem(Ext->FunctionalDeviceObject);
+        if (Ext->LwmStartWorkItem == NULL)
+            return NDIS_STATUS_RESOURCES;
+    }
+
+    Ext->Initialized = TRUE;
+    InterlockedExchange(&Ext->ProtocolBindingsClosing, 0);
+    KeClearEvent(&Ext->LwmStartDoneEvent);
+    IoQueueWorkItem(Ext->LwmStartWorkItem, Ndis6LwmStartWorker, DelayedWorkQueue, Adapter);
+    return NDIS_STATUS_SUCCESS;
 }
 
 VOID
@@ -352,7 +411,23 @@ NTAPI
 NdisLWMUninitializeNetworkInterface(
     _In_ NDIS_HANDLE NdisMiniportAdapterHandle)
 {
-    UNREFERENCED_PARAMETER(NdisMiniportAdapterHandle);
+    PLOGICAL_ADAPTER Adapter = NdisMiniportAdapterHandle;
+    PNDIS6_ADAPTER_EXT Ext;
+
+    if (Adapter == NULL || !Adapter->IsNdis6)
+        return;
+
+    Ext = NDIS6_EXT(Adapter);
+    if (Ext == NULL || Ext->DriverBlock == NULL || !Ext->DriverBlock->IsLwm)
+        return;
+
+    KeWaitForSingleObject(&Ext->LwmStartDoneEvent, Executive, KernelMode, FALSE, NULL);
+    if (Ext->Initialized)
+    {
+        Ndis6CallMiniportHaltEx(Adapter, NdisHaltDeviceDisabled);
+        Ext->Initialized = FALSE;
+    }
+    Ndis6DestroyLogicalAdapter(Adapter);
 }
 
 NTSTATUS

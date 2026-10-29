@@ -696,7 +696,7 @@ NdisMSetMiniportAttributes(
 
             /* The MiniportAdapterContext field is the driver's per-instance
              * cookie. Every subsequent call into the driver passes this. */
-            if (!Ext->IsWdfManaged)
+            if (!Ext->IsWdfManaged && !Ext->DriverBlock->IsLwm)
                 Ext->MiniportAdapterContext = Reg->MiniportAdapterContext;
             return NDIS_STATUS_SUCCESS;
         }

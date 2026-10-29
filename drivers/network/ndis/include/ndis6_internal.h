@@ -177,6 +177,10 @@ typedef struct _NDIS6_ADAPTER_EXT
     KSPIN_LOCK                      WdfReferenceLock;
     KEVENT                          WdfReferenceDrainEvent;
 
+    UNICODE_STRING                  LwmConfigurationPath;
+    PIO_WORKITEM                    LwmStartWorkItem;
+    KEVENT                          LwmStartDoneEvent;
+
     /* Driver-supplied per-adapter context, returned via NdisMSetMiniportAttributes
      * and passed to every subsequent callback into the driver. */
     NDIS_HANDLE                     MiniportAdapterContext;
@@ -626,6 +630,15 @@ VOID
 Ndis6SetNetInterfaceState(
     _In_ PLOGICAL_ADAPTER       Adapter,
     _In_ BOOLEAN                Enable);
+
+extern PDRIVER_OBJECT NdisDriverObject;
+
+NDIS_STATUS
+Ndis6CreateLwmInstance(
+    _In_ PNDIS6_DRIVER_BLOCK    DriverBlock,
+    _In_ const GUID *           InterfaceGuid,
+    _In_ NDIS_HANDLE            MiniportAdapterContext,
+    _Out_ PLOGICAL_ADAPTER*     AdapterOut);
 
 /* Intermediate-driver upper-miniport instantiation (NdisIMInitializeDeviceInstanceEx).
  * Creates a virtual 802.3 miniport with no PnP PDO, runs the driver's
