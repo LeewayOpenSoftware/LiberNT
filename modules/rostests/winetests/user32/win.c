@@ -9665,11 +9665,6 @@ static void test_layered_window(void)
 
     ret = pSetLayeredWindowAttributes( hwnd, 0, 255, LWA_ALPHA );
     ok( ret, "SetLayeredWindowAttributes should succeed on layered window\n" );
-#ifdef __REACTOS__
-    if (is_reactos()) {
-        ok(FALSE, "FIXME: This hangs on ReactOS!\n");
-    } else {
-#endif
     while (GetMessageA(&msg, 0, 0, 0))
     {
         DispatchMessageA(&msg);
@@ -9677,9 +9672,6 @@ static void test_layered_window(void)
         if (msg.message == WM_PAINT && msg.hwnd == child)
             break;
     }
-#ifdef __REACTOS__
-    }
-#endif
 
     DestroyWindow( hwnd );
     DeleteDC( hdc );
