@@ -818,7 +818,8 @@ LxExecImage(
         LxTmpfsInodeAttributes(LxTmpfsFileInode(Main.File), &Mode, &FileUid, &FileGid, &Device);
     if ((Error == 0) && !Process->NoNewPrivs &&
         ((LxTmpfsFileInode(Main.File) != NULL) ||
-         (LxNtReadLxAttributes(Main.File->Handle, &Mode, &FileUid, &FileGid, &Device) == 0)) && (Mode != MAXULONG))
+         (LxNtReadLxAttributes(Main.File->Handle, &Mode, &FileUid, &FileGid, &Device) == 0)) && (Mode != MAXULONG) &&
+        LxIdsMapped(Process, FileUid, FileGid))
     {
         SetUid = ((Mode & LX_S_ISUID) != 0) && (FileUid != MAXULONG);
         SetGid = ((Mode & (LX_S_ISGID | LX_S_IXGRP)) == (LX_S_ISGID | LX_S_IXGRP)) && (FileGid != MAXULONG);
