@@ -658,6 +658,20 @@ TiDispatch(
                 }
                 break;
 
+            case IOCTL_IP_QUERY_ADDRESS:
+                if (DeviceObject != IPDeviceObject)
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                else if (IrpSp->Parameters.DeviceIoControl.InputBufferLength < sizeof(IP4_ADDRESS_INFO) ||
+                         IrpSp->Parameters.DeviceIoControl.OutputBufferLength < sizeof(IP4_ADDRESS_INFO))
+                    Status = STATUS_INVALID_PARAMETER;
+                else
+                {
+                    Status = IPQueryAddressV4(Irp->AssociatedIrp.SystemBuffer);
+                    if (NT_SUCCESS(Status))
+                        Irp->IoStatus.Information = sizeof(IP4_ADDRESS_INFO);
+                }
+                break;
+
             case IOCTL_IP6_GET_BEST_ROUTE:
                 if (DeviceObject != IP6DeviceObject)
                     Status = STATUS_INVALID_DEVICE_REQUEST;

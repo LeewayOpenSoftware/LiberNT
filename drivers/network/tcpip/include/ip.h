@@ -207,6 +207,9 @@ typedef struct _IP_NTE {
     ULONG Instance;
     BOOLEAN RouteOwner;
     PVOID TCPContext;
+    ULONG DadState;
+    ULONG DadProbes;
+    ULONGLONG DadNext;
 } IP_NTE, *PIP_NTE;
 
 typedef struct _IP_SET_ADDRESS {

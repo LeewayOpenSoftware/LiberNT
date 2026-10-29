@@ -385,6 +385,28 @@ static BOOL ip4_query_interface(UINT index, IP4_INTERFACE_INFO *info)
     return NT_SUCCESS(status);
 }
 
+static ULONG ip4_address_dad_state(UINT index, DWORD address)
+{
+    UNICODE_STRING name = RTL_CONSTANT_STRING(L"\\Device\\Ip");
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK iosb;
+    IP4_ADDRESS_INFO info;
+    NTSTATUS status;
+    HANDLE file;
+
+    memset(&info, 0, sizeof(info));
+    info.Index = index;
+    info.Address = address;
+    InitializeObjectAttributes(&attr, &name, OBJ_CASE_INSENSITIVE, NULL, NULL);
+    status = NtOpenFile(&file, SYNCHRONIZE, &attr, &iosb, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        FILE_SYNCHRONOUS_IO_NONALERT);
+    if (!NT_SUCCESS(status)) return IpDadStatePreferred;
+    status = NtDeviceIoControlFile(file, NULL, NULL, NULL, &iosb, IOCTL_IP_QUERY_ADDRESS,
+                                   &info, sizeof(info), &info, sizeof(info));
+    NtClose(file);
+    return NT_SUCCESS(status) ? info.DadState : IpDadStatePreferred;
+}
+
 static void override_zone_indices(ULONG *zones, const ULONG *overrides)
 {
     UINT level;
@@ -899,7 +921,7 @@ static DWORD enumerate_ipv4_unicast(struct nsi_enumerate_all_ex *params)
                 {
                     struct nsi_ip_unicast_dynamic *dynamic = (struct nsi_ip_unicast_dynamic *)params->dynamic_data + written;
                     memset(dynamic, 0, sizeof(*dynamic));
-                    dynamic->dad_state = IpDadStatePreferred;
+                    dynamic->dad_state = ip4_address_dad_state(indexes->indexes[i], address);
                 }
                 if (params->static_data) memset((struct nsi_ip_unicast_static *)params->static_data + written, 0, sizeof(struct nsi_ip_unicast_static));
                 written++;

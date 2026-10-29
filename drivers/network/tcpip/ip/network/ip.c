@@ -149,6 +149,7 @@ VOID NTAPI NeighborTimeoutDpcFn(PKDPC Dpc,
                                 PVOID SystemArgument2)
 {
     NBFastTimeout();
+    NteDadTimeout();
 }
 
 
