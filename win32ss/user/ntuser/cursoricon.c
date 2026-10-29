@@ -502,10 +502,10 @@ BOOL UserSetCursorPos( INT x, INT y, DWORD flags, ULONG_PTR dwExtraInfo, BOOL Ho
     else
         rcClip = CurInfo->rcClip;
 
-    if (x >= rcClip.right)  x = rcClip.right - 1;
-    if (x < rcClip.left)    x = rcClip.left;
-    if (y >= rcClip.bottom) y = rcClip.bottom - 1;
-    if (y < rcClip.top)     y = rcClip.top;
+    if (x < rcClip.left)            x = rcClip.left;
+    else if (x >= rcClip.right)     x = rcClip.right - 1;
+    if (y < rcClip.top)             y = rcClip.top;
+    else if (y >= rcClip.bottom)    y = rcClip.bottom - 1;
 
     if (!Hook)
         IntAddMouseMoveHistory(x, y, EngGetTickCount32(), dwExtraInfo);
