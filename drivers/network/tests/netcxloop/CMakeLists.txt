@@ -1,11 +1,16 @@
 
-add_library(netcxloop MODULE netcxloop.cpp netcxloop.rc)
-set_module_type(netcxloop kmdfdriver KMDF_VERSION 1.33)
-target_include_directories(netcxloop PRIVATE
-    ${REACTOS_SOURCE_DIR}/sdk/include/ddk/netcx/kmdf/adapter/2.5
-    ${REACTOS_SOURCE_DIR}/sdk/include/psdk/netcx/shared/1.0)
-target_compile_definitions(netcxloop PRIVATE NET_VERSION_MAJOR=2 NET_VERSION_MINOR=5)
-target_link_libraries(netcxloop netadaptercxstub_2_5 ntoskrnl_vista libcntpr ${PSEH_LIB})
-add_importlibs(netcxloop ntoskrnl hal)
+function(add_netcxloop _target _minor)
+    add_library(${_target} MODULE netcxloop.cpp netcxloop.rc)
+    set_module_type(${_target} kmdfdriver KMDF_VERSION 1.33)
+    target_include_directories(${_target} PRIVATE
+        ${REACTOS_SOURCE_DIR}/sdk/include/ddk/netcx/kmdf/adapter/2.${_minor}
+        ${REACTOS_SOURCE_DIR}/sdk/include/psdk/netcx/shared/1.0)
+    target_compile_definitions(${_target} PRIVATE NET_VERSION_MAJOR=2 NET_VERSION_MINOR=${_minor})
+    target_link_libraries(${_target} netadaptercxstub_2_${_minor} ntoskrnl_vista libcntpr ${PSEH_LIB})
+    add_importlibs(${_target} ntoskrnl hal)
+endfunction()
+
+add_netcxloop(netcxloop 5)
+add_netcxloop(netcxloop23 3)
 
 add_subdirectory(test)
