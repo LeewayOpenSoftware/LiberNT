@@ -1393,6 +1393,30 @@ static DWORD WAVE_mciSet(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_WAVE_SET_PARMS
 	    WAVE_mciStop(wDevID, MCI_WAIT, NULL);
 	wmw->wOutput = WAVE_MAPPER;
     }
+#ifdef __REACTOS__
+    if ((dwFlags & (MCI_WAVE_SET_FORMATTAG | MCI_WAVE_SET_AVGBYTESPERSEC | MCI_WAVE_SET_BITSPERSAMPLE |
+                    MCI_WAVE_SET_BLOCKALIGN | MCI_WAVE_SET_CHANNELS | MCI_WAVE_SET_SAMPLESPERSEC)) &&
+        wmw->lpWaveFormat == &wmw->wfxRef)
+    {
+        WAVEFORMATEX wfx = wmw->wfxRef;
+
+        if (dwFlags & MCI_WAVE_SET_FORMATTAG)      wfx.wFormatTag = lpParms->wFormatTag;
+        if (dwFlags & MCI_WAVE_SET_BITSPERSAMPLE)  wfx.wBitsPerSample = lpParms->wBitsPerSample;
+        if (dwFlags & MCI_WAVE_SET_CHANNELS)       wfx.nChannels = lpParms->nChannels;
+        if (dwFlags & MCI_WAVE_SET_SAMPLESPERSEC)  wfx.nSamplesPerSec = lpParms->nSamplesPerSec;
+        if (dwFlags & MCI_WAVE_SET_BLOCKALIGN)     wfx.nBlockAlign = lpParms->nBlockAlign;
+        if (dwFlags & MCI_WAVE_SET_AVGBYTESPERSEC) wfx.nAvgBytesPerSec = lpParms->nAvgBytesPerSec;
+        if (wfx.wFormatTag == WAVE_FORMAT_PCM)
+        {
+            wfx.nBlockAlign = wfx.nChannels * wfx.wBitsPerSample / 8;
+            wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+        }
+        wfx.cbSize = 0;
+        if (waveOutOpen(NULL, WAVE_MAPPER, &wfx, 0, 0, WAVE_FORMAT_QUERY) != MMSYSERR_NOERROR &&
+            waveInOpen(NULL, WAVE_MAPPER, &wfx, 0, 0, WAVE_FORMAT_QUERY) != MMSYSERR_NOERROR)
+            return MCIERR_OUTOFRANGE;
+    }
+#endif
     /* Set wave format parameters is refused after Open or Record.*/
     if (dwFlags & MCI_WAVE_SET_FORMATTAG) {
 	TRACE("MCI_WAVE_SET_FORMATTAG = %d\n", lpParms->wFormatTag);
