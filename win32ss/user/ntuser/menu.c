@@ -4575,6 +4575,7 @@ static INT FASTCALL MENU_TrackMenu(PMENU pmenu, UINT wFlags, INT x, INT y,
     BOOL firstClick = TRUE;
     PWND pWnd;
     PTHREADINFO pti = PsGetCurrentThreadWin32Thread();
+    POINT ptMouseLast = gpsi->ptCursor;
 
     if (pti != pwnd->head.pti)
     {
@@ -4765,6 +4766,9 @@ static INT FASTCALL MENU_TrackMenu(PMENU pmenu, UINT wFlags, INT x, INT y,
                     /* the selected menu item must be changed every time */
                     /* the mouse moves. */
 
+                    if (mt.Pt.x == ptMouseLast.x && mt.Pt.y == ptMouseLast.y)
+                        break;
+                    ptMouseLast = mt.Pt;
                     if (pmMouse)
                         fInsideMenuLoop |= MENU_MouseMove( &mt, pmMouse, wFlags );
 
