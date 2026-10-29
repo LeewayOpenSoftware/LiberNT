@@ -53,6 +53,7 @@ enum class PageId
     Mouse,
     Typing,
     Printers,
+    Drivers,
     Network,
     WiFi,
     WiFiKnown,
@@ -393,6 +394,7 @@ void BuildBluetooth(PageBuilder &page);
 void BuildMouse(PageBuilder &page);
 void BuildTyping(PageBuilder &page);
 void BuildPrinters(PageBuilder &page);
+void BuildDrivers(PageBuilder &page);
 void BuildNetwork(PageBuilder &page);
 void BuildWiFi(PageBuilder &page);
 void BuildWiFiKnown(PageBuilder &page);

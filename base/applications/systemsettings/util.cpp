@@ -38,6 +38,7 @@ static const PageInfo Pages[] =
     { PageId::Mouse, IDS_PAGE_MOUSE, L"cursor_20_regular", PageId::Devices, BuildMouse, L"mousetouchpad" },
     { PageId::Typing, IDS_PAGE_TYPING, L"keyboard_20_regular", PageId::Devices, BuildTyping, L"typing" },
     { PageId::Printers, IDS_PAGE_PRINTERS, L"print_20_regular", PageId::Devices, BuildPrinters, L"printers" },
+    { PageId::Drivers, IDS_PAGE_DRIVERS, L"device_meeting_room_20_regular", PageId::Devices, BuildDrivers, L"drivers" },
     { PageId::WiFi, IDS_PAGE_WIFI, L"wifi_1_20_regular", PageId::Network, BuildWiFi,
       L"network-wifi;network-wifisettings" },
     { PageId::WiFiKnown, IDS_PAGE_WIFI_KNOWN, L"wifi_1_20_regular", PageId::WiFi, BuildWiFiKnown, NULL },

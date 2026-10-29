@@ -15,6 +15,22 @@
 #include <winspool.h>
 
 typedef INT_PTR (WINAPI *PFN_DEVICEPROPERTIES)(HWND, LPCWSTR, LPCWSTR, BOOL);
+typedef BOOL (WINAPI *PFN_INSTALLDEVINST)(HWND, LPCWSTR, BOOL, LPDWORD);
+
+static void
+UpdateDeviceDriver(HWND owner, const std::wstring &instance)
+{
+    HMODULE module = LoadLibraryW(L"newdev.dll");
+    PFN_INSTALLDEVINST install;
+    DWORD reboot = 0;
+
+    if (!module)
+        return;
+    install = (PFN_INSTALLDEVINST)GetProcAddress(module, "InstallDevInst");
+    if (install)
+        install(owner, instance.c_str(), TRUE, &reboot);
+    FreeLibrary(module);
+}
 
 static void
 ShowDeviceProperties(HWND owner, const std::wstring &instance)
@@ -459,6 +475,66 @@ AddDeviceList(PageBuilder &page)
     SetupDiDestroyDeviceInfoList(set);
 }
 
+static std::wstring
+DriverStatusText(SP_DEVINFO_DATA *data)
+{
+    DWORD status = 0;
+    DWORD problem = 0;
+    CONFIGRET result = CM_Get_DevNode_Status(&status, &problem, data->DevInst, 0);
+
+    if (result != CR_SUCCESS)
+        return Str(IDS_DRIVER_STATUS_UNKNOWN);
+    if (problem == CM_PROB_FAILED_INSTALL)
+        return Printf(Str(IDS_DRIVER_STATUS_NO_DRIVER).c_str(), problem);
+    if (problem != 0 || (status & DN_HAS_PROBLEM))
+        return Printf(Str(IDS_DRIVER_STATUS_PROBLEM).c_str(), problem);
+    return Str(IDS_DRIVER_STATUS_OK);
+}
+
+void
+BuildDrivers(PageBuilder &page)
+{
+    SettingsHost *host = page.Host;
+    HDEVINFO set;
+    SP_DEVINFO_DATA data = { sizeof(data) };
+    UINT count = 0;
+
+    page.Hero(Str(IDS_PAGE_DRIVERS), Str(IDS_DRIVERS_DESC), L"device_meeting_room_20_regular");
+    if (page.Indexing)
+        return;
+    set = SetupDiGetClassDevsW(NULL, NULL, NULL, DIGCF_ALLCLASSES);
+    if (set == INVALID_HANDLE_VALUE)
+        return;
+    page.Group(Str(IDS_DRIVERS_DEVICES));
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(set, i, &data); i++, data.cbSize = sizeof(data))
+    {
+        WCHAR instance[MAX_DEVICE_ID_LEN];
+        std::wstring name;
+        HICON icon = NULL;
+
+        name = DeviceText(set, &data, SPDRP_FRIENDLYNAME);
+        if (name.empty())
+            name = DeviceText(set, &data, SPDRP_DEVICEDESC);
+        if (name.empty())
+            name = DeviceText(set, &data, SPDRP_HARDWAREID);
+        if (name.empty())
+            name = Str(IDS_DRIVER_UNKNOWN_DEVICE);
+        if (!SetupDiGetDeviceInstanceIdW(set, &data, instance, _countof(instance), NULL))
+            continue;
+        SetupDiLoadClassIcon(&data.ClassGuid, &icon, NULL);
+        {
+            std::wstring id = instance;
+            SettingRow &row = page.Button(name, DriverStatusText(&data), NULL, Str(IDS_UPDATE_DRIVER),
+                                          [host, id](int) { UpdateDeviceDriver(host->Window(), id); });
+            row.Image = icon;
+        }
+        count++;
+    }
+    if (count == 0)
+        page.Text(Str(IDS_DRIVERS_NONE));
+    SetupDiDestroyDeviceInfoList(set);
+}
+
 void
 BuildDevices(PageBuilder &page)
 {
@@ -477,6 +553,7 @@ BuildDevices(PageBuilder &page)
     page.Navigate(Str(IDS_PAGE_MOUSE), Str(IDS_MOUSE_DESC), L"cursor_20_regular", PageId::Mouse);
     page.Navigate(Str(IDS_PAGE_TYPING), Str(IDS_TYPING_DESC), L"keyboard_20_regular", PageId::Typing);
     page.Navigate(Str(IDS_PAGE_PRINTERS), Str(IDS_PRINTERS_DESC), L"print_20_regular", PageId::Printers);
+    page.Navigate(Str(IDS_PAGE_DRIVERS), Str(IDS_DRIVERS_DESC), L"device_meeting_room_20_regular", PageId::Drivers);
     if (!page.Indexing)
         AddDeviceList(page);
 }
