@@ -1570,9 +1570,19 @@ LxDataPoll(
     return Mask;
 }
 
+static
+LONG
+LxDataTruncate(
+    _In_ PLX_FILE File,
+    _In_ LONG64 Length)
+{
+    UNREFERENCED_PARAMETER(Length);
+    return (File->WriteHandler != NULL) ? 0 : -LX_EINVAL;
+}
+
 static const LX_FILE_OPS LxDataFileOps =
 {
-    LxDataRead, LxDataWrite, NULL, LxDataPoll, LxDataStat, LxDataSeek, NULL, NULL, NULL
+    LxDataRead, LxDataWrite, NULL, LxDataPoll, LxDataStat, LxDataSeek, NULL, LxDataTruncate, NULL
 };
 
 PLX_FILE

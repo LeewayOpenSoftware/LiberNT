@@ -2443,6 +2443,85 @@ LxPidMemOpen(
     return 0;
 }
 
+static volatile LONG LxAuditSessionId;
+
+static
+LONG
+LxParseWrittenNumber(
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length,
+    _Out_ PULONG Value);
+
+static
+VOID
+LxGenPidLoginuid(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    PLX_PROCESS Process = LxProcessLookup(Self->Instance, Synth->Pid);
+    ULONG LoginUid;
+
+    if (Process == NULL)
+        return;
+    LoginUid = Process->LoginUid;
+    LxProcessDereference(Process);
+    if (LoginUid != MAXULONG)
+        LoginUid = LxIdFromKernel(LxCredUserNs(Self), FALSE, LoginUid);
+    LxTextPrintf(Text, "%lu", LoginUid);
+}
+
+static
+VOID
+LxGenPidSessionid(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    PLX_PROCESS Process = LxProcessLookup(Self->Instance, Synth->Pid);
+
+    if (Process == NULL)
+        return;
+    LxTextPrintf(Text, "%lu", Process->SessionId);
+    LxProcessDereference(Process);
+}
+
+static
+LONG
+LxWritePidLoginuid(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    PLX_THREAD Current = LxCurrentThread();
+    PLX_PROCESS Process;
+    ULONG Pid = (ULONG)(ULONG_PTR)File->HandlerContext, Value, LoginUid, SessionId = MAXULONG;
+    LONG Error;
+
+    if ((Current == NULL) || (Current->Process->Pid != Pid))
+        return -LX_EPERM;
+    Error = LxParseWrittenNumber(Data, Length, &Value);
+    if (Error != 0)
+        return Error;
+    Process = Current->Process;
+    LoginUid = (Value == MAXULONG) ? MAXULONG : LxIdToKernel(LxCredUserNs(Process), FALSE, Value);
+    if ((Value != MAXULONG) && (LoginUid == MAXULONG))
+        return -LX_EINVAL;
+    if ((Process->LoginUid != MAXULONG) && !LxCapable(Process, LX_CAP_AUDIT_CONTROL))
+        return -LX_EPERM;
+    if (LoginUid != MAXULONG)
+    {
+        SessionId = (ULONG)InterlockedIncrement(&LxAuditSessionId);
+        if (SessionId == MAXULONG)
+            SessionId = (ULONG)InterlockedIncrement(&LxAuditSessionId);
+    }
+    ExAcquireFastMutex(&Process->Lock);
+    Process->LoginUid = LoginUid;
+    Process->SessionId = SessionId;
+    ExReleaseFastMutex(&Process->Lock);
+    return 0;
+}
+
 static
 VOID
 LxGenPidPersonality(
@@ -2475,7 +2554,7 @@ static const LX_PID_ENTRY LxPidEntries[] =
     { "gid_map", LX_S_IFREG, 0644, NULL, LxGenPidGidMap, LxWritePidGidMap },
     { "io", LX_S_IFREG, 0400, "rchar: 0\nwchar: 0\nsyscr: 0\nsyscw: 0\nread_bytes: 0\nwrite_bytes: 0\ncancelled_write_bytes: 0\n", NULL, NULL },
     { "limits", LX_S_IFREG, 0444, NULL, LxGenPidLimits, NULL },
-    { "loginuid", LX_S_IFREG, 0644, "4294967295", NULL, LxWriteAccept },
+    { "loginuid", LX_S_IFREG, 0644, NULL, LxGenPidLoginuid, LxWritePidLoginuid },
     { "map_files", LX_S_IFDIR, 0500, NULL, NULL, NULL },
     { "maps", LX_S_IFREG, 0444, NULL, LxGenPidMaps, NULL },
     { "mem", LX_S_IFREG, 0600, NULL, NULL, NULL },
@@ -2489,7 +2568,7 @@ static const LX_PID_ENTRY LxPidEntries[] =
     { "pagemap", LX_S_IFREG, 0400, NULL, NULL, NULL },
     { "personality", LX_S_IFREG, 0400, NULL, LxGenPidPersonality, NULL },
     { "root", LX_S_IFLNK, 0777, NULL, NULL, NULL },
-    { "sessionid", LX_S_IFREG, 0444, "4294967295", NULL, NULL },
+    { "sessionid", LX_S_IFREG, 0444, NULL, LxGenPidSessionid, NULL },
     { "setgroups", LX_S_IFREG, 0644, NULL, LxGenPidSetgroups, LxWritePidSetgroups },
     { "smaps", LX_S_IFREG, 0444, NULL, LxGenPidSmaps, NULL },
     { "stat", LX_S_IFREG, 0444, NULL, LxGenPidStat, NULL },

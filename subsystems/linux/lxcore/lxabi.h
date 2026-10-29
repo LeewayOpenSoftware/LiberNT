@@ -784,6 +784,7 @@ typedef struct _LX_MSGINFO
 #define LX_CAP_SYS_RESOURCE     24
 #define LX_CAP_SYS_TIME         25
 #define LX_CAP_MKNOD            27
+#define LX_CAP_AUDIT_CONTROL    30
 #define LX_CAP_SETFCAP          31
 #define LX_CAP_MAC_OVERRIDE     32
 #define LX_CAP_SYSLOG           34

@@ -647,6 +647,8 @@ struct _LX_PROCESS
     LONG64 Ptracer;
     volatile LONG Traced;
     ULONG Personality;
+    ULONG LoginUid;
+    ULONG SessionId;
 };
 
 typedef struct _LX_CRED_SAVE

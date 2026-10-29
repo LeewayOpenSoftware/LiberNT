@@ -340,6 +340,8 @@ LxProcessCreate(
     Process->Dumpable = 1;
     Process->CoreFilter = 0x33;
     Process->ExitSignal = LX_SIGCHLD;
+    Process->LoginUid = MAXULONG;
+    Process->SessionId = MAXULONG;
     Process->CapBounding = LX_CAP_FULL_SET & ~(1ULL << LX_CAP_SYS_TIME);
     Process->CapPermitted = Process->CapEffective = Process->CapBounding;
     Process->StartTime = (LONG64)KeQueryInterruptTime();
@@ -400,6 +402,8 @@ LxProcessFork(
     Process->CoreFilter = Parent->CoreFilter;
     Process->OomScoreAdj = Parent->OomScoreAdj;
     Process->Personality = Parent->Personality;
+    Process->LoginUid = Parent->LoginUid;
+    Process->SessionId = Parent->SessionId;
     Process->Trace = Parent->Trace;
     for (Fd = 0; Fd < LX_MAX_FDS; Fd++)
     {
