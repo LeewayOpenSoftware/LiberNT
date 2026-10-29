@@ -12,6 +12,7 @@ list(APPEND SOURCE
     dhcp/api.c
     dhcp/compat.c
     dhcp/dhclient.c
+    dhcp/dhcp6.c
     dhcp/dispatch.c
     dhcp/hash.c
     dhcp/options.c

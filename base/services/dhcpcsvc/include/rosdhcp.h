@@ -99,6 +99,9 @@ void stop_client(void);
 
 void AdapterInit(VOID);
 HANDLE StartAdapterDiscovery(HANDLE hStopEvent);
+HANDLE StartDhcp6Client(HANDLE StopEvent);
+DWORD Dhcp6RenewAdapter(PCWSTR AdapterName);
+DWORD Dhcp6ReleaseAdapter(PCWSTR AdapterName);
 void AdapterStop(VOID);
 HKEY FindAdapterKey(PDHCP_ADAPTER Adapter);
 DWORD LoadAlternateConfiguration(PDHCP_ADAPTER Adapter, HKEY AdapterKey);

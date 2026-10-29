@@ -599,3 +599,27 @@ done:
 
     return ret;
 }
+
+/* Function 8 */
+DWORD
+__stdcall
+Server_AcquireParametersV6(
+    _In_ PDHCP_SERVER_NAME ServerName,
+    _In_ LPWSTR AdapterName)
+{
+    DPRINT("Server_AcquireParametersV6(%S)\n", AdapterName);
+
+    return Dhcp6RenewAdapter(AdapterName);
+}
+
+/* Function 9 */
+DWORD
+__stdcall
+Server_ReleaseParametersV6(
+    _In_ PDHCP_SERVER_NAME ServerName,
+    _In_ LPWSTR AdapterName)
+{
+    DPRINT("Server_ReleaseParametersV6(%S)\n", AdapterName);
+
+    return Dhcp6ReleaseAdapter(AdapterName);
+}
