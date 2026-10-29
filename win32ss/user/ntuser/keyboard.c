@@ -800,7 +800,7 @@ co_CallLowLevelKeyboardHook(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjec
     KbdHookData.flags = 0;
     if (dwFlags & KEYEVENTF_EXTENDEDKEY)
         KbdHookData.flags |= LLKHF_EXTENDED;
-    if (bAltDown)
+    if (bAltDown && !bCtrlDown)
         KbdHookData.flags |= LLKHF_ALTDOWN;
     if (dwFlags & KEYEVENTF_KEYUP)
         KbdHookData.flags |= LLKHF_UP;
@@ -809,13 +809,10 @@ co_CallLowLevelKeyboardHook(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjec
     KbdHookData.time = dwTime;
     KbdHookData.dwExtraInfo = dwExtraInfo;
 
-    /* Note: it doesnt support WM_SYSKEYUP */
-    if (dwFlags & KEYEVENTF_KEYUP)
-        uMsg = WM_KEYUP;
-    else if (bAltDown && !bCtrlDown)
-        uMsg = WM_SYSKEYDOWN;
+    if (bAltDown && !bCtrlDown)
+        uMsg = (dwFlags & KEYEVENTF_KEYUP) ? WM_SYSKEYUP : WM_SYSKEYDOWN;
     else
-        uMsg = WM_KEYDOWN;
+        uMsg = (dwFlags & KEYEVENTF_KEYUP) ? WM_KEYUP : WM_KEYDOWN;
 
     return co_HOOK_CallHooks(WH_KEYBOARD_LL, HC_ACTION, uMsg, (LPARAM)&KbdHookData);
 }
