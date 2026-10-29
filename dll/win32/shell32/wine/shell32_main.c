@@ -1873,7 +1873,8 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
                     else
                     {
                         /* the icon is in the file */
-                        strcpyW(psfi->szDisplayName, szFullPath);
+                        psfi->szDisplayName[0] = UNICODE_NULL;
+                        psfi->iIcon = 0;
                     }
                 }
                 else
@@ -1891,7 +1892,10 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
                     szLocation, MAX_PATH, &iIndex, &uFlags);
 
                 if (uFlags & GIL_NOTFILENAME)
-                    ret = FALSE;
+                {
+                    psfi->szDisplayName[0] = UNICODE_NULL;
+                    psfi->iIcon = lstrcmpW(szLocation, L"*") ? 0 : iIndex;
+                }
                 else
                 {
                     lstrcpyW (psfi->szDisplayName, szLocation);

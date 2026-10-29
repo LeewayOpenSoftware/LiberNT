@@ -242,6 +242,10 @@ VOID CShellLink::Reset()
     m_pPropertyStore.Release();
     m_pHiddenStorages.Free();
     m_cbHiddenStorages = 0;
+    m_pTargetExtractIcon.Release();
+    m_pszExtractIconFile.Free();
+    m_iExtractIconIndex = 0;
+    m_bExtractIconChosen = FALSE;
 
     HeapFree(GetProcessHeap(), 0, m_sPath);
     m_sPath = NULL;
@@ -285,6 +289,8 @@ CShellLink::CShellLink()
     m_Header.wHotKey = 0;
 
     m_pPidl = NULL;
+    m_iExtractIconIndex = 0;
+    m_bExtractIconChosen = FALSE;
 
     m_sPath = NULL;
     ZeroMemory(&volume, sizeof(volume));
@@ -1770,20 +1776,6 @@ HRESULT STDMETHODCALLTYPE CShellLink::GetIconLocation(LPWSTR pszIconPath, INT cc
     return S_OK;
 }
 
-static HRESULT SHELL_PidlGetIconLocationW(PCIDLIST_ABSOLUTE pidl,
-        UINT uFlags, PWSTR pszIconFile, UINT cchMax, int *piIndex, UINT *pwFlags)
-{
-    CComPtr<IExtractIconW> pei;
-    HRESULT hr = SHELL_GetUIObjectOfAbsoluteItem(NULL, pidl, IID_PPV_ARG(IExtractIconW, &pei));
-    if (FAILED_UNEXPECTEDLY(hr))
-        return hr;
-    hr = pei->GetIconLocation(uFlags, pszIconFile, cchMax, piIndex, pwFlags);
-    if (FAILED_UNEXPECTEDLY(hr))
-        return hr;
-
-    return S_OK;
-}
-
 HRESULT STDMETHODCALLTYPE CShellLink::GetIconLocation(UINT uFlags, PWSTR pszIconFile, UINT cchMax, int *piIndex, UINT *pwFlags)
 {
     HRESULT hr;
@@ -1811,18 +1803,42 @@ HRESULT STDMETHODCALLTYPE CShellLink::GetIconLocation(UINT uFlags, PWSTR pszIcon
     if (uFlags & GIL_DEFAULTICON)
         return S_FALSE;
 
-    hr = GetIconLocation(pszIconFile, cchMax, piIndex);
-    if (FAILED(hr) || pszIconFile[0] == UNICODE_NULL)
+    if (!m_bExtractIconChosen)
     {
-        hr = SHELL_PidlGetIconLocationW(m_pPidl, uFlags, pszIconFile, cchMax, piIndex, pwFlags);
-    }
-    else
-    {
-        // TODO: If GetIconLocation succeeded, why are we setting GIL_NOTFILENAME? And are we not PERINSTANCE?
-        *pwFlags = GIL_NOTFILENAME | GIL_PERCLASS;
+        WCHAR szIconFile[MAX_PATH];
+        INT iIndex;
+
+        hr = GetIconLocation(szIconFile, _countof(szIconFile), &iIndex);
+        if (SUCCEEDED(hr) && szIconFile[0] != UNICODE_NULL)
+        {
+            hr = SHStrDupW(szIconFile, &m_pszExtractIconFile);
+            if (FAILED(hr))
+                return hr;
+            m_iExtractIconIndex = iIndex;
+        }
+        else
+        {
+            hr = SHELL_GetUIObjectOfAbsoluteItem(NULL, m_pPidl, IID_PPV_ARG(IExtractIconW, &m_pTargetExtractIcon));
+            if (FAILED_UNEXPECTEDLY(hr))
+                return hr;
+        }
+        m_bExtractIconChosen = TRUE;
     }
 
-    return hr;
+    if (m_pTargetExtractIcon)
+    {
+        hr = m_pTargetExtractIcon->GetIconLocation(uFlags, pszIconFile, cchMax, piIndex, pwFlags);
+        if (FAILED_UNEXPECTEDLY(hr))
+            return hr;
+        return S_OK;
+    }
+
+    hr = StringCchCopyW(pszIconFile, cchMax, m_pszExtractIconFile);
+    if (FAILED(hr))
+        return hr;
+    *piIndex = m_iExtractIconIndex;
+    *pwFlags = GIL_PERINSTANCE;
+    return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE
@@ -1830,6 +1846,9 @@ CShellLink::Extract(PCWSTR pszFile, UINT nIconIndex, HICON *phiconLarge, HICON *
 {
     HRESULT hr = NOERROR;
     UINT cxyLarge = LOWORD(nIconSize), cxySmall = HIWORD(nIconSize);
+
+    if (m_pTargetExtractIcon)
+        return m_pTargetExtractIcon->Extract(pszFile, nIconIndex, phiconLarge, phiconSmall, nIconSize);
 
     if (phiconLarge)
     {

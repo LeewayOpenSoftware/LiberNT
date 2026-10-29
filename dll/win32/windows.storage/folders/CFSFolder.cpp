@@ -428,24 +428,19 @@ HRESULT CFSExtractIcon_CreateInstance(IShellFolder * psf, LPCITEMIDLIST pidl, RE
             if (!wcscmp(L"%1", wTemp)) /* icon is in the file */
             {
                 ILGetDisplayNameExW(psf, pidl, wTemp, ILGDN_FORPARSING);
-                icon_idx = 0;
-
-                INT ret = PrivateExtractIconsW(wTemp, 0, 0, 0, NULL, NULL, 0, 0);
-                if (ret <= 0)
-                {
-                    StringCbCopyW(wTemp, sizeof(wTemp), swShell32Name);
-                    if (lstrcmpiW(pExtension, L".exe") == 0 || lstrcmpiW(pExtension, L".scr") == 0)
-                        icon_idx = -IDI_SHELL_EXE;
-                    else
-                        icon_idx = -IDI_SHELL_DOCUMENT;
-                }
+                initIcon->SetNormalIcon(wTemp, 0);
+                initIcon->SetFlags(GIL_NOTFILENAME | GIL_PERINSTANCE);
             }
-
-            initIcon->SetNormalIcon(wTemp, icon_idx);
+            else
+            {
+                initIcon->SetNormalIcon(L"*", SIC_GetIconIndex(wTemp, icon_idx, 0));
+                initIcon->SetFlags(GIL_NOTFILENAME | GIL_PERCLASS);
+            }
         }
         else
         {
-            initIcon->SetNormalIcon(swShell32Name, 0);
+            initIcon->SetNormalIcon(L"*", SIC_GetIconIndex(swShell32Name, 0, 0));
+            initIcon->SetFlags(GIL_NOTFILENAME | GIL_PERCLASS);
         }
 
         if (hkey)
@@ -2655,8 +2650,11 @@ HRESULT WINAPI CFSFolder::GetIconOf(PCUITEMID_CHILD pidl, UINT flags, int *pIcon
     if (FAILED(hr))
         return S_FALSE;
     hr = pei->GetIconLocation(flags, szIconFile, _countof(szIconFile), &iIcon, &uFlags);
-    if (hr != S_OK || (uFlags & (GIL_NOTFILENAME | GIL_DONTCACHE | GIL_PERINSTANCE)))
+    if (hr != S_OK || (uFlags & (GIL_DONTCACHE | GIL_PERINSTANCE)) ||
+        ((uFlags & GIL_NOTFILENAME) && wcscmp(szIconFile, L"*")))
+    {
         return S_FALSE;
+    }
 
     *pIconIndex = SIC_GetIconIndex(szIconFile, iIcon, uFlags);
     return (*pIconIndex >= 0) ? S_OK : S_FALSE;
