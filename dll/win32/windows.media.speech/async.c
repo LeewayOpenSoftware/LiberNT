@@ -133,11 +133,27 @@ static HRESULT WINAPI async_impl_put_Completed( IAsyncInfoImpl *iface, IAsyncOpe
         {
             IInspectable *operation = impl->IInspectable_outer;
             AsyncStatus status = impl->status;
+#ifdef __REACTOS__
+            IAsyncOperationCompletedHandlerImpl_AddRef( handler );
+            LeaveCriticalSection( &impl->cs );
+
+            IAsyncOperationCompletedHandlerImpl_Invoke( handler, operation, status );
+
+            EnterCriticalSection( &impl->cs );
+            if (impl->handler == handler)
+            {
+                impl->handler = NULL;
+                IAsyncOperationCompletedHandlerImpl_Release( handler );
+            }
+            LeaveCriticalSection( &impl->cs );
+            IAsyncOperationCompletedHandlerImpl_Release( handler );
+#else
             impl->handler = NULL; /* Prevent concurrent invoke. */
             LeaveCriticalSection( &impl->cs );
 
             IAsyncOperationCompletedHandlerImpl_Invoke( handler, operation, status );
             IAsyncOperationCompletedHandlerImpl_Release( handler );
+#endif
 
             return S_OK;
         }
@@ -211,18 +227,39 @@ static BOOL async_info_complete( struct async_info *impl, BOOL called_async )
 
     EnterCriticalSection( &impl->cs );
     if (impl->status != Closed) impl->status = FAILED(hr) ? Error : Completed;
+#ifdef __REACTOS__
+    impl->result = result;
+    PropVariantInit( &result );
+#else
     PropVariantCopy( &impl->result, &result );
+#endif
     impl->hr = hr;
 
     if (impl->handler != NULL && impl->handler != HANDLER_NOT_SET)
     {
         IAsyncOperationCompletedHandlerImpl *handler = impl->handler;
         AsyncStatus status = impl->status;
+#ifdef __REACTOS__
+        IAsyncOperationCompletedHandlerImpl_AddRef( handler );
+        LeaveCriticalSection( &impl->cs );
+
+        IAsyncOperationCompletedHandlerImpl_Invoke( handler, operation, status );
+
+        EnterCriticalSection( &impl->cs );
+        if (impl->handler == handler)
+        {
+            impl->handler = NULL;
+            IAsyncOperationCompletedHandlerImpl_Release( handler );
+        }
+        LeaveCriticalSection( &impl->cs );
+        IAsyncOperationCompletedHandlerImpl_Release( handler );
+#else
         impl->handler = NULL; /* Prevent concurrent invoke. */
         LeaveCriticalSection( &impl->cs );
 
         IAsyncOperationCompletedHandlerImpl_Invoke( handler, operation, status );
         IAsyncOperationCompletedHandlerImpl_Release( handler );
+#endif
     }
     else LeaveCriticalSection( &impl->cs );
 
@@ -318,8 +355,12 @@ static HRESULT WINAPI async_info_Cancel( IAsyncInfo *iface )
     TRACE( "iface %p.\n", iface );
 
     EnterCriticalSection( &impl->cs );
+#ifdef __REACTOS__
+    if (impl->status == Started) impl->status = Canceled;
+#else
     if (impl->status == Closed) hr = E_ILLEGAL_METHOD_CALL;
     else if (impl->status == Started) impl->status = Canceled;
+#endif
     LeaveCriticalSection( &impl->cs );
 
     return hr;
