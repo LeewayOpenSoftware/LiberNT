@@ -848,6 +848,15 @@ static void ipv4_unicast_origin(UINT index, DWORD address, struct nsi_ip_unicast
     if (!RegQueryValueExA(key, "EnableDHCP", NULL, &type, (BYTE *)&enabled, &size) && type == REG_DWORD && enabled)
     {
         size = sizeof(text);
+        if (!RegQueryValueExA(key, "IPAutoconfigurationAddress", NULL, &type, (BYTE *)text, &size) && type == REG_SZ &&
+            !RtlIpv4StringToAddressA(text, TRUE, &end, &lease_address) && lease_address.S_un.S_addr == address)
+        {
+            rw->prefix_origin = IpPrefixOriginWellKnown;
+            rw->suffix_origin = IpSuffixOriginLinkLayerAddress;
+            RegCloseKey(key);
+            return;
+        }
+        size = sizeof(text);
         if (!RegQueryValueExA(key, "DhcpIPAddress", NULL, &type, (BYTE *)text, &size) && type == REG_SZ &&
             !RtlIpv4StringToAddressA(text, TRUE, &end, &lease_address) && lease_address.S_un.S_addr == address)
         {
