@@ -1820,7 +1820,9 @@ DefWndNCHitTest(HWND hWnd, POINT Point)
                 (Button = ThemeHitTestCaptionButtons(hWnd, &wi, Point)) != HTNOWHERE)
                 return Button;
             ThickFrame = (wi.dwStyle & WS_THICKFRAME);
-            if (Point.y < WindowRect.top)
+            if (Point.y < WindowRect.top &&
+                !(ThickFrame && (wi.dwStyle & WS_CAPTION) == WS_CAPTION &&
+                  Point.y >= WindowRect.top - GetSystemMetrics(SM_CXPADDEDBORDER)))
             {
                 if (wi.dwStyle & WS_MINIMIZE)
                     return HTCAPTION;

@@ -2107,7 +2107,8 @@ GetNCHitEx(PWND pWnd, POINT pt)
       if (!RECTL_bPointInRect(&rcWindow, pt.x, pt.y ))
       {
             /* Check top sizing border */
-            if (pt.y < rcWindow.top)
+            if (pt.y < rcWindow.top -
+                       (((Style & WS_CAPTION) == WS_CAPTION) ? UserGetSystemMetrics(SM_CXPADDEDBORDER) : 0))
             {
                 if (pt.x < rcWindow.left+UserGetSystemMetrics(SM_CXSIZE)) return HTTOPLEFT;
                 if (pt.x >= rcWindow.right-UserGetSystemMetrics(SM_CXSIZE)) return HTTOPRIGHT;
