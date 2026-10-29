@@ -17,14 +17,16 @@
 #include <windef.h>
 #include <winbase.h>
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <iphlpapi.h>
+#include <ip2string.h>
 
 #include <conutils.h>
 
 #include "netstat.h"
 #include "resource.h"
 
-enum ProtoType {IP, TCP, UDP, ICMP} Protocol;
+enum ProtoType {IP, TCP, UDP, ICMP, TCPV6, UDPV6} Protocol;
 DWORD Interval; /* time to pause between printing output */
 
 /* TCP endpoint states */
@@ -124,6 +126,10 @@ BOOL ParseCmdline(int argc, wchar_t* argv[])
                             Protocol = TCP;
                         else if (!_wcsicmp(L"UDP", Proto))
                             Protocol = UDP;
+                        else if (!_wcsicmp(L"TCPv6", Proto))
+                            Protocol = TCPV6;
+                        else if (!_wcsicmp(L"UDPv6", Proto))
+                            Protocol = UDPV6;
                         else
                             goto StopParsingAndShowUsageHelp;
                         break;
@@ -166,7 +172,7 @@ BOOL DisplayOutput(VOID)
     if (bNoOptions)
     {
         DisplayTableHeader();
-        return ShowTcpTable();
+        return ShowTcpTable() && ShowTcp6Table();
     }
 
     if (bDoShowRouteTable)
@@ -207,6 +213,12 @@ BOOL DisplayOutput(VOID)
                     ShowUdpStatistics();
                 DisplayTableHeader();
                 return (bDoShowAllCons ? ShowUdpTable() : TRUE);
+            case TCPV6:
+                DisplayTableHeader();
+                return ShowTcp6Table();
+            case UDPV6:
+                DisplayTableHeader();
+                return (bDoShowAllCons ? ShowUdp6Table() : TRUE);
             default:
                 break;
         }
@@ -222,8 +234,8 @@ BOOL DisplayOutput(VOID)
     else
     {
         DisplayTableHeader();
-        if (ShowTcpTable() && bDoShowAllCons)
-            ShowUdpTable();
+        if (ShowTcpTable() && ShowTcp6Table() && bDoShowAllCons && ShowUdpTable())
+            ShowUdp6Table();
     }
 
     return TRUE;
@@ -504,6 +516,135 @@ BOOL ShowUdpTable(VOID)
         }
 
         ConPrintf(StdOut, L"  %-6s %-22S %-34s %S\n", L"UDP", Host, L"*:*", PID);
+    }
+
+    HeapFree(GetProcessHeap(), 0, udpTable);
+    return TRUE;
+}
+
+static
+PCHAR
+GetIp6HostName(const UCHAR Address[16], DWORD ScopeId, CHAR Name[], SIZE_T NameLen)
+{
+    CHAR Text[INET6_ADDRSTRLEN];
+    const IN6_ADDR *Address6 = (const IN6_ADDR *)Address;
+
+    RtlIpv6AddressToStringA(Address6, Text);
+    if (ScopeId && (IN6_IS_ADDR_LINKLOCAL(Address6) || IN6_IS_ADDR_SITELOCAL(Address6)))
+        _snprintf(Name, NameLen, "[%s%%%lu]", Text, ScopeId);
+    else
+        _snprintf(Name, NameLen, "[%s]", Text);
+    Name[NameLen - 1] = '\0';
+    return Name;
+}
+
+BOOL ShowTcp6Table(VOID)
+{
+    PMIB_TCP6TABLE_OWNER_PID tcpTable;
+    DWORD error, dwSize = sizeof(MIB_TCP6TABLE_OWNER_PID);
+    DWORD i;
+    CHAR HostIp[HOSTNAMELEN], HostPort[PORTNAMELEN];
+    CHAR RemoteIp[HOSTNAMELEN], RemotePort[PORTNAMELEN];
+    CHAR Host[ADDRESSLEN + 32];
+    CHAR Remote[ADDRESSLEN + 32];
+    CHAR PID[64];
+
+    do
+    {
+        tcpTable = (PMIB_TCP6TABLE_OWNER_PID)HeapAlloc(GetProcessHeap(), 0, dwSize);
+        if (!tcpTable)
+            return FALSE;
+        error = GetExtendedTcpTable(tcpTable, &dwSize, TRUE, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0);
+        if (error != NO_ERROR)
+            HeapFree(GetProcessHeap(), 0, tcpTable);
+    }
+    while (error == ERROR_INSUFFICIENT_BUFFER);
+
+    if (error != NO_ERROR)
+    {
+        ConResPrintf(StdErr, IDS_ERROR_TCP_SNAPSHOT);
+        DoFormatMessage(error);
+        return FALSE;
+    }
+
+    for (i = 0; i < tcpTable->dwNumEntries; i++)
+    {
+        PMIB_TCP6ROW_OWNER_PID Row = &tcpTable->table[i];
+
+        if (!bDoShowAllCons && Row->dwState != MIB_TCP_STATE_ESTAB &&
+            Row->dwState != MIB_TCP_STATE_CLOSE_WAIT && Row->dwState != MIB_TCP_STATE_TIME_WAIT)
+            continue;
+
+        GetIp6HostName(Row->ucLocalAddr, Row->dwLocalScopeId, HostIp, sizeof(HostIp));
+        GetPortName(Row->dwLocalPort, "tcp", HostPort, sizeof(HostPort));
+        sprintf(Host, "%s:%s", HostIp, HostPort);
+
+        if (Row->dwState == MIB_TCP_STATE_LISTEN)
+        {
+            sprintf(Remote, "[::]:0");
+        }
+        else
+        {
+            GetIp6HostName(Row->ucRemoteAddr, Row->dwRemoteScopeId, RemoteIp, sizeof(RemoteIp));
+            GetPortName(Row->dwRemotePort, "tcp", RemotePort, sizeof(RemotePort));
+            sprintf(Remote, "%s:%s", RemoteIp, RemotePort);
+        }
+
+        if (bDoShowProcessId)
+            sprintf(PID, "%ld", Row->dwOwningPid);
+        else
+            PID[0] = 0;
+
+        ConPrintf(StdOut, L"  %-6s %-22S %-22S %-11s %S\n", L"TCP", Host, Remote,
+                  TcpState[Row->dwState < ARRAYSIZE(TcpState) ? Row->dwState : 0], PID);
+    }
+
+    HeapFree(GetProcessHeap(), 0, tcpTable);
+    return TRUE;
+}
+
+BOOL ShowUdp6Table(VOID)
+{
+    PMIB_UDP6TABLE_OWNER_PID udpTable;
+    DWORD error, dwSize = 0;
+    DWORD i;
+    CHAR HostIp[HOSTNAMELEN], HostPort[PORTNAMELEN];
+    CHAR Host[ADDRESSLEN + 32];
+    CHAR PID[64];
+
+    error = GetExtendedUdpTable(NULL, &dwSize, TRUE, AF_INET6, UDP_TABLE_OWNER_PID, 0);
+    if (error != ERROR_INSUFFICIENT_BUFFER)
+    {
+        ConResPuts(StdErr, IDS_ERROR_UDP_ENDPOINT);
+        DoFormatMessage(error);
+        return FALSE;
+    }
+    udpTable = (PMIB_UDP6TABLE_OWNER_PID)HeapAlloc(GetProcessHeap(), 0, dwSize);
+    if (!udpTable)
+        return FALSE;
+    error = GetExtendedUdpTable(udpTable, &dwSize, TRUE, AF_INET6, UDP_TABLE_OWNER_PID, 0);
+    if (error)
+    {
+        ConResPuts(StdErr, IDS_ERROR_UDP_ENDPOINT_TABLE);
+        DoFormatMessage(error);
+        HeapFree(GetProcessHeap(), 0, udpTable);
+        return FALSE;
+    }
+
+    for (i = 0; i < udpTable->dwNumEntries; i++)
+    {
+        PMIB_UDP6ROW_OWNER_PID Row = &udpTable->table[i];
+
+        GetIp6HostName(Row->ucLocalAddr, Row->dwLocalScopeId, HostIp, sizeof(HostIp));
+        GetPortName(Row->dwLocalPort, "udp", HostPort, sizeof(HostPort));
+        sprintf(Host, "%s:%s", HostIp, HostPort);
+
+        if (bDoShowProcessId)
+            sprintf(PID, "%ld", Row->dwOwningPid);
+        else
+            PID[0] = 0;
+
+        ConPrintf(StdOut, L"  %-6s %-22S %-22s %S\n", L"UDP", Host, L"*:*", PID);
     }
 
     HeapFree(GetProcessHeap(), 0, udpTable);

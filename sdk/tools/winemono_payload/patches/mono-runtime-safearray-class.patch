@@ -1,0 +1,61 @@
+--- a/mono/metadata/marshal.c
++++ b/mono/metadata/marshal.c
+@@ -3428,6 +3428,18 @@
+ 			spec->native == MONO_NATIVE_INTERFACE)) ||
+ 			(t->type == MONO_TYPE_CLASS && mono_cominterop_is_interface(t->data.klass)))
+ 			return mono_cominterop_emit_marshal_com_interface (m, argnum, t, spec, conv_arg, conv_arg_type, action);
++		if (spec && (spec->native == MONO_NATIVE_SAFEARRAY) &&
++			t->type == MONO_TYPE_CLASS && t->data.klass == mono_defaults.array_class) {
++			switch (action) {
++			case MARSHAL_ACTION_CONV_OUT:
++			case MARSHAL_ACTION_CONV_IN:
++			case MARSHAL_ACTION_PUSH:
++			case MARSHAL_ACTION_MANAGED_CONV_IN:
++			case MARSHAL_ACTION_MANAGED_CONV_OUT:
++			case MARSHAL_ACTION_MANAGED_INIT_OUT:
++				return mono_cominterop_emit_marshal_safearray (m, argnum, t, spec, conv_arg, conv_arg_type, action);
++			}
++		}
+ 		if (spec && (spec->native == MONO_NATIVE_SAFEARRAY) && 
+ 			(spec->data.safearray_data.elem_type == MONO_VARIANT_VARIANT) && 
+ 			((action == MARSHAL_ACTION_CONV_OUT) || (action == MARSHAL_ACTION_CONV_IN) || (action == MARSHAL_ACTION_PUSH)))
+--- a/mono/metadata/cominterop.c
++++ b/mono/metadata/cominterop.c
+@@ -4255,7 +4255,7 @@
+ 	MonoMarshalVariant elem_type = spec->data.safearray_data.elem_type;
+ 	int result_var;
+ 
+-	if (elem_type == 0)
++	if (elem_type == 0 && mono_class_from_mono_type_internal (t) != mono_defaults.array_class)
+ 	{
+ 		MonoClass *klass = mono_class_from_mono_type_internal (t);
+ 		MonoClass *eklass = m_class_get_element_class (klass);
+@@ -5030,6 +5030,8 @@
+ 		return NULL;
+ 
+ 	guint32 i, d, dim = m_class_get_rank (mono_object_class (array));
++	if (vt == 0)
++		vt = vt_from_class (m_class_get_element_class (mono_object_class (array)));
+ 	bnd = (SAFEARRAYBOUND*)g_malloc (dim * (sizeof (*bnd) + sizeof (*idx)));
+ 	idx = (glong*)(bnd + dim);
+ 
+@@ -5144,6 +5146,19 @@
+ 
+ 	guint32 i, d, dim = mono_marshal_safearray_get_dim (safearray);
+ 
++#ifdef HOST_WIN32
++	if (vt == 0 && aclass == mono_defaults.array_class)
++	{
++		VARTYPE actual_vt;
++		if (FAILED (SafeArrayGetVartype (safearray, &actual_vt)))
++		{
++			mono_error_set_generic_error (error, "System.Runtime.InteropServices", "SafeArrayTypeMismatchException", "Specified array was not of the expected type.");
++			return NULL_HANDLE_ARRAY;
++		}
++		vt = actual_vt;
++	}
++#endif
++
+ 	if (aclass == mono_defaults.array_class)
+ 	{
+ 		MonoClass* klass;

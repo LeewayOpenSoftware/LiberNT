@@ -40,6 +40,9 @@ typedef struct _domattr
     IXMLDOMAttribute IXMLDOMAttribute_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 } domattr;
 
 static const tid_t domattr_se_tids[] =
@@ -54,11 +57,24 @@ static inline domattr *impl_from_IXMLDOMAttribute( IXMLDOMAttribute *iface )
     return CONTAINING_RECORD(iface, domattr, IXMLDOMAttribute_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const domattr_typed_iids[] =
+{
+    &IID_IXMLDOMAttribute,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI domattr_QueryInterface(IXMLDOMAttribute *iface, REFIID riid, void **obj)
 {
     domattr *attr = impl_from_IXMLDOMAttribute(iface);
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&attr->tearoff, (IUnknown *)iface, &attr->dispex, attr->node,
+            domattr_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if (IsEqualGUID(riid, &IID_IXMLDOMAttribute) ||
         IsEqualGUID(riid, &IID_IXMLDOMNode) ||
@@ -97,23 +113,39 @@ static ULONG WINAPI domattr_AddRef(IXMLDOMAttribute *iface)
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&attr->tearoff, attr->node, refcount);
+#else
     return refcount;
+#endif
 }
 
 static ULONG WINAPI domattr_Release(IXMLDOMAttribute *iface)
 {
     domattr *attr = impl_from_IXMLDOMAttribute(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG refcount = node_tearoff_decrement(&attr->tearoff, attr->node, &attr->refcount, &reported);
+#else
     ULONG refcount = InterlockedDecrement(&attr->refcount);
+#endif
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&attr->tearoff);
+#endif
         domnode_release(attr->node);
         free(attr);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return refcount;
+#endif
 }
 
 static HRESULT WINAPI domattr_GetTypeInfoCount(IXMLDOMAttribute *iface, UINT *count)

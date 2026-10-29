@@ -240,6 +240,7 @@ typedef struct _AFD_STORED_DATAGRAM {
 typedef struct _AFD_FCB {
     SOCK_SHARED_INFO SharedData;
     BOOLEAN Locked, Critical, NonBlocking, OobInline, TdiReceiveClosed, SendClosed;
+    BOOLEAN ReceiveShutdown;
     BOOLEAN ReceiveRepostActive, ReceiveRepostPending;
     BOOLEAN SendStartActive, SendStartPending;
     BOOLEAN CleanedUp;
@@ -258,6 +259,8 @@ typedef struct _AFD_FCB {
     LARGE_INTEGER DisconnectTimeout;
     PTRANSPORT_ADDRESS LocalAddress, RemoteAddress;
     ULONG ConnectedSourceAddress;
+    USHORT ConnectedSource6[8];
+    ULONG ConnectedSourceScope;
     PTDI_CONNECTION_INFORMATION AddressFrom, ConnectCallInfo, ConnectReturnInfo;
     PVOID RecvControl;
     PVOID SendDatagramBuffer;

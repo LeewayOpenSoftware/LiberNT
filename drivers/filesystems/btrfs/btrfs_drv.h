@@ -165,8 +165,6 @@ typedef struct _FILE_ID_128 {
 
 #define FILE_CS_FLAG_CASE_SENSITIVE_DIR                 1
 #endif
-#else
-#define FILE_CS_FLAG_CASE_SENSITIVE_DIR                 1
 #endif // __REACTOS__
 
 typedef struct _DUPLICATE_EXTENTS_DATA {

@@ -72,6 +72,9 @@ typedef struct
     } output;
     enum output_type output_type;
     BSTR outstr;
+#ifdef __REACTOS__
+    IUnknown *output_obj;
+#endif
 
     struct xslprocessor_params params;
 } xslprocessor;
@@ -346,6 +349,10 @@ static ULONG WINAPI xslprocessor_Release( IXSLProcessor *iface )
         if (This->input) IXMLDOMNode_Release(This->input);
         if (This->output.unk)
             IUnknown_Release(This->output.unk);
+#ifdef __REACTOS__
+        if (This->output_obj)
+            IUnknown_Release(This->output_obj);
+#endif
         SysFreeString(This->outstr);
 
         LIST_FOR_EACH_ENTRY_SAFE(par, par2, &This->params.list, struct xslprocessor_par, entry)
@@ -552,6 +559,13 @@ static HRESULT WINAPI xslprocessor_put_output(
             IUnknown_Release(This->output.unk);
         This->output.unk = output;
         This->output_type = output_type;
+#ifdef __REACTOS__
+        if (This->output_obj)
+            IUnknown_Release(This->output_obj);
+        This->output_obj = output ? V_UNKNOWN(&var) : NULL;
+        if (This->output_obj)
+            IUnknown_AddRef(This->output_obj);
+#endif
     }
 
     return hr;
@@ -567,6 +581,15 @@ static HRESULT WINAPI xslprocessor_get_output(
 
     if (!output) return E_INVALIDARG;
 
+#ifdef __REACTOS__
+    if (This->output_obj)
+    {
+        V_VT(output) = VT_UNKNOWN;
+        V_UNKNOWN(output) = This->output_obj;
+        IUnknown_AddRef(This->output_obj);
+    }
+    else
+#endif
     if (This->output.unk)
     {
         V_VT(output) = VT_UNKNOWN;

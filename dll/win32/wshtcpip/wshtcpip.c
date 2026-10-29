@@ -718,6 +718,7 @@ typedef struct _WSH_SORT_ENTRY
     IN6_ADDR Source;
     BOOLEAN Usable;
     ULONG Index;
+    PSOCKADDR_IN6 Original;
 } WSH_SORT_ENTRY, *PWSH_SORT_ENTRY;
 
 typedef struct _WSH_PREFIX_POLICY
@@ -938,6 +939,7 @@ WSHIoctl_AddressListSort(
 
         Entry->Destination = *Address;
         Entry->Index = Index;
+        Entry->Original = Address;
         Entry->Usable = WshResolveDestination(pGetBestRoute2, Entry);
         if (!Entry->Usable && Entry->Destination.sin6_scope_id == 0 &&
             (IN6_IS_ADDR_LINKLOCAL(&Entry->Destination.sin6_addr) ||
@@ -951,6 +953,20 @@ WSHIoctl_AddressListSort(
     qsort(Entries, Kept, sizeof(*Entries), WshCompareDestinations);
 
     Required = FIELD_OFFSET(SOCKET_ADDRESS_LIST, Address) + Kept * (sizeof(SOCKET_ADDRESS) + sizeof(SOCKADDR_IN6));
+    if (Output && OutputBufferLength < Required &&
+        OutputBufferLength >= FIELD_OFFSET(SOCKET_ADDRESS_LIST, Address) + Kept * sizeof(SOCKET_ADDRESS))
+    {
+        Output->iAddressCount = (INT)Kept;
+        for (Index = 0; Index < Kept; Index++)
+        {
+            *Entries[Index].Original = Entries[Index].Destination;
+            Output->Address[Index].lpSockaddr = (LPSOCKADDR)Entries[Index].Original;
+            Output->Address[Index].iSockaddrLength = sizeof(SOCKADDR_IN6);
+        }
+        *NumberOfBytesReturned = FIELD_OFFSET(SOCKET_ADDRESS_LIST, Address) + Kept * sizeof(SOCKET_ADDRESS);
+        HeapFree(GetProcessHeap(), 0, Entries);
+        return NO_ERROR;
+    }
     *NumberOfBytesReturned = Required;
     if (!Output || OutputBufferLength < Required)
     {

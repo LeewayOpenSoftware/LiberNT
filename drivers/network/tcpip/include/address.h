@@ -17,6 +17,7 @@
 {                                                     \
     (IPAddress)->Type                = IP_ADDRESS_V4; \
     (IPAddress)->Address.IPv4Address = (RawAddress);  \
+    (IPAddress)->ScopeId             = 0;             \
 }
 
 #if DBG

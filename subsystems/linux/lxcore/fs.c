@@ -264,6 +264,8 @@ LxOpenCommon(
     LxFree(Path);
     if (Error != 0)
         return Error;
+    if (!(Flags & LX_O_PATH))
+        File->Flags |= LX_O_LARGEFILE;
 
     Tty = LxFileGetTty(File);
     if ((Tty != NULL) && !(Flags & LX_O_NOCTTY))
@@ -449,7 +451,7 @@ LX_SYSCALL(LxSysFcntl)
             break;
 
         case LX_F_GETFL:
-            Result = File->Flags | LX_O_LARGEFILE;
+            Result = File->Flags;
             break;
 
         case LX_F_SETFL:
@@ -675,6 +677,8 @@ LX_SYSCALL(LxSysIoctl)
 
         default:
             Result = (File->Ops->Ioctl != NULL) ? File->Ops->Ioctl(File, Request, Call->Args[2]) : -LX_ENOTTY;
+            if ((Result == -LX_ENOTTY) && LxFileIsSocket(File))
+                Result = LxNetDeviceIoctl(Process, Request, Call->Args[2]);
             break;
     }
 
@@ -721,7 +725,7 @@ LxStatNodeFollow(
     _In_ PLX_NODE Node,
     _Out_ PLX_STAT Stat)
 {
-    if ((Node->Type == LX_S_IFLNK) && (Node->LinkTarget == NULL) && (Node->Mount->Kind != LxFsNt))
+    if ((Node->Type == LX_S_IFLNK) && (Node->LinkTarget == NULL) && LxMountIsSynthetic(Node->Mount))
     {
         PLX_FILE File;
         LONG Error = LxVfsOpenNode(Process, Node, LX_O_RDONLY | LX_O_PATH, 0, &File);
@@ -924,7 +928,7 @@ LxStatfsFile(
         Values[0] = LX_SOCKFS_MAGIC;
     else if (LxFileGetTty(File) != NULL)
         Values[0] = LX_DEVPTS_MAGIC;
-    else if (File->Handle != NULL)
+    else if ((File->Handle != NULL) || (LxTmpfsFileInode(File) != NULL))
         Values[0] = 0x01021994ULL;
     else
         Values[0] = LX_ANON_INODE_MAGIC;
@@ -1421,7 +1425,8 @@ LX_SYSCALL(LxSysFallocate)
         Result = -LX_EINVAL;
     else if ((File->Flags & LX_O_ACCMODE) == LX_O_RDONLY)
         Result = -LX_EBADF;
-    else if ((File->Handle == NULL) || File->Directory || (File->Ops->Truncate == NULL))
+    else if (((File->Handle == NULL) && (LxTmpfsFileInode(File) == NULL)) || File->Directory ||
+             (File->Ops->Truncate == NULL))
         Result = -LX_ENODEV;
     else if ((Mode & (LX_FALLOC_FL_PUNCH_HOLE | LX_FALLOC_FL_ZERO_RANGE)) && (File->Memfd != NULL) &&
              (File->Memfd->Seals & (LX_F_SEAL_WRITE | LX_F_SEAL_FUTURE_WRITE)))
@@ -1438,7 +1443,13 @@ LX_SYSCALL(LxSysFallocate)
                 Stat.Size = Offset + Length;
         }
         if ((Result == 0) && (Mode & (LX_FALLOC_FL_PUNCH_HOLE | LX_FALLOC_FL_ZERO_RANGE)) && (Offset < Stat.Size))
-            Result = LxFileZeroRange(File, (ULONG64)Offset, (ULONG64)min(Offset + Length, Stat.Size));
+        {
+            if (LxTmpfsFileInode(File) != NULL)
+                Result = LxTmpfsInodeZeroRange(LxTmpfsFileInode(File), (ULONG64)Offset,
+                                               (ULONG64)min(Offset + Length, Stat.Size));
+            else
+                Result = LxFileZeroRange(File, (ULONG64)Offset, (ULONG64)min(Offset + Length, Stat.Size));
+        }
         if ((File->Mount != NULL) && (File->Path != NULL))
             LxVcacheInvalidatePath(File->Mount->Ns, File->Path);
     }
@@ -1458,7 +1469,7 @@ LxSetAttributesFile(
     LX_NODE Node;
     LONG Error;
 
-    if ((File->Handle == NULL) || File->NtPipe)
+    if (((File->Handle == NULL) && (LxTmpfsFileInode(File) == NULL)) || File->NtPipe)
         return 0;
     Error = LxVfsSetAttributes(Process, NULL, File, Mode, Uid, Gid);
     if ((Error != -LX_EACCES) || (File->Path == NULL) || (File->Path[0] != '/'))
@@ -2216,6 +2227,7 @@ typedef struct _LX_XATTR_TARGET
 {
     PLX_FILE File;
     HANDLE Handle;
+    PLX_TMPFS_INODE Inode;
     BOOLEAN Close;
     ULONG Type;
     ULONG Mode;
@@ -2237,6 +2249,8 @@ LxXattrRelease(
 {
     if (Target->Close && (Target->Handle != NULL))
         ZwClose(Target->Handle);
+    if (Target->Inode != NULL)
+        LxTmpfsInodeDereference(Target->Inode);
     if (Target->File != NULL)
         LxFileDereference(Target->File);
     RtlZeroMemory(Target, sizeof(*Target));
@@ -2282,7 +2296,16 @@ LxXattrResolve(
         if (Target->File == NULL)
             return -LX_EBADF;
         Target->Type = Target->File->Type;
-        Error = LxXattrOpenFile(Target->File, Write, &Target->Handle, &Target->Close);
+        Target->Inode = LxTmpfsFileInode(Target->File);
+        if (Target->Inode != NULL)
+        {
+            LxTmpfsInodeReference(Target->Inode);
+            Error = 0;
+        }
+        else
+        {
+            Error = LxXattrOpenFile(Target->File, Write, &Target->Handle, &Target->Close);
+        }
     }
     else
     {
@@ -2291,8 +2314,15 @@ LxXattrResolve(
         if (Error != 0)
             return Error;
         Target->Type = Node.Type;
-        Error = LxXattrOpenNode(&Node, Write, &Target->Handle);
-        Target->Close = (Error == 0);
+        if (Node.Exists && (Node.Mount != NULL) && (Node.Mount->Kind == LxFsTmpfs))
+        {
+            Error = LxTmpfsLookup(Node.Mount, Node.Relative, &Target->Inode);
+        }
+        else
+        {
+            Error = LxXattrOpenNode(&Node, Write, &Target->Handle);
+            Target->Close = (Error == 0);
+        }
         LxNodeFree(&Node);
     }
     if (Error != 0)
@@ -2300,11 +2330,38 @@ LxXattrResolve(
         LxXattrRelease(Target);
         return Error;
     }
-    if (LxNtReadLxAttributes(Target->Handle, &Target->Mode, &Target->Uid, &Target->Gid, &Device) != 0)
+    if (Target->Inode != NULL)
+        LxTmpfsInodeAttributes(Target->Inode, &Target->Mode, &Target->Uid, &Target->Gid, &Device);
+    else if (LxNtReadLxAttributes(Target->Handle, &Target->Mode, &Target->Uid, &Target->Gid, &Device) != 0)
         Target->Mode = Target->Uid = Target->Gid = MAXULONG;
     if ((Target->Mode != MAXULONG) && (Target->Mode & LX_S_IFMT))
         Target->Type = Target->Mode & LX_S_IFMT;
     return 0;
+}
+
+static
+LONG
+LxXattrTargetRead(
+    _In_ PLX_XATTR_TARGET Target,
+    _Out_writes_bytes_to_(Capacity, *Length) PUCHAR Buffer,
+    _In_ ULONG Capacity,
+    _Out_ PULONG Length)
+{
+    if (Target->Inode != NULL)
+        return LxTmpfsXattrRead(Target->Inode, Buffer, Capacity, Length);
+    return LxXattrRead(Target->Handle, Buffer, Capacity, Length);
+}
+
+static
+LONG
+LxXattrTargetWrite(
+    _In_ PLX_XATTR_TARGET Target,
+    _In_reads_bytes_(Length) PUCHAR Blob,
+    _In_ ULONG Length)
+{
+    if (Target->Inode != NULL)
+        return LxTmpfsXattrWrite(Target->Inode, Blob, Length);
+    return LxXattrWrite(Target->Handle, Blob, Length);
 }
 
 static
@@ -2442,7 +2499,7 @@ LxXattrGetCommon(
     if (Result == 0)
         Result = LxXattrPermission(Call->Process, Name, Target, FALSE);
     if (Result == 0)
-        Result = LxXattrRead(Target->Handle, Blob, LX_XATTR_BLOB_MAX, &Length);
+        Result = LxXattrTargetRead(Target, Blob, LX_XATTR_BLOB_MAX, &Length);
     if (Result == 0)
     {
         Record = LxXattrFind(Blob, Length, Name, &RecordLength, &ValueLength);
@@ -2492,7 +2549,7 @@ LxXattrSetCommon(
     if (Result == 0)
         Result = LxXattrPermission(Call->Process, Name, Target, TRUE);
     if (Result == 0)
-        Result = LxXattrRead(Target->Handle, Blob, LX_XATTR_BLOB_MAX, &Length);
+        Result = LxXattrTargetRead(Target, Blob, LX_XATTR_BLOB_MAX, &Length);
     if (Result != 0)
         goto Exit;
 
@@ -2538,7 +2595,7 @@ LxXattrSetCommon(
             goto Exit;
         NewLength += 4 + NameLength + (ULONG)Size;
     }
-    Result = LxXattrWrite(Target->Handle, Updated, NewLength);
+    Result = LxXattrTargetWrite(Target, Updated, NewLength);
 
 Exit:
     LxFree(Name);
@@ -2561,7 +2618,7 @@ LxXattrListCommon(
     if (Blob == NULL)
         return -LX_ENOMEM;
     Names = Blob + LX_XATTR_BLOB_MAX;
-    Result = LxXattrRead(Target->Handle, Blob, LX_XATTR_BLOB_MAX, &Length);
+    Result = LxXattrTargetRead(Target, Blob, LX_XATTR_BLOB_MAX, &Length);
     while ((Result == 0) && (Offset + 4 <= Length))
     {
         USHORT EntryName, EntryValue;
@@ -3067,6 +3124,8 @@ LxFileCurrentPath(
     HANDLE Root;
     PSTR Path = NULL;
 
+    if ((File->Mount != NULL) && (LxTmpfsFileInode(File) != NULL))
+        return LxTmpfsInodePath(LxTmpfsFileInode(File), File->Mount);
     if ((File->Mount == NULL) || (File->Mount->Kind != LxFsNt) || (File->Handle == NULL) || File->NtPipe)
         return NULL;
     if (LxNtPath(File->Mount, "", &RootPath) != 0)

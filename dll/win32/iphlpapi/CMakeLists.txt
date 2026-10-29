@@ -27,6 +27,7 @@ list(APPEND SOURCE
     iphlpapi_reactos.c
     iphlpapi_main.c
     media.c
+    netio_reactos.c
     iphlpapi_private.h
     ${CMAKE_CURRENT_BINARY_DIR}/iphlpapi_stubs.c)
 

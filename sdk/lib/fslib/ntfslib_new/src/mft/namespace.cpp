@@ -1702,9 +1702,10 @@ MasterFileTable::RenameFile(
     {
         LONG Comparison;
 
-        Status = DiskVolume->CompareFileNames(
+        Status = DiskVolume->CollateFileNames(
             &OldNameString,
             &NewNameString,
+            NewParent->IsCaseSensitiveDirectory(),
             &Comparison);
         if (!NT_SUCCESS(Status))
             goto Done;

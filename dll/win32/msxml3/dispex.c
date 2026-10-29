@@ -126,7 +126,10 @@ static tid_id_t tid_ids[] = {
     { &IID_IMXReaderControl, LibXml2 },
     { &IID_IMXWriter, LibXml2 },
     { &IID_IVBMXNamespaceManager, LibXml2 },
-    { &IID_IServerXMLHTTPRequest, LibXml2 }
+    { &IID_IServerXMLHTTPRequest, LibXml2 },
+#ifdef __REACTOS__
+    { &IID_IMXNamespacePrefixes, LibXml2 },
+#endif
 };
 
 const IID *get_riid_from_tid(tid_t tid)
@@ -157,6 +160,19 @@ static HRESULT get_typelib(unsigned lib, ITypeLib **tl)
     *tl = typelib[lib];
     return S_OK;
 }
+
+#ifdef __REACTOS__
+HRESULT get_class_typeinfo(const CLSID *clsid, ITypeInfo **typeinfo)
+{
+    ITypeLib *typelib;
+    HRESULT hr;
+
+    if (FAILED(hr = get_typelib(LibXml2, &typelib)))
+        return hr;
+
+    return ITypeLib_GetTypeInfoOfGuid(typelib, clsid, typeinfo);
+}
+#endif
 
 HRESULT get_typeinfo(enum tid_t tid, ITypeInfo **typeinfo)
 {

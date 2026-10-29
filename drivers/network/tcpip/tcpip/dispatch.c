@@ -4,6 +4,7 @@
  * FILE:        tcpip/dispatch.h
  * PURPOSE:     TDI dispatch routines
  * PROGRAMMERS: Casper S. Hornstrup (chorns@users.sourceforge.net)
+ *              Ahmed ARIF (arif.ing@outlook.com)
  * REVISIONS:
  *   CSH 01/08-2000 Created
  * TODO:        Validate device object in all dispatch routines
@@ -616,10 +617,13 @@ NTSTATUS DispTdiListen(
  */
 {
   PCONNECTION_ENDPOINT Connection;
+  PCONNECTION_ENDPOINT Listener = NULL;
+  PCONNECTION_ENDPOINT DrainListener = NULL;
   PTDI_REQUEST_KERNEL Parameters;
   PTRANSPORT_CONTEXT TranContext;
   PIO_STACK_LOCATION IrpSp;
   NTSTATUS Status = STATUS_SUCCESS;
+  BOOLEAN NewListener = FALSE;
 
   TI_DbgPrint(DEBUG_IRP, ("Called.\n"));
 
@@ -680,16 +684,26 @@ NTSTATUS DispTdiListen(
           ReferenceObject(Connection->AddressFile);
 	  Connection->AddressFile->Listener->AddressFile =
 	      Connection->AddressFile;
-
-	  Status = TCPSocket( Connection->AddressFile->Listener,
-			      Connection->AddressFile->Family,
-			      SOCK_STREAM,
-			      Connection->AddressFile->Protocol );
+	  NewListener = TRUE;
       }
+  }
+
+  if( NT_SUCCESS(Status) ) {
+      Listener = Connection->AddressFile->Listener;
+      ReferenceObject(Listener);
+  }
+
+  UnlockObject(Connection->AddressFile);
+
+  if( NewListener ) {
+      Status = TCPSocket( Listener,
+			  Connection->AddressFile->Family,
+			  SOCK_STREAM,
+			  Connection->AddressFile->Protocol );
 
       if( NT_SUCCESS(Status) ) {
-	  ReferenceObject(Connection->AddressFile->Listener);
-	  Status = TCPListen( Connection->AddressFile->Listener, 1024 );
+	  ReferenceObject(Listener);
+	  Status = TCPListen( Listener, 1024 );
 	  /* BACKLOG */
       }
   }
@@ -697,14 +711,20 @@ NTSTATUS DispTdiListen(
   if( NT_SUCCESS(Status) ) {
       Status = TCPAccept
 	  ( (PTDI_REQUEST)Parameters,
-	    Connection->AddressFile->Listener,
+	    Listener,
 	    Connection,
 	    DispDataRequestComplete,
-	    Irp );
+	    Irp,
+	    &DrainListener );
   }
 
-  UnlockObject(Connection->AddressFile);
   UnlockObject(Connection);
+
+  if (Listener)
+      DereferenceObject(Listener);
+
+  if (DrainListener)
+      TCPDrainPendingAccept(DrainListener);
 
 done:
   if (Status != STATUS_PENDING) {

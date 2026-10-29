@@ -469,6 +469,13 @@ struct saxreader
     int max_element_depth;
     BSTR empty_bstr;
     MSXML_VERSION version;
+#ifdef __REACTOS__
+    ISAXLocator ISAXLocator_iface;
+    struct saxlocator *locator;
+    int line;
+    int column;
+    bool no_dispatch;
+#endif
 };
 
 static HRESULT saxreader_put_handler(struct saxreader *reader, enum saxhandler_type type, void *ptr, bool vb)
@@ -6037,6 +6044,11 @@ static void saxreader_detect_encoding(struct saxlocator *locator, bool force_utf
     raw->written = read;
 
     encoding = force_utf16 ? XML_ENCODING_UTF16LE : saxreader_match_encoding(raw->data, read, &bom);
+#ifdef __REACTOS__
+    if (locator->saxreader->version == MSXML4 &&
+            (encoding == XML_ENCODING_UCS4BE || encoding == XML_ENCODING_UCS4LE))
+        encoding = XML_ENCODING_UTF8;
+#endif
 
     if (encoding == XML_ENCODING_UNKNOWN)
     {
@@ -6081,6 +6093,10 @@ static HRESULT saxreader_parse_stream(struct saxreader *reader, ISequentialStrea
 
     if (FAILED(hr = saxlocator_create(reader, stream, vbInterface, &locator)))
         return hr;
+
+#ifdef __REACTOS__
+    reader->locator = locator;
+#endif
 
     while (locator->state != SAX_PARSER_EOF)
     {
@@ -6202,6 +6218,11 @@ static HRESULT saxreader_parse_stream(struct saxreader *reader, ISequentialStrea
     }
 
     hr = locator->status;
+#ifdef __REACTOS__
+    reader->line = locator->line;
+    reader->column = locator->column;
+    reader->locator = NULL;
+#endif
     ISAXLocator_Release(&locator->ISAXLocator_iface);
 
     return hr;
@@ -6564,6 +6585,12 @@ static HRESULT WINAPI saxxmlreader_QueryInterface(IVBSAXXMLReader *iface, REFIID
 
     *obj = NULL;
 
+#ifdef __REACTOS__
+    if (reader->no_dispatch && (IsEqualGUID(riid, &IID_IDispatch) ||
+            IsEqualGUID(riid, &IID_IDispatchEx) || IsEqualGUID(riid, &IID_IVBSAXXMLReader)))
+        return E_NOINTERFACE;
+#endif
+
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IDispatch) ||
         IsEqualGUID(riid, &IID_IVBSAXXMLReader))
@@ -6578,6 +6605,12 @@ static HRESULT WINAPI saxxmlreader_QueryInterface(IVBSAXXMLReader *iface, REFIID
     {
         *obj = &reader->ISAXXMLReaderExtension_iface;
     }
+#ifdef __REACTOS__
+    else if (IsEqualGUID(riid, &IID_ISAXLocator) && reader->version >= MSXML4)
+    {
+        *obj = &reader->ISAXLocator_iface;
+    }
+#endif
     else if (dispex_query_interface(&reader->dispex, riid, obj))
     {
         return *obj ? S_OK : E_NOINTERFACE;
@@ -7022,6 +7055,94 @@ static const struct ISAXXMLReaderVtbl saxxmlreadervtbl =
     isaxxmlreader_parseURL
 };
 
+#ifdef __REACTOS__
+static inline struct saxreader *impl_reader_from_ISAXLocator(ISAXLocator *iface)
+{
+    return CONTAINING_RECORD(iface, struct saxreader, ISAXLocator_iface);
+}
+
+static HRESULT WINAPI saxreader_locator_QueryInterface(ISAXLocator *iface, REFIID riid, void **obj)
+{
+    struct saxreader *reader = impl_reader_from_ISAXLocator(iface);
+    return IVBSAXXMLReader_QueryInterface(&reader->IVBSAXXMLReader_iface, riid, obj);
+}
+
+static ULONG WINAPI saxreader_locator_AddRef(ISAXLocator *iface)
+{
+    struct saxreader *reader = impl_reader_from_ISAXLocator(iface);
+    return IVBSAXXMLReader_AddRef(&reader->IVBSAXXMLReader_iface);
+}
+
+static ULONG WINAPI saxreader_locator_Release(ISAXLocator *iface)
+{
+    struct saxreader *reader = impl_reader_from_ISAXLocator(iface);
+    return IVBSAXXMLReader_Release(&reader->IVBSAXXMLReader_iface);
+}
+
+static HRESULT WINAPI saxreader_locator_getColumnNumber(ISAXLocator *iface, int *column)
+{
+    struct saxreader *reader = impl_reader_from_ISAXLocator(iface);
+
+    TRACE("%p, %p.\n", iface, column);
+
+    if (reader->locator)
+        return ISAXLocator_getColumnNumber(&reader->locator->ISAXLocator_iface, column);
+
+    *column = reader->column;
+    return S_OK;
+}
+
+static HRESULT WINAPI saxreader_locator_getLineNumber(ISAXLocator *iface, int *line)
+{
+    struct saxreader *reader = impl_reader_from_ISAXLocator(iface);
+
+    TRACE("%p, %p.\n", iface, line);
+
+    if (reader->locator)
+        return ISAXLocator_getLineNumber(&reader->locator->ISAXLocator_iface, line);
+
+    *line = reader->line;
+    return S_OK;
+}
+
+static HRESULT WINAPI saxreader_locator_getPublicId(ISAXLocator *iface, const WCHAR **value)
+{
+    struct saxreader *reader = impl_reader_from_ISAXLocator(iface);
+
+    TRACE("%p, %p.\n", iface, value);
+
+    if (reader->locator)
+        return ISAXLocator_getPublicId(&reader->locator->ISAXLocator_iface, value);
+
+    *value = NULL;
+    return S_OK;
+}
+
+static HRESULT WINAPI saxreader_locator_getSystemId(ISAXLocator *iface, const WCHAR **value)
+{
+    struct saxreader *reader = impl_reader_from_ISAXLocator(iface);
+
+    TRACE("%p, %p.\n", iface, value);
+
+    if (reader->locator)
+        return ISAXLocator_getSystemId(&reader->locator->ISAXLocator_iface, value);
+
+    *value = NULL;
+    return S_OK;
+}
+
+static const struct ISAXLocatorVtbl saxreader_locator_vtbl =
+{
+    saxreader_locator_QueryInterface,
+    saxreader_locator_AddRef,
+    saxreader_locator_Release,
+    saxreader_locator_getColumnNumber,
+    saxreader_locator_getLineNumber,
+    saxreader_locator_getPublicId,
+    saxreader_locator_getSystemId
+};
+#endif
+
 static HRESULT WINAPI saxxmlreader_extension_QueryInterface(ISAXXMLReaderExtension *iface, REFIID riid, void **obj)
 {
     struct saxreader *reader = impl_from_ISAXXMLReaderExtension(iface);
@@ -7085,6 +7206,10 @@ static HRESULT saxreader_create(MSXML_VERSION version, struct saxreader **reader
     object->version = version;
     object->empty_bstr = SysAllocString(L"");
     object->max_element_depth = version > MSXML3 ? 256 : 5000;
+#ifdef __REACTOS__
+    object->ISAXLocator_iface.lpVtbl = &saxreader_locator_vtbl;
+    object->line = version < MSXML4 ? 0 : 1;
+#endif
 
     init_dispex(&object->dispex, (IUnknown *)&object->IVBSAXXMLReader_iface, &saxreader_dispex);
 
@@ -7109,6 +7234,22 @@ HRESULT SAXXMLReader_create(MSXML_VERSION version, void **obj)
 
     return hr;
 }
+
+#ifdef __REACTOS__
+HRESULT SAXXMLReader_create_iid(MSXML_VERSION version, REFIID riid, void **obj)
+{
+    struct saxreader *reader;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = SAXXMLReader_create(version, obj)))
+    {
+        reader = impl_from_IVBSAXXMLReader(*obj);
+        reader->no_dispatch = version == MSXML4 && IsEqualGUID(riid, &IID_ISAXXMLReader);
+    }
+
+    return hr;
+}
+#endif
 
 /* Fixed size buffer variant, to be used without markup. */
 static void saxreader_parse_xmldecl_body(struct saxlocator *locator)

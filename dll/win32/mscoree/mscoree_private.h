@@ -69,6 +69,10 @@ typedef struct CLRRuntimeInfo
     DWORD minor;
     DWORD build;
     struct RuntimeHost *loaded_runtime;
+#ifdef __REACTOS__
+    DWORD startup_flags;
+    WCHAR *host_config_file;
+#endif
 } CLRRuntimeInfo;
 
 struct RuntimeHost
@@ -77,8 +81,11 @@ struct RuntimeHost
     ICLRRuntimeHost ICLRRuntimeHost_iface;
 #ifdef __REACTOS__
     ICLRControl ICLRControl_iface;
+    ICLRDomainManager ICLRDomainManager_iface;
+    IHostControl *host_control;
     WCHAR *domain_manager_assembly;
     WCHAR *domain_manager_type;
+    BOOL default_domain_started;
 #endif
     CLRRuntimeInfo *version;
     CRITICAL_SECTION lock;
@@ -122,10 +129,29 @@ extern HRESULT ICLRRuntimeInfo_GetRuntimeHost(ICLRRuntimeInfo *iface, RuntimeHos
 
 extern HRESULT MetaDataDispenser_CreateInstance(IUnknown **ppUnk);
 
+#ifdef __REACTOS__
+typedef struct assembly_binding
+{
+    struct list entry;
+    LPWSTR name;
+    LPWSTR public_key_token;
+    LPWSTR culture;
+    BOOL is_code_base;
+    WORD low[4];
+    WORD high[4];
+    WORD target[4];
+    LPWSTR code_base;
+} assembly_binding;
+#endif
+
 typedef struct parsed_config_file
 {
     struct list supported_runtimes;
     LPWSTR private_path;
+#ifdef __REACTOS__
+    HRESULT parse_result;
+    struct list assembly_bindings;
+#endif
 } parsed_config_file;
 
 typedef struct supported_runtime
@@ -142,6 +168,21 @@ extern HRESULT parse_config_file(LPCWSTR filename, parsed_config_file *result);
 extern HRESULT parse_config_stream(IStream *stream, parsed_config_file *result);
 
 extern void free_parsed_config_file(parsed_config_file *file);
+
+#ifdef __REACTOS__
+extern HRESULT check_host_config_file(LPCWSTR filename);
+
+extern HRESULT set_startup_flags(ICLRRuntimeInfo *iface, DWORD flags, BOOL set_config, LPCWSTR host_config_file);
+
+extern void RuntimeHost_NotifyEvent(EClrEvent event, void *data);
+
+extern int (CDECL *mono_domain_get_id)(MonoDomain *domain);
+
+extern void set_app_assembly_bindings(struct list *bindings, const WCHAR *base_dir, SIZE_T base_dir_size);
+extern void replace_app_assembly_bindings(struct list *bindings);
+extern char* (CDECL *mono_string_to_utf8)(MonoString *string_obj);
+extern void (CDECL *mono_free)(void *);
+#endif
 
 typedef enum {
 	MONO_IMAGE_OK,

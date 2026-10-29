@@ -141,6 +141,250 @@ bool node_query_interface(struct domnode *node, REFIID riid, void **obj)
     return false;
 }
 
+#ifdef __REACTOS__
+static const IID IID_node_tearoff = {0x5b6c1a52,0x2f8e,0x4d1b,{0x9a,0x4e,0x3c,0x71,0x0d,0x52,0x8e,0x19}};
+
+static CRITICAL_SECTION node_identity_cs;
+static CRITICAL_SECTION_DEBUG node_identity_cs_debug =
+{
+    0, 0, &node_identity_cs,
+    { &node_identity_cs_debug.ProcessLocksList, &node_identity_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": node_identity_cs") }
+};
+static CRITICAL_SECTION node_identity_cs = { &node_identity_cs_debug, -1, 0, 0, 0, 0 };
+
+static HRESULT create_node_object(struct domnode *node, IUnknown **obj);
+
+IUnknown *domnode_get_identity(struct domnode *node)
+{
+    IUnknown *identity;
+
+    EnterCriticalSection(&node_identity_cs);
+    if ((identity = node->identity))
+        IUnknown_AddRef(identity);
+    LeaveCriticalSection(&node_identity_cs);
+
+    return identity;
+}
+
+IUnknown *domnode_set_identity(struct domnode *node, IUnknown *identity)
+{
+    IUnknown *existing;
+
+    EnterCriticalSection(&node_identity_cs);
+    if ((existing = node->identity))
+        IUnknown_AddRef(existing);
+    else
+        node->identity = identity;
+    LeaveCriticalSection(&node_identity_cs);
+
+    return existing;
+}
+
+LONG domnode_release_identity(struct domnode *node, IUnknown *identity, LONG *refcount)
+{
+    LONG ref;
+
+    EnterCriticalSection(&node_identity_cs);
+    ref = InterlockedDecrement(refcount);
+    if (!ref && node->identity == identity)
+        node->identity = NULL;
+    LeaveCriticalSection(&node_identity_cs);
+
+    return ref;
+}
+
+static struct node_tearoff *get_node_tearoff(IUnknown *obj)
+{
+    struct node_tearoff *tearoff = NULL;
+
+    IUnknown_QueryInterface(obj, &IID_node_tearoff, (void **)&tearoff);
+    return tearoff;
+}
+
+static HRESULT node_get_identity(struct domnode *node, IUnknown **ret)
+{
+    struct node_tearoff *tearoff;
+    IUnknown *obj;
+    HRESULT hr;
+
+    if ((*ret = domnode_get_identity(node)))
+        return S_OK;
+
+    if (FAILED(hr = create_node_object(node, &obj)))
+        return hr;
+
+    if (!(tearoff = get_node_tearoff(obj)))
+    {
+        *ret = obj;
+        return S_OK;
+    }
+    tearoff->kind = NODE_TEAROFF_IDENTITY;
+
+    if ((*ret = domnode_set_identity(node, obj)))
+        IUnknown_Release(obj);
+    else
+        *ret = obj;
+
+    return S_OK;
+}
+
+static enum node_tearoff_kind node_tearoff_get_kind(const IID * const *typed_iids, REFIID riid)
+{
+    if (IsEqualGUID(riid, &IID_IXMLDOMNode))
+        return NODE_TEAROFF_NODE;
+    if (IsEqualGUID(riid, &IID_IDispatch))
+        return NODE_TEAROFF_DISPATCH;
+    if (IsEqualGUID(riid, &IID_IDispatchEx))
+        return NODE_TEAROFF_DISPATCHEX;
+
+    for (; *typed_iids; ++typed_iids)
+    {
+        if (IsEqualGUID(riid, *typed_iids))
+            return NODE_TEAROFF_TYPED;
+    }
+
+    return NODE_TEAROFF_NONE;
+}
+
+bool node_tearoff_query_interface(struct node_tearoff *tearoff, IUnknown *iface, DispatchEx *dispex,
+        struct domnode *node, const IID * const *typed_iids, REFIID riid, void **obj)
+{
+    struct node_tearoff *new_tearoff;
+    enum node_tearoff_kind kind;
+    IUnknown *identity, *unk;
+
+    if (IsEqualGUID(riid, &IID_node_tearoff))
+    {
+        *obj = tearoff;
+        return true;
+    }
+
+    if (tearoff->kind == NODE_TEAROFF_NONE)
+        return false;
+
+    identity = tearoff->kind == NODE_TEAROFF_IDENTITY ? iface : tearoff->identity;
+
+    if (IsEqualGUID(riid, &IID_IUnknown))
+    {
+        *obj = identity;
+        IUnknown_AddRef(identity);
+        return true;
+    }
+
+    if ((kind = node_tearoff_get_kind(typed_iids, riid)) == NODE_TEAROFF_NONE)
+        return false;
+
+    if (kind == tearoff->kind)
+    {
+        *obj = kind == NODE_TEAROFF_DISPATCHEX ? (void *)&dispex->IDispatchEx_iface : (void *)iface;
+        IUnknown_AddRef(iface);
+        return true;
+    }
+
+    *obj = NULL;
+    if (FAILED(create_node_object(node, &unk)))
+        return true;
+
+    if (!(new_tearoff = get_node_tearoff(unk)))
+    {
+        IUnknown_Release(unk);
+        return true;
+    }
+
+    new_tearoff->kind = kind;
+    new_tearoff->identity = identity;
+    IUnknown_AddRef(identity);
+    if (tearoff->kind == NODE_TEAROFF_NODE && kind == NODE_TEAROFF_TYPED)
+    {
+        new_tearoff->source = iface;
+        IUnknown_AddRef(iface);
+    }
+
+    IUnknown_QueryInterface(unk, riid, obj);
+    IUnknown_Release(unk);
+    return true;
+}
+
+ULONG node_tearoff_refcount(const struct node_tearoff *tearoff, const struct domnode *node, LONG refcount)
+{
+    if (tearoff->kind == NODE_TEAROFF_TYPED)
+        return refcount + 1;
+    if (tearoff->kind == NODE_TEAROFF_IDENTITY && node->parent)
+        return refcount + 1;
+    return refcount;
+}
+
+LONG node_tearoff_decrement(const struct node_tearoff *tearoff, struct domnode *node, LONG *refcount,
+        ULONG *reported)
+{
+    LONG ref;
+
+    if (tearoff->kind != NODE_TEAROFF_IDENTITY)
+    {
+        ref = InterlockedDecrement(refcount);
+        *reported = node_tearoff_refcount(tearoff, node, ref);
+        return ref;
+    }
+
+    EnterCriticalSection(&node_identity_cs);
+    ref = InterlockedDecrement(refcount);
+    *reported = node_tearoff_refcount(tearoff, node, ref);
+    if (!ref && node->identity && get_node_tearoff(node->identity) == tearoff)
+        node->identity = NULL;
+    LeaveCriticalSection(&node_identity_cs);
+
+    return ref;
+}
+
+void node_tearoff_cleanup(struct node_tearoff *tearoff)
+{
+    if (tearoff->source)
+        IUnknown_Release(tearoff->source);
+    if (tearoff->identity)
+        IUnknown_Release(tearoff->identity);
+    tearoff->source = tearoff->identity = NULL;
+}
+
+static const IID *node_get_typed_iid(const struct domnode *node)
+{
+    switch (node->type)
+    {
+    case NODE_ELEMENT: return &IID_IXMLDOMElement;
+    case NODE_ATTRIBUTE: return &IID_IXMLDOMAttribute;
+    case NODE_TEXT: return &IID_IXMLDOMText;
+    case NODE_CDATA_SECTION: return &IID_IXMLDOMCDATASection;
+    case NODE_ENTITY_REFERENCE: return &IID_IXMLDOMEntityReference;
+    case NODE_PROCESSING_INSTRUCTION: return &IID_IXMLDOMProcessingInstruction;
+    case NODE_COMMENT: return &IID_IXMLDOMComment;
+    case NODE_DOCUMENT: return &IID_IXMLDOMDocument;
+    case NODE_DOCUMENT_FRAGMENT: return &IID_IXMLDOMDocumentFragment;
+    case NODE_DOCUMENT_TYPE: return &IID_IXMLDOMDocumentType;
+    case NODE_ENTITY: return &IID_IXMLDOMEntity;
+    case NODE_NOTATION: return &IID_IXMLDOMNotation;
+    default: return &IID_IXMLDOMNode;
+    }
+}
+
+HRESULT create_node_typed(struct domnode *node, void **ret)
+{
+    IUnknown *identity;
+    HRESULT hr;
+
+    *ret = NULL;
+
+    if (!node)
+        return S_FALSE;
+
+    if (FAILED(hr = node_get_identity(node, &identity)))
+        return hr;
+
+    hr = IUnknown_QueryInterface(identity, node_get_typed_iid(node), ret);
+    IUnknown_Release(identity);
+    return hr;
+}
+#endif
+
 /* common ISupportErrorInfo implementation */
 typedef struct {
    ISupportErrorInfo ISupportErrorInfo_iface;
@@ -1322,8 +1566,13 @@ HRESULT create_pi_node(struct domnode *doc, const WCHAR *target, const WCHAR *da
     else
         hr = node_put_data(pi, data);
 
+#ifdef __REACTOS__
+    if (SUCCEEDED(hr))
+        return create_node_typed(pi, (void **)ret);
+#else
     if (SUCCEEDED(hr))
         return create_node(pi, (IXMLDOMNode **)ret);
+#endif
 
     domnode_destroy_tree(pi);
 
@@ -1684,7 +1933,11 @@ static void domnode_append_ignored_pre(struct domnode *node, struct node_get_tex
 
     if (sibling)
     {
+#ifdef __REACTOS__
+        if (sibling->type == NODE_ELEMENT || sibling->type == NODE_CDATA_SECTION)
+#else
         if (sibling->type == NODE_ELEMENT)
+#endif
             return domnode_append_ignored(sibling, DOMNODE_IGNORED_WS, context);
     }
     else if (node->parent && node->parent->type == NODE_ELEMENT)
@@ -1776,6 +2029,27 @@ static void domnode_get_attribute_value(struct domnode *attr, struct string_buff
             }
         }
     }
+#ifdef __REACTOS__
+    else if (!properties->normalize_attribute_values && properties->version >= MSXML6)
+    {
+        LIST_FOR_EACH_ENTRY(child, &attr->children, struct domnode, entry)
+        {
+            p = child->data;
+
+            while (p && *p)
+            {
+                if (*p == '\r')
+                {
+                    if (p[1] == '\n') ++p;
+                    string_append(buffer, L"\n", 1);
+                }
+                else
+                    string_append(buffer, p, 1);
+                ++p;
+            }
+        }
+    }
+#endif
     else
     {
         LIST_FOR_EACH_ENTRY(child, &attr->children, struct domnode, entry)
@@ -3484,8 +3758,10 @@ HRESULT node_get_prefix(struct domnode *node, BSTR *prefix)
 HRESULT node_get_attribute(const struct domnode *node, const WCHAR *name, IXMLDOMAttribute **attribute)
 {
     struct domnode *attr;
+#ifndef __REACTOS__
     IUnknown *obj;
     HRESULT hr;
+#endif
 
     if (attribute)
         *attribute = NULL;
@@ -3499,6 +3775,9 @@ HRESULT node_get_attribute(const struct domnode *node, const WCHAR *name, IXMLDO
     if (domnode_get_attribute(node, name, &attr) != S_OK)
         return S_FALSE;
 
+#ifdef __REACTOS__
+    return create_node_typed(attr, (void **)attribute);
+#else
     hr = create_attribute(attr, &obj);
     if (SUCCEEDED(hr))
     {
@@ -3507,6 +3786,7 @@ HRESULT node_get_attribute(const struct domnode *node, const WCHAR *name, IXMLDO
     }
 
     return hr;
+#endif
 }
 
 HRESULT node_get_qualified_attribute(const struct domnode *node, const WCHAR *name, const WCHAR *uri, IXMLDOMNode **ret)
@@ -3742,15 +4022,39 @@ HRESULT node_get_base_name(struct domnode *node, BSTR *name)
     return return_bstr(node->name, name);
 }
 
+#ifdef __REACTOS__
 HRESULT create_node(struct domnode *node, IXMLDOMNode **ret)
 {
-    IUnknown *obj;
+    IUnknown *identity;
     HRESULT hr;
 
     *ret = NULL;
 
     if (!node)
         return S_FALSE;
+
+    if (FAILED(hr = node_get_identity(node, &identity)))
+        return hr;
+
+    hr = IUnknown_QueryInterface(identity, &IID_IXMLDOMNode, (void **)ret);
+    IUnknown_Release(identity);
+    return hr;
+}
+
+static HRESULT create_node_object(struct domnode *node, IUnknown **ret)
+#else
+HRESULT create_node(struct domnode *node, IXMLDOMNode **ret)
+#endif
+{
+    IUnknown *obj;
+    HRESULT hr;
+
+    *ret = NULL;
+
+#ifndef __REACTOS__
+    if (!node)
+        return S_FALSE;
+#endif
 
     switch (node->type)
     {
@@ -3795,11 +4099,16 @@ HRESULT create_node(struct domnode *node, IXMLDOMNode **ret)
         return E_FAIL;
     }
 
+#ifdef __REACTOS__
+    if (hr == S_OK)
+        *ret = obj;
+#else
     if (hr == S_OK)
     {
         hr = IUnknown_QueryInterface(obj, &IID_IXMLDOMNode, (void **)ret);
         IUnknown_Release(obj);
     }
+#endif
 
     return hr;
 }
@@ -5230,7 +5539,11 @@ HRESULT node_split_text(struct domnode *node, LONG offset, IXMLDOMText **out)
     if (node->parent)
         domnode_insert_domnode(node->parent, child, domnode_get_next_sibling(node));
 
+#ifdef __REACTOS__
+    if (FAILED(hr = create_node_typed(child, (void **)out)))
+#else
     if (FAILED(hr = create_node(child, (IXMLDOMNode **)out)))
+#endif
         domnode_unlink_child(child);
 
     return hr;

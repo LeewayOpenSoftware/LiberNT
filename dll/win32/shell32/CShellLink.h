@@ -101,6 +101,10 @@ private:
     CComPtr<IPropertyStore> m_pPropertyStore;
     CComHeapPtr<BYTE>    m_pHiddenStorages;
     ULONG                m_cbHiddenStorages;
+    CComPtr<IExtractIconW> m_pTargetExtractIcon;
+    CComHeapPtr<WCHAR>   m_pszExtractIconFile;
+    INT                  m_iExtractIconIndex;
+    BOOL                 m_bExtractIconChosen;
 
     VOID Reset();
 

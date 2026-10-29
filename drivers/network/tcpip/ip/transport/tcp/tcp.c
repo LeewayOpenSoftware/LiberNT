@@ -791,6 +791,7 @@ VOID TCPMapToDualStack(
     Address->Address.IPv6Address[5] = 0xFFFF;
     RtlCopyMemory(&Address->Address.IPv6Address[6], &IPv4Address, sizeof(IPv4Address));
     Address->Type = IP_ADDRESS_V6;
+    Address->ScopeId = 0;
 }
 
 NTSTATUS TCPGetSockAddress

@@ -40,31 +40,31 @@
 #@ stub CPNatfwtIndicateReceivedBuffers
 #@ stub CPNatfwtRegisterProviderInstance
 #@ stub CreateAnycastIpAddressEntry
-#@ stub CreateIpForwardEntry2
+@ stdcall CreateIpForwardEntry2( ptr )
 @ stdcall CreateIpForwardEntry( ptr )
-#@ stub CreateIpNetEntry2
+@ stdcall CreateIpNetEntry2( ptr )
 @ stdcall CreateIpNetEntry( ptr )
 #@ stub CreatePersistentTcpPortReservation
 #@ stub CreatePersistentUdpPortReservation
 @ stdcall CreateProxyArpEntry( long long long )
 @ stdcall CreateSortedAddressPairs( ptr long ptr long long ptr ptr )
-#@ stub CreateUnicastIpAddressEntry
+@ stdcall CreateUnicastIpAddressEntry( ptr )
 #@ stub DeleteAnycastIpAddressEntry
 @ stdcall DeleteIPAddress( long )
-#@ stub DeleteIpForwardEntry2
+@ stdcall DeleteIpForwardEntry2( ptr )
 @ stdcall DeleteIpForwardEntry( ptr )
-#@ stub DeleteIpNetEntry2
+@ stdcall DeleteIpNetEntry2( ptr )
 @ stdcall DeleteIpNetEntry( ptr )
 #@ stub DeletePersistentTcpPortReservation
 #@ stub DeletePersistentUdpPortReservation
 @ stdcall DeleteProxyArpEntry( long long long )
-#@ stub DeleteUnicastIpAddressEntry
+@ stdcall DeleteUnicastIpAddressEntry( ptr )
 @ stdcall DisableMediaSense(ptr ptr)
 #@ stub do_echo_rep
 #@ stub do_echo_req
 @ stdcall EnableRouter( ptr ptr )
 @ stdcall FlushIpNetTable( long )
-#@ stub FlushIpNetTable2
+@ stdcall FlushIpNetTable2( long long )
 @ stub FlushIpNetTableFromStack
 #@ stub FlushIpPathTable
 @ stdcall FreeMibTable( ptr )
@@ -102,7 +102,7 @@
 @ stdcall GetIpAddrTable( ptr ptr long )
 @ stub GetIpAddrTableFromStack
 #@ stub GetIpErrorString
-#@ stub GetIpForwardEntry2
+@ stdcall GetIpForwardEntry2( ptr )
 @ stdcall GetIpForwardTable( ptr ptr long )
 @ stdcall GetIpForwardTable2( long ptr )
 @ stub GetIpForwardTableFromStack
@@ -163,9 +163,9 @@
 @ stdcall IcmpSendEcho(ptr long ptr long ptr ptr long long)
 @ stdcall if_indextoname(long ptr) IPHLP_if_indextoname
 @ stdcall if_nametoindex(str) IPHLP_if_nametoindex
-#@ stub InitializeIpForwardEntry
+@ stdcall InitializeIpForwardEntry( ptr )
 @ stdcall InitializeIpInterfaceEntry(ptr)
-#@ stub InitializeUnicastIpAddressEntry
+@ stdcall InitializeUnicastIpAddressEntry( ptr )
 #@ stub InternalCleanupPersistentStore
 #@ stub InternalCreateAnycastIpAddressEntry
 @ stub InternalCreateIpForwardEntry
@@ -271,12 +271,12 @@
 @ stdcall SetCurrentThreadCompartmentId( long )
 @ stdcall SetIfEntry( ptr )
 @ stub SetIfEntryToStack
-#@ stub SetIpForwardEntry2
+@ stdcall SetIpForwardEntry2( ptr )
 @ stdcall SetIpForwardEntry( ptr )
 @ stub SetIpForwardEntryToStack
-#@ stub SetIpInterfaceEntry
+@ stdcall SetIpInterfaceEntry( ptr )
 @ stub SetIpMultihopRouteEntryToStack
-#@ stub SetIpNetEntry2
+@ stdcall SetIpNetEntry2( ptr )
 @ stdcall SetIpNetEntry( ptr )
 @ stub SetIpNetEntryToStack
 @ stub SetIpRouteEntryToStack
@@ -294,5 +294,5 @@
 #@ stub SetSessionCompartmentId
 @ stdcall SetTcpEntry( ptr )
 @ stub SetTcpEntryToStack
-#@ stub SetUnicastIpAddressEntry
+@ stdcall SetUnicastIpAddressEntry( ptr )
 @ stdcall UnenableRouter( ptr ptr )

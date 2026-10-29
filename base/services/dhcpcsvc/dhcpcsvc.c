@@ -913,6 +913,7 @@ ServiceMain(DWORD argc, LPWSTR* argv)
 {
     HANDLE hPipeThread = INVALID_HANDLE_VALUE;
     HANDLE hDiscoveryThread = INVALID_HANDLE_VALUE;
+    HANDLE hDhcp6Thread = INVALID_HANDLE_VALUE;
     DWORD ret;
 
     ServiceStatusHandle = RegisterServiceCtrlHandlerExW(ServiceName,
@@ -978,6 +979,8 @@ ServiceMain(DWORD argc, LPWSTR* argv)
         return;
     }
 
+    hDhcp6Thread = StartDhcp6Client(hStopEvent);
+
     DH_DbgPrint(MID_TRACE,("DHCP Service Started\n"));
 
     UpdateServiceStatus(SERVICE_RUNNING);
@@ -1006,6 +1009,12 @@ ServiceMain(DWORD argc, LPWSTR* argv)
         DPRINT("Waiting for discovery thread\n");
         ret = WaitForSingleObject(hDiscoveryThread, 5000);
         DPRINT("Done %lx\n", ret);
+    }
+
+    if (hDhcp6Thread != INVALID_HANDLE_VALUE)
+    {
+        WaitForSingleObject(hDhcp6Thread, 5000);
+        CloseHandle(hDhcp6Thread);
     }
 
     DPRINT("Closing events!\n");

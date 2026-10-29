@@ -2199,7 +2199,7 @@ LRESULT CAutoComplete::OnAutoCompStart(UINT uMsg, WPARAM wParam, LPARAM lParam, 
     }
 
     // if previous text was empty
-    if (m_strText.IsEmpty())
+    if (m_strText.IsEmpty() || ChrCmpIW(m_strText[0], strText[0]) != 0)
     {
         pThread->m_bReset = TRUE;
     }

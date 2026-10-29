@@ -15602,6 +15602,17 @@ DxgkpMiniportPnpDispatch(
             return Status;
         }
 
+        case IRP_MN_QUERY_REMOVE_DEVICE:
+        {
+            if (DxgkIsDisplayAdapter(Adapter))
+            {
+                Irp->IoStatus.Status = STATUS_DEVICE_BUSY;
+                IoCompleteRequest(Irp, IO_NO_INCREMENT);
+                return STATUS_DEVICE_BUSY;
+            }
+            return DxgkpForwardIrp(Adapter, Irp);
+        }
+
         case IRP_MN_QUERY_DEVICE_RELATIONS:
         {
             DEVICE_RELATION_TYPE RelType =

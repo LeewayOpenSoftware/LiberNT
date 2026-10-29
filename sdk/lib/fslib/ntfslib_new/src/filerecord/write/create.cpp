@@ -169,6 +169,8 @@ FileRecord::InitializeNewFileRecord(
     Standard.LastAccessTime = CurrentTime;
     Standard.FilePermissions = NormalizedAttributes;
     Standard.SecurityId = SecurityId;
+    if (IsDirectory && Parent->IsCaseSensitiveDirectory())
+        Standard.VersionNum = STANDARD_INFORMATION_CASE_SENSITIVE_DIR;
     Status = ReplaceResidentData(
         Attribute,
         reinterpret_cast<const UCHAR*>(&Standard),

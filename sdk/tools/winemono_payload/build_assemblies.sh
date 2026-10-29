@@ -24,6 +24,12 @@ if [ ! -d "$M/.git" ]; then
     git -C "$M" apply "$HERE/patches/mono-customattrs-reflected-base.patch"
     git -C "$M" apply "$HERE/patches/mono-winrt-projection-resolve.patch"
     git -C "$M" apply "$HERE/patches/mono-appdomain-manager.patch"
+    git -C "$M" apply "$HERE/patches/mono-appdomainsetup-target-framework.patch"
+    git -C "$M" apply "$HERE/patches/mono-marshal-custom-query-interface.patch"
+    git -C "$M" apply "$HERE/patches/mono-variant-record.patch"
+    git -C "$M" apply "$HERE/patches/mono-typelib-version.patch"
+    git -C "$M" apply "$HERE/patches/mono-interop-proxy-keep-identity.patch"
+    git -C "$M" apply "$HERE/patches/mono-assemblybuilder-ignores-access-checks.patch"
     git -C "$E/corefx" apply "$HERE/patches/corefx-certificatechoices.patch"
 fi
 P="$W/wpf"
@@ -35,6 +41,7 @@ if [ ! -d "$P/.git" ]; then
     git -C "$P" apply "$HERE/patches/wpf-seekable-parts.patch"
 fi
 mkdir -p "$W/winrt" && cp "$HERE/winrt/Windows.cs" "$W/winrt/Windows.cs"
+mkdir -p "$W/tlbgen" && cp "$HERE"/tlbgen/* "$W/tlbgen/"
 curl -sSL -o "$W/resx2srid.cs" https://raw.githubusercontent.com/wine-mono/wine-mono/wine-mono-11.3.0/tools/resx2srid/resx2srid.cs
 mkdir -p "$W/msi" && 7zz x -y -o"$W/msi" "$MSI" >/dev/null
 L="$M/mcs/class/lib/net_4_x-win32"; G="$W/msi/lib/mono/gac"; mkdir -p "$L" "$M/mcs/class/lib/build"
@@ -91,6 +98,13 @@ cp ../lib/net_4_x-win32/System.Security.dll /w/System.Security.patched.dll
 cd /w/mono/mcs/class/corlib && rm -f ../lib/net_4_x-win32/mscorlib.dll
 make PROFILE=net_4_x HOST_PLATFORM=win32 ENABLE_COMPILER_SERVER=0 BCL_OPTIMIZE=1 >/w/build-corlib.log 2>&1 || true
 cp ../lib/net_4_x-win32/mscorlib.dll /w/mscorlib.patched.dll
+cp "$C" /w/tlbgen/
+mcs -nologo -r:"$C" -r:System.Core.dll -out:/w/tlbgen/comshape.exe /w/tlbgen/comshape.cs
+mcs -nologo -r:"$C" -r:System.Core.dll -out:/w/tlbgen/tlbgen.exe /w/tlbgen/tlbgen.cs
+mono /w/tlbgen/comshape.exe /w/mscorlib.patched.dll /w/tlbgen/mscorlib-com.txt /w/mscorlib.shaped.dll
+mv /w/mscorlib.shaped.dll /w/mscorlib.patched.dll
+mono /w/tlbgen/tlbgen.exe /w/mscorlib.patched.dll win32 /w/mscorlib32.idl /w/tlbgen/mscorlib-com.txt
+mono /w/tlbgen/tlbgen.exe /w/mscorlib.patched.dll win64 /w/mscorlib64.idl /w/tlbgen/mscorlib-com.txt
 mono /w/mono/external/roslyn-binaries/Microsoft.Net.Compilers/3.9.0/csc.exe -nologo -noconfig -nostdlib -target:library -optimize+ -deterministic -r:/w/msi/lib/mono/4.5/mscorlib.dll -out:/w/Windows.built.dll /w/winrt/Windows.cs
 mkdir -p /w/bin
 printf "#!/bin/sh\nexec mono /w/mono/mcs/class/lib/build/resgen.exe \"\$@\"\n" > /w/bin/resgen

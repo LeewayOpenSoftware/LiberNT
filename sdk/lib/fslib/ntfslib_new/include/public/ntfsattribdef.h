@@ -163,6 +163,8 @@ typedef struct StandardInformationEx
     UINT64 UpdateSequenceNumber;           // Offset 0x40, Size 8
 } *PStandardInformationEx;
 
+#define STANDARD_INFORMATION_CASE_SENSITIVE_DIR 0x00000001
+
 /// $ATTRIBUTE_LIST (0x20)
 typedef struct
 {

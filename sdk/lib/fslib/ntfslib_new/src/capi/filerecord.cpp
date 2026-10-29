@@ -170,6 +170,27 @@ NtfsFileRecordSetBasicInformation(
         SetBasicInformation(Information);
 }
 
+BOOLEAN
+NtfsFileRecordIsCaseSensitiveDirectory(
+    _In_ PNtfsFileRecord Fr)
+{
+    if (!Fr)
+        return FALSE;
+    return reinterpret_cast<PFileRecord>(Fr)->
+        IsCaseSensitiveDirectory();
+}
+
+NTSTATUS
+NtfsFileRecordSetCaseSensitiveDirectory(
+    _In_ PNtfsFileRecord Fr,
+    _In_ BOOLEAN CaseSensitive)
+{
+    if (!Fr)
+        return STATUS_INVALID_PARAMETER;
+    return reinterpret_cast<PFileRecord>(Fr)->
+        SetCaseSensitiveDirectory(CaseSensitive);
+}
+
 NTSTATUS
 NtfsFileRecordSetAutomaticTimestampMask(
     _In_ PNtfsFileRecord Fr,

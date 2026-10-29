@@ -1290,7 +1290,7 @@ LsapSetTokenOwner(
         {
             if (EqualSid(TokenInfo1->Groups->Groups[i].Sid, LsapAdministratorsSid))
             {
-                OwnerSid = &TokenInfo1->Groups->Groups[i];
+                TokenInfo1->Groups->Groups[i].Attributes |= SE_GROUP_OWNER;
                 break;
             }
         }
@@ -1303,7 +1303,6 @@ LsapSetTokenOwner(
         RtlCopyMemory(TokenInfo1->Owner.Owner,
                       OwnerSid->Sid,
                       Length);
-        OwnerSid->Attributes |= SE_GROUP_OWNER;
     }
 
     return STATUS_SUCCESS;

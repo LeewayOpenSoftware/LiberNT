@@ -9,6 +9,7 @@
  */
 
 #include "precomp.h"
+#include <commoncontrols.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
@@ -208,6 +209,34 @@ HRESULT STDMETHODCALLTYPE CExtractIcon::GetIconLocation(
     return S_OK;
 }
 
+static HICON GetSystemImageListIcon(UINT nIconIndex, UINT cxIcon)
+{
+    static const int s_Lists[] = { SHIL_SMALL, SHIL_LARGE, SHIL_EXTRALARGE, SHIL_JUMBO };
+    CComPtr<IImageList> pBest;
+    int cxBest = 0;
+    HICON hIcon = NULL;
+
+    for (UINT i = 0; i < _countof(s_Lists); ++i)
+    {
+        CComPtr<IImageList> pList;
+        int cx, cy;
+
+        if (FAILED(SHGetImageList(s_Lists[i], IID_PPV_ARG(IImageList, &pList))) ||
+            FAILED(pList->GetIconSize(&cx, &cy)))
+        {
+            continue;
+        }
+        if (!pBest || (cxBest < (int)cxIcon && cx > cxBest) || (cx >= (int)cxIcon && cx < cxBest))
+        {
+            pBest = pList;
+            cxBest = cx;
+        }
+    }
+    if (pBest)
+        pBest->GetIcon(nIconIndex, ILD_NORMAL, &hIcon);
+    return hIcon;
+}
+
 HRESULT STDMETHODCALLTYPE CExtractIcon::Extract(
     LPCWSTR pszFile,
     UINT nIconIndex,
@@ -218,7 +247,47 @@ HRESULT STDMETHODCALLTYPE CExtractIcon::Extract(
     TRACE("(%p, %s, %u, %p, %p, %u)\n", this, debugstr_w(pszFile), nIconIndex, phiconLarge, phiconSmall, nIconSize);
 
     /* Nothing to do, ExtractIconW::GetIconLocation should be enough */
-    return S_FALSE;
+    if (!(flags & GIL_NOTFILENAME) || !pszFile)
+        return S_FALSE;
+
+    if (phiconLarge)
+        *phiconLarge = NULL;
+    if (phiconSmall)
+        *phiconSmall = NULL;
+
+    if (!wcscmp(pszFile, L"*"))
+    {
+        UINT cxLarge = LOWORD(nIconSize) ? LOWORD(nIconSize) : GetSystemMetrics(SM_CXICON);
+        UINT cxSmall = HIWORD(nIconSize) ? HIWORD(nIconSize) : GetSystemMetrics(SM_CXSMICON);
+
+        if (phiconLarge)
+            *phiconLarge = GetSystemImageListIcon(nIconIndex, cxLarge);
+        if (phiconSmall)
+            *phiconSmall = GetSystemImageListIcon(nIconIndex, cxSmall);
+    }
+    else
+    {
+        UINT cxLarge = LOWORD(nIconSize), cxSmall = HIWORD(nIconSize);
+
+        if (phiconLarge)
+            PrivateExtractIconsW(pszFile, nIconIndex, cxLarge, cxLarge, phiconLarge, NULL, 1, LR_COPYFROMRESOURCE);
+        if (phiconSmall)
+            PrivateExtractIconsW(pszFile, nIconIndex, cxSmall, cxSmall, phiconSmall, NULL, 1, LR_COPYFROMRESOURCE);
+    }
+
+    if ((phiconLarge && !*phiconLarge) || (phiconSmall && !*phiconSmall))
+    {
+        if (phiconLarge && *phiconLarge)
+            DestroyIcon(*phiconLarge);
+        if (phiconSmall && *phiconSmall)
+            DestroyIcon(*phiconSmall);
+        if (phiconLarge)
+            *phiconLarge = NULL;
+        if (phiconSmall)
+            *phiconSmall = NULL;
+        return S_FALSE;
+    }
+    return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE CExtractIcon::GetIconLocation(

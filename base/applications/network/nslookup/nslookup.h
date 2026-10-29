@@ -5,8 +5,10 @@
 
 #define WIN32_NO_STATUS
 #include <windef.h>
+#include <winbase.h>
 #define _INC_WINDOWS
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <tchar.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +31,7 @@
 #define TYPE_WKS    0x0B
 #define TYPE_PTR    0x0C
 #define TYPE_MX     0x0F
+#define TYPE_AAAA   0x1C
 #define TYPE_ANY    0xFF
 
 #define ClassIN     "IN"
@@ -63,6 +66,8 @@
 
 #define DEFAULT_ROOT    "A.ROOT-SERVERS.NET."
 #define ARPA_SIG        ".in-addr.arpa"
+#define ARPA6_SIG       ".ip6.arpa"
+#define SERVER_ADDRESS_LENGTH 64
 
 typedef struct _STATE
 {
@@ -84,7 +89,7 @@ typedef struct _STATE
     PCHAR Class;
     USHORT port;
     CHAR DefaultServer[256];
-    CHAR DefaultServerAddress[16];
+    CHAR DefaultServerAddress[SERVER_ADDRESS_LENGTH];
 } STATE, *PSTATE;
 
 /* nslookup.c */

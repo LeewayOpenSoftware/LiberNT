@@ -81,7 +81,8 @@ UCHAR IopQueryOperationLength[FileMaximumInformation] =
     0,
     0,
     0,
-    sizeof(FILE_ID_INFORMATION)
+    sizeof(FILE_ID_INFORMATION),
+    [FileCaseSensitiveInformation] = sizeof(FILE_CASE_SENSITIVE_INFORMATION)
 };
 
 UCHAR IopSetOperationLength[FileMaximumInformation] =
@@ -129,7 +130,8 @@ UCHAR IopSetOperationLength[FileMaximumInformation] =
     sizeof(UNICODE_STRING),
     sizeof(FILE_IO_COMPLETION_NOTIFICATION_INFORMATION),
     0,
-    sizeof(FILE_IO_PRIORITY_HINT_INFORMATION)
+    sizeof(FILE_IO_PRIORITY_HINT_INFORMATION),
+    [FileCaseSensitiveInformation] = sizeof(FILE_CASE_SENSITIVE_INFORMATION)
 };
 
 ACCESS_MASK IopQueryOperationAccess[FileMaximumInformation] =
@@ -175,7 +177,8 @@ ACCESS_MASK IopQueryOperationAccess[FileMaximumInformation] =
     0,
     0,
     0,
-    0
+    0,
+    [FileCaseSensitiveInformation] = FILE_READ_ATTRIBUTES
 };
 
 ACCESS_MASK IopSetOperationAccess[FileMaximumInformation] =
@@ -221,7 +224,8 @@ ACCESS_MASK IopSetOperationAccess[FileMaximumInformation] =
     0,
     FILE_WRITE_DATA,
     DELETE,
-    0
+    0,
+    [FileCaseSensitiveInformation] = FILE_WRITE_ATTRIBUTES
 };
 
 //

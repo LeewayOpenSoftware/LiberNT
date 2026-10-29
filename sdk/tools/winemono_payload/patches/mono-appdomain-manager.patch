@@ -1,18 +1,18 @@
 diff --git a/mcs/class/corlib/System/AppDomain.cs b/mcs/class/corlib/System/AppDomain.cs
-index ed2c28c9ac..ec6eb3eeff 100644
+index ed2c28c9ac..7ec36f3ac8 100644
 --- a/mcs/class/corlib/System/AppDomain.cs
 +++ b/mcs/class/corlib/System/AppDomain.cs
-@@ -1512,6 +1512,22 @@ public bool IsFullyTrusted {
+@@ -1512,6 +1512,31 @@ public bool IsFullyTrusted {
  		public AppDomainManager DomainManager {
  			get { return (AppDomainManager)_domain_manager; }
  		}
 +
-+		internal static void InitializeDomainManager (string assemblyName, string typeName)
++		internal static AppDomainManager InitializeDomainManager (string assemblyName, string typeName)
 +		{
 +			AppDomain domain = CurrentDomain;
 +
 +			if (domain._domain_manager != null)
-+				return;
++				return null;
 +
 +			AppDomainSetup setup = domain.SetupInformationNoCopy;
 +			setup.AppDomainManagerAssembly = assemblyName;
@@ -20,7 +20,16 @@ index ed2c28c9ac..ec6eb3eeff 100644
 +
 +			AppDomainManager manager = (AppDomainManager) Activator.CreateInstance (assemblyName, typeName).Unwrap ();
 +			domain._domain_manager = manager;
-+			manager.InitializeNewDomain (domain.SetupInformation);
++			manager.InitializeNewDomain (setup);
++
++			if ((manager.InitializationFlags & AppDomainManagerInitializationOptions.RegisterWithHost) == 0)
++				return null;
++			return manager;
++		}
++
++		internal static string GetConfigurationFileInternal ()
++		{
++			return CurrentDomain.SetupInformationNoCopy.ConfigurationFile;
 +		}
  #else
  		[Obsolete ("AppDomain.DomainManager is not supported on this platform.", true)]

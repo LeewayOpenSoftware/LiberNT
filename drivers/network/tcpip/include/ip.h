@@ -26,6 +26,7 @@ typedef struct IP_ADDRESS {
         IPv4_RAW_ADDRESS IPv4Address;/* IPv4 address (in network byte order) */
         IPv6_RAW_ADDRESS IPv6Address;/* IPv6 address (in network byte order) */
     } Address;
+    ULONG ScopeId;
 } IP_ADDRESS, *PIP_ADDRESS;
 
 /* IP type constants */
@@ -176,6 +177,24 @@ typedef struct _IP_INTERFACE {
     LL_TRANSMIT_ROUTINE Transmit; /* Pointer to transmit function */
     PVOID TCPContext;             /* TCP Content for this interface */
     SEND_RECV_STATS Stats;        /* Send/Receive statistics */
+    BOOLEAN Wireless;
+    BOOLEAN ManualMetric;
+    UINT  InterfaceMetric;
+    BOOLEAN Forwarding;
+    BOOLEAN WeakHostSend;
+    BOOLEAN WeakHostReceive;
+    BOOLEAN DisableDefaultRoutes;
+    BOOLEAN AdvertiseDefaultRoute;
+    UINT  LinkMTU;
+    ULONG RetransmitTime;
+    ULONG BaseReachableTime;
+    ULONG ReachableTime;
+    ULONG DadTransmits;
+    ULONG RouterDiscoveryBehavior;
+    ULONG PathMtuDiscoveryTimeout;
+    ULONG LinkLocalAddressTimeout;
+    ULONG SitePrefixLength;
+    ULONG ZoneIndices[16];
 } IP_INTERFACE, *PIP_INTERFACE;
 
 typedef struct _IP_NTE {
@@ -218,6 +237,7 @@ typedef VOID (*IP_PROTOCOL_HANDLER)(
 
 /* Timeout timer constants */
 #define IP_TIMEOUT 1000 /* Timeout in milliseconds */
+#define NB_FAST_TIMEOUT 100
 #define IP_DEFAULT_LINK_SPEED  10000
 
 extern LIST_ENTRY InterfaceListHead;
@@ -250,6 +270,34 @@ BOOLEAN IPRegisterInterface(
 
 VOID IPUnregisterInterface(
     PIP_INTERFACE IF);
+
+UINT IPAutomaticMetric(
+    PIP_INTERFACE Interface);
+
+UINT IPInterfaceMetric(
+    PIP_INTERFACE Interface);
+
+struct _IP4_INTERFACE_INFO;
+
+NTSTATUS IPQueryInterfaceV4(
+    struct _IP4_INTERFACE_INFO *Info);
+
+NTSTATUS IPSetInterfaceV4(
+    struct _IP4_INTERFACE_INFO *Info);
+
+BOOLEAN IPv4AcceptDestination(
+    PIP_INTERFACE Interface,
+    PIP_ADDRESS Destination,
+    PBOOLEAN Forward);
+
+VOID IPv4Forward(
+    PIP_INTERFACE Interface,
+    PIP_PACKET IPPacket);
+
+VOID NTAPI NeighborTimeoutDpcFn(PKDPC Dpc,
+                                PVOID DeferredContext,
+                                PVOID SystemArgument1,
+                                PVOID SystemArgument2);
 
 VOID NTAPI IPTimeoutDpcFn(PKDPC Dpc,
                           PVOID DeferredContext,

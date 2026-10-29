@@ -131,7 +131,6 @@ BOOL PerformInternalLookup( PCHAR pAddr, PCHAR pResult )
     if( Type == TYPE_PTR )
     {
         ReverseIP( pAddr, pResolve );
-        strcat( pResolve, ARPA_SIG );
     }
     else
     {
@@ -266,6 +265,190 @@ cleanup:
     return bOk;
 }
 
+typedef struct _NS_ANSWER
+{
+    CHAR Canonical[256];
+    CHAR Addresses[32][SERVER_ADDRESS_LENGTH];
+    int Count;
+    CHAR Aliases[8][256];
+    int AliasCount;
+    UCHAR RCode;
+    BOOL Authoritative;
+} NS_ANSWER, *PNS_ANSWER;
+
+static int DecodeName( const UCHAR *Packet, int Length, int Offset, PCHAR Out, int OutSize )
+{
+    int Next = -1, Jumps = 0, o = 0;
+
+    for( ;; )
+    {
+        UCHAR Label;
+
+        if( Offset >= Length ) return -1;
+        Label = Packet[Offset];
+        if( (Label & 0xC0) == 0xC0 )
+        {
+            if( Offset + 1 >= Length || ++Jumps > 32 ) return -1;
+            if( Next < 0 ) Next = Offset + 2;
+            Offset = ((Label & 0x3F) << 8) | Packet[Offset + 1];
+            continue;
+        }
+        Offset += 1;
+        if( !Label ) break;
+        if( Offset + Label > Length || o + Label + 2 > OutSize ) return -1;
+        if( o ) Out[o++] = '.';
+        memcpy( &Out[o], &Packet[Offset], Label );
+        o += Label;
+        Offset += Label;
+    }
+    Out[o] = '\0';
+    return (Next >= 0) ? Next : Offset;
+}
+
+static int BuildQuery( PCHAR pResolve, USHORT Type, PUCHAR Buffer, int Size )
+{
+    int i = 12, j;
+    size_t k;
+
+    if( (int)strlen( pResolve ) + 18 > Size ) return -1;
+    ((PUSHORT)Buffer)[0] = htons( RequestID );
+    Buffer[2] = State.recurse ? 0x01 : 0x00;
+    Buffer[3] = 0x00;
+    ((PUSHORT)Buffer)[2] = htons( 1 );
+    ((PUSHORT)Buffer)[3] = 0;
+    ((PUSHORT)Buffer)[4] = 0;
+    ((PUSHORT)Buffer)[5] = 0;
+
+    j = i;
+    i += 1;
+    for( k = 0; k < strlen( pResolve ); k += 1 )
+    {
+        if( pResolve[k] != '.' )
+        {
+            Buffer[i++] = pResolve[k];
+        }
+        else
+        {
+            Buffer[j] = (UCHAR)((i - j) - 1);
+            j = i;
+            i += 1;
+        }
+    }
+    Buffer[j] = (UCHAR)((i - j) - 1);
+    Buffer[i++] = 0x00;
+    Buffer[i++] = (UCHAR)(Type >> 8);
+    Buffer[i++] = (UCHAR)Type;
+    Buffer[i++] = 0x00;
+    Buffer[i++] = (UCHAR)ClassNametoClassID( State.Class );
+    return i;
+}
+
+static BOOL QueryAddresses( PCHAR pAddr, USHORT Type, PNS_ANSWER Answer )
+{
+    UCHAR Query[300], Reply[1500];
+    ULONG ReplyLength = sizeof(Reply);
+    CHAR Name[256];
+    int QueryLength, Offset, i;
+    USHORT Questions, Answers;
+
+    QueryLength = BuildQuery( pAddr, Type, Query, sizeof(Query) );
+    RequestID += 1;
+    if( QueryLength < 0 ||
+        !SendRequest( (PCHAR)Query, QueryLength, (PCHAR)Reply, &ReplyLength ) ||
+        ReplyLength < 12 )
+        return FALSE;
+
+    Answer->RCode = Reply[3] & 0x0F;
+    Answer->Authoritative = Answer->Authoritative || (Reply[2] & 0x04) != 0;
+    if( Answer->RCode != RCODE_NOERROR ) return TRUE;
+
+    Questions = ntohs( ((PUSHORT)Reply)[2] );
+    Answers = ntohs( ((PUSHORT)Reply)[3] );
+    Offset = 12;
+    for( i = 0; i < Questions && Offset > 0; i += 1 )
+    {
+        Offset = DecodeName( Reply, ReplyLength, Offset, Name, sizeof(Name) );
+        if( Offset > 0 ) Offset += 4;
+    }
+
+    for( i = 0; i < Answers && Offset > 0; i += 1 )
+    {
+        USHORT RecordType, DataLength;
+        CHAR Target[256];
+
+        Offset = DecodeName( Reply, ReplyLength, Offset, Name, sizeof(Name) );
+        if( Offset < 0 || Offset + 10 > (int)ReplyLength ) break;
+        RecordType = (Reply[Offset] << 8) | Reply[Offset + 1];
+        DataLength = (Reply[Offset + 8] << 8) | Reply[Offset + 9];
+        Offset += 10;
+        if( Offset + DataLength > (int)ReplyLength ) break;
+
+        if( RecordType == TYPE_CNAME && DecodeName( Reply, ReplyLength, Offset, Target, sizeof(Target) ) > 0 )
+        {
+            if( Answer->AliasCount < 8 ) strcpy( Answer->Aliases[Answer->AliasCount++], Name );
+            strcpy( Answer->Canonical, Target );
+        }
+        else if( (RecordType == TYPE_A && DataLength == 4) || (RecordType == TYPE_AAAA && DataLength == 16) )
+        {
+            if( Answer->Count < 32 &&
+                inet_ntop( RecordType == TYPE_A ? AF_INET : AF_INET6, &Reply[Offset],
+                           Answer->Addresses[Answer->Count], SERVER_ADDRESS_LENGTH ) )
+            {
+                Answer->Count += 1;
+            }
+            strcpy( Answer->Canonical, Name );
+        }
+        Offset += DataLength;
+    }
+    return TRUE;
+}
+
+static void PerformAddressLookup( PCHAR pAddr )
+{
+    NS_ANSWER Answer;
+    BOOL Both = !strcmp( State.type, TypeBoth );
+    BOOL Ok = FALSE;
+    int i, j;
+
+    RtlZeroMemory( &Answer, sizeof(Answer) );
+    if( Both || !strcmp( State.type, TypeAAAA ) )
+        Ok = QueryAddresses( pAddr, TYPE_AAAA, &Answer );
+    if( (Both && (!Ok || Answer.RCode == RCODE_NOERROR)) || !strcmp( State.type, TypeA ) )
+        Ok = QueryAddresses( pAddr, TYPE_A, &Answer ) || Ok;
+
+    if( !Ok )
+    {
+        _tprintf( _T("*** Request to %s timed-out\n"), State.DefaultServer[0] ? State.DefaultServer : "UnKnown" );
+        return;
+    }
+    if( !Answer.Count )
+    {
+        if( Answer.RCode == RCODE_NXDOMAIN )
+            _tprintf( _T("*** %s can't find %s: Non-existent domain\n"), State.DefaultServer[0] ? State.DefaultServer : "UnKnown", pAddr );
+        else if( Both )
+            _tprintf( _T("*** No internal type for both IPv4 and IPv6 Addresses (A+AAAA) records available for %s\n"), pAddr );
+        else if( !strcmp( State.type, TypeAAAA ) )
+            _tprintf( _T("*** No IPv6 address (AAAA) records available for %s\n"), pAddr );
+        else
+            _tprintf( _T("*** No address (A) records available for %s\n"), pAddr );
+        return;
+    }
+
+    if( !Answer.Authoritative )
+        _tprintf( _T("Non-authoritative answer:\n") );
+    _tprintf( _T("Name:    %s\n"), Answer.Canonical[0] ? Answer.Canonical : pAddr );
+    _tprintf( Answer.Count > 1 ? _T("Addresses:  %s\n") : _T("Address:  %s\n"), Answer.Addresses[0] );
+    for( i = 1; i < Answer.Count; i += 1 )
+        _tprintf( _T("          %s\n"), Answer.Addresses[i] );
+    for( i = 0; i < Answer.AliasCount; i += 1 )
+    {
+        for( j = 0; j < i && strcmp( Answer.Aliases[j], Answer.Aliases[i] ); j += 1 );
+        if( j == i )
+            _tprintf( i ? _T("          %s\n") : _T("Aliases:  %s\n"), Answer.Aliases[i] );
+    }
+    _tprintf( _T("\n") );
+}
+
 void PerformLookup( PCHAR pAddr )
 {
     /* Needed to issue DNS packets and parse them. */
@@ -285,7 +468,7 @@ void PerformLookup( PCHAR pAddr )
 
     if( (strlen( pAddr ) + 1) > 255 ) return;
 
-    _tprintf( _T("Server:  %s\n"), State.DefaultServer );
+    _tprintf( _T("Server:  %s\n"), State.DefaultServer[0] ? State.DefaultServer : "UnKnown" );
     _tprintf( _T("Address:  %s\n\n"), State.DefaultServerAddress );
 
     if( !strcmp( TypeA, State.type )
@@ -294,6 +477,11 @@ void PerformLookup( PCHAR pAddr )
     {
         Type = TYPE_A;
         if( IsValidIP( pAddr ) ) Type = TYPE_PTR;
+        if( Type == TYPE_A )
+        {
+            PerformAddressLookup( pAddr );
+            return;
+        }
     }
     else
         Type = TypeNametoTypeID( State.type );
@@ -302,7 +490,6 @@ void PerformLookup( PCHAR pAddr )
     if( (Type == TYPE_PTR) && IsValidIP( pAddr ) )
     {
         ReverseIP( pAddr, pResolve );
-        strcat( pResolve, ARPA_SIG );
     }
     else
     {
@@ -528,8 +715,8 @@ BOOL ParseCommandLine( int argc, char* argv[] )
                    DNS server provided was an IP or an FQDN. */
                 if( IsValidIP( Server ) )
                 {
-                    strncpy( State.DefaultServerAddress, Server, 15 );
-                    State.DefaultServerAddress[15] = '\0';
+                    strncpy( State.DefaultServerAddress, Server, SERVER_ADDRESS_LENGTH - 1 );
+                    State.DefaultServerAddress[SERVER_ADDRESS_LENGTH - 1] = '\0';
 
                     PerformInternalLookup( State.DefaultServerAddress,
                                            State.DefaultServer );
@@ -557,43 +744,43 @@ BOOL ParseCommandLine( int argc, char* argv[] )
                 }
                 else if( !strncmp( "-type=", argv[i], 6 ) )
                 {
-                    if( !strncmp( TypeA, &argv[i][6], strlen( TypeA ) ) )
+                    if( !_stricmp( TypeA, &argv[i][6] ) )
                     {
                         State.type = TypeA;
                     }
-                    else if( !strncmp( TypeAAAA, &argv[i][6], strlen( TypeAAAA ) ) )
+                    else if( !_stricmp( TypeAAAA, &argv[i][6] ) )
                     {
                         State.type = TypeAAAA;
                     }
-                    else if( !strncmp( TypeBoth, &argv[i][6], strlen( TypeBoth ) ) )
+                    else if( !_stricmp( TypeBoth, &argv[i][6] ) )
                     {
                         State.type = TypeBoth;
                     }
-                    else if( !strncmp( TypeAny, &argv[i][6], strlen( TypeAny ) ) )
+                    else if( !_stricmp( TypeAny, &argv[i][6] ) )
                     {
                         State.type = TypeAny;
                     }
-                    else if( !strncmp( TypeCNAME, &argv[i][6], strlen( TypeCNAME ) ) )
+                    else if( !_stricmp( TypeCNAME, &argv[i][6] ) )
                     {
                         State.type = TypeCNAME;
                     }
-                    else if( !strncmp( TypeMX, &argv[i][6], strlen( TypeMX ) ) )
+                    else if( !_stricmp( TypeMX, &argv[i][6] ) )
                     {
                         State.type = TypeMX;
                     }
-                    else if( !strncmp( TypeNS, &argv[i][6], strlen( TypeNS ) ) )
+                    else if( !_stricmp( TypeNS, &argv[i][6] ) )
                     {
                         State.type = TypeNS;
                     }
-                    else if( !strncmp( TypePTR, &argv[i][6], strlen( TypePTR ) ) )
+                    else if( !_stricmp( TypePTR, &argv[i][6] ) )
                     {
                         State.type = TypePTR;
                     }
-                    else if( !strncmp( TypeSOA, &argv[i][6], strlen( TypeSOA ) ) )
+                    else if( !_stricmp( TypeSOA, &argv[i][6] ) )
                     {
                         State.type = TypeSOA;
                     }
-                    else if( !strncmp( TypeSRV, &argv[i][6], strlen( TypeSRV ) ) )
+                    else if( !_stricmp( TypeSRV, &argv[i][6] ) )
                     {
                         State.type = TypeSRV;
                     }
@@ -629,43 +816,43 @@ BOOL ParseCommandLine( int argc, char* argv[] )
                 }
                 else if( !strncmp( "-querytype=", argv[i], 11 ) )
                 {
-                    if( !strncmp( TypeA, &argv[i][11], strlen( TypeA ) ) )
+                    if( !_stricmp( TypeA, &argv[i][11] ) )
                     {
                         State.type = TypeA;
                     }
-                    else if( !strncmp( TypeAAAA, &argv[i][11], strlen( TypeAAAA ) ) )
+                    else if( !_stricmp( TypeAAAA, &argv[i][11] ) )
                     {
                         State.type = TypeAAAA;
                     }
-                    else if( !strncmp( TypeBoth, &argv[i][11], strlen( TypeBoth ) ) )
+                    else if( !_stricmp( TypeBoth, &argv[i][11] ) )
                     {
                         State.type = TypeBoth;
                     }
-                    else if( !strncmp( TypeAny, &argv[i][11], strlen( TypeAny ) ) )
+                    else if( !_stricmp( TypeAny, &argv[i][11] ) )
                     {
                         State.type = TypeAny;
                     }
-                    else if( !strncmp( TypeCNAME, &argv[i][11], strlen( TypeCNAME ) ) )
+                    else if( !_stricmp( TypeCNAME, &argv[i][11] ) )
                     {
                         State.type = TypeCNAME;
                     }
-                    else if( !strncmp( TypeMX, &argv[i][11], strlen( TypeMX ) ) )
+                    else if( !_stricmp( TypeMX, &argv[i][11] ) )
                     {
                         State.type = TypeMX;
                     }
-                    else if( !strncmp( TypeNS, &argv[i][11], strlen( TypeNS ) ) )
+                    else if( !_stricmp( TypeNS, &argv[i][11] ) )
                     {
                         State.type = TypeNS;
                     }
-                    else if( !strncmp( TypePTR, &argv[i][11], strlen( TypePTR ) ) )
+                    else if( !_stricmp( TypePTR, &argv[i][11] ) )
                     {
                         State.type = TypePTR;
                     }
-                    else if( !strncmp( TypeSOA, &argv[i][11], strlen( TypeSOA ) ) )
+                    else if( !_stricmp( TypeSOA, &argv[i][11] ) )
                     {
                         State.type = TypeSOA;
                     }
-                    else if( !strncmp( TypeSRV, &argv[i][11], strlen( TypeSRV ) ) )
+                    else if( !_stricmp( TypeSRV, &argv[i][11] ) )
                     {
                         State.type = TypeSRV;
                     }
@@ -944,43 +1131,43 @@ void InteractiveMode()
                     }
                     else if (!_strnicmp(args_vector[1], "type=", strlen("type=")))
                     {
-                        if (!strncmp(TypeA, &args_vector[1][6], strlen(TypeA)))
+                        if (!_stricmp(TypeA, &args_vector[1][6]))
                         {
                             State.type = TypeA;
                         }
-                        else if (!strncmp(TypeAAAA, &args_vector[1][6], strlen(TypeAAAA)))
+                        else if (!_stricmp(TypeAAAA, &args_vector[1][6]))
                         {
                             State.type = TypeAAAA;
                         }
-                        else if (!strncmp(TypeBoth, &args_vector[1][6], strlen(TypeBoth)))
+                        else if (!_stricmp(TypeBoth, &args_vector[1][6]))
                         {
                             State.type = TypeBoth;
                         }
-                        else if (!strncmp(TypeAny, &args_vector[1][6], strlen(TypeAny)))
+                        else if (!_stricmp(TypeAny, &args_vector[1][6]))
                         {
                             State.type = TypeAny;
                         }
-                        else if (!strncmp(TypeCNAME, &args_vector[1][6], strlen(TypeCNAME)))
+                        else if (!_stricmp(TypeCNAME, &args_vector[1][6]))
                         {
                             State.type = TypeCNAME;
                         }
-                        else if (!strncmp(TypeMX, &args_vector[1][6], strlen(TypeMX)))
+                        else if (!_stricmp(TypeMX, &args_vector[1][6]))
                         {
                             State.type = TypeMX;
                         }
-                        else if (!strncmp(TypeNS, &args_vector[1][6], strlen(TypeNS)))
+                        else if (!_stricmp(TypeNS, &args_vector[1][6]))
                         {
                             State.type = TypeNS;
                         }
-                        else if (!strncmp(TypePTR, &args_vector[1][6], strlen(TypePTR)))
+                        else if (!_stricmp(TypePTR, &args_vector[1][6]))
                         {
                             State.type = TypePTR;
                         }
-                        else if (!strncmp(TypeSOA, &args_vector[1][6], strlen(TypeSOA)))
+                        else if (!_stricmp(TypeSOA, &args_vector[1][6]))
                         {
                             State.type = TypeSOA;
                         }
-                        else if (!strncmp(TypeSRV, &args_vector[1][6], strlen(TypeSRV)))
+                        else if (!_stricmp(TypeSRV, &args_vector[1][6]))
                         {
                             State.type = TypeSRV;
                         }
@@ -991,43 +1178,43 @@ void InteractiveMode()
                     }
                     else if (!_strnicmp(args_vector[1], "querytype=", strlen("querytype=")))
                     {
-                        if (!strncmp(TypeA, &args_vector[1][11], strlen(TypeA)))
+                        if (!_stricmp(TypeA, &args_vector[1][11]))
                         {
                             State.type = TypeA;
                         }
-                        else if (!strncmp(TypeAAAA, &args_vector[1][11], strlen(TypeAAAA)))
+                        else if (!_stricmp(TypeAAAA, &args_vector[1][11]))
                         {
                             State.type = TypeAAAA;
                         }
-                        else if (!strncmp(TypeBoth, &args_vector[1][11], strlen(TypeBoth)))
+                        else if (!_stricmp(TypeBoth, &args_vector[1][11]))
                         {
                             State.type = TypeBoth;
                         }
-                        else if (!strncmp(TypeAny, &args_vector[1][11], strlen(TypeAny)))
+                        else if (!_stricmp(TypeAny, &args_vector[1][11]))
                         {
                             State.type = TypeAny;
                         }
-                        else if (!strncmp(TypeCNAME, &args_vector[1][11], strlen(TypeCNAME)))
+                        else if (!_stricmp(TypeCNAME, &args_vector[1][11]))
                         {
                             State.type = TypeCNAME;
                         }
-                        else if (!strncmp(TypeMX, &args_vector[1][11], strlen(TypeMX)))
+                        else if (!_stricmp(TypeMX, &args_vector[1][11]))
                         {
                             State.type = TypeMX;
                         }
-                        else if (!strncmp(TypeNS, &args_vector[1][11], strlen(TypeNS)))
+                        else if (!_stricmp(TypeNS, &args_vector[1][11]))
                         {
                             State.type = TypeNS;
                         }
-                        else if (!strncmp(TypePTR, &args_vector[1][11], strlen(TypePTR)))
+                        else if (!_stricmp(TypePTR, &args_vector[1][11]))
                         {
                             State.type = TypePTR;
                         }
-                        else if (!strncmp(TypeSOA, &args_vector[1][11], strlen(TypeSOA)))
+                        else if (!_stricmp(TypeSOA, &args_vector[1][11]))
                         {
                             State.type = TypeSOA;
                         }
-                        else if (!strncmp(TypeSRV, &args_vector[1][11], strlen(TypeSRV)))
+                        else if (!_stricmp(TypeSRV, &args_vector[1][11]))
                         {
                             State.type = TypeSRV;
                         }
@@ -1093,7 +1280,7 @@ void InteractiveMode()
                 }
                 else if (dwArgCount == 2)
                 {
-                    CHAR BackupServerAddress[16];
+                    CHAR BackupServerAddress[SERVER_ADDRESS_LENGTH];
                     CHAR BackupServer[256];
 
                     CopyMemory(BackupServerAddress, State.DefaultServerAddress, sizeof(BackupServerAddress));
@@ -1101,8 +1288,8 @@ void InteractiveMode()
 
                     if (IsValidIP(args_vector[1]))
                     {
-                        strncpy(State.DefaultServerAddress, args_vector[1], min(16, strlen(args_vector[1])));
-                        State.DefaultServerAddress[min(16, strlen(args_vector[1]))] = '\0';
+                        strncpy(State.DefaultServerAddress, args_vector[1], SERVER_ADDRESS_LENGTH - 1);
+                        State.DefaultServerAddress[SERVER_ADDRESS_LENGTH - 1] = '\0';
 
                         PerformInternalLookup(State.DefaultServerAddress,
                                               State.DefaultServer);
@@ -1137,6 +1324,45 @@ void InteractiveMode()
 
 }
 
+static void SelectDefaultServer( void )
+{
+    PIP_ADAPTER_ADDRESSES pList, pAdapter, pBest = NULL;
+    ULONG Size = 16384;
+    DWORD Error;
+
+    pList = HeapAlloc( ProcessHeap, 0, Size );
+    if( !pList ) return;
+    Error = GetAdaptersAddresses( AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_FRIENDLY_NAME,
+                                  NULL, pList, &Size );
+    if( Error == ERROR_BUFFER_OVERFLOW )
+    {
+        HeapFree( ProcessHeap, 0, pList );
+        pList = HeapAlloc( ProcessHeap, 0, Size );
+        if( !pList ) return;
+        Error = GetAdaptersAddresses( AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_FRIENDLY_NAME,
+                                      NULL, pList, &Size );
+    }
+
+    for( pAdapter = (Error == NO_ERROR) ? pList : NULL; pAdapter; pAdapter = pAdapter->Next )
+    {
+        if( pAdapter->OperStatus != IfOperStatusUp || !pAdapter->FirstDnsServerAddress ) continue;
+        if( !pBest || pAdapter->Ipv4Metric < pBest->Ipv4Metric ) pBest = pAdapter;
+    }
+
+    if( pBest )
+    {
+        DWORD Length = sizeof(State.DefaultServerAddress);
+        SOCKADDR *pServer = pBest->FirstDnsServerAddress->Address.lpSockaddr;
+        PVOID pBytes = (pServer->sa_family == AF_INET6) ? (PVOID)&((SOCKADDR_IN6*)pServer)->sin6_addr
+                                                        : (PVOID)&((SOCKADDR_IN*)pServer)->sin_addr;
+
+        if( !inet_ntop( pServer->sa_family, pBytes, State.DefaultServerAddress, Length ) )
+            State.DefaultServerAddress[0] = '\0';
+    }
+
+    HeapFree( ProcessHeap, 0, pList );
+}
+
 int main( int argc, char* argv[] )
 {
     int i;
@@ -1169,7 +1395,7 @@ int main( int argc, char* argv[] )
     RtlZeroMemory( State.domain, 256 );
     for( i = 0; i < 6; i += 1 ) RtlZeroMemory( State.srchlist[i], 256 );
     RtlZeroMemory( State.DefaultServer, 256 );
-    RtlZeroMemory( State.DefaultServerAddress, 16 );
+    RtlZeroMemory( State.DefaultServerAddress, sizeof(State.DefaultServerAddress) );
 
     memcpy( State.root, DEFAULT_ROOT, sizeof(DEFAULT_ROOT) );
 
@@ -1207,10 +1433,12 @@ int main( int argc, char* argv[] )
     strncpy( State.srchlist[0], pNetInfo->DomainName, 255 );
     strncpy( State.DefaultServerAddress,
              pNetInfo->DnsServerList.IpAddress.String,
-             15 );
-    State.DefaultServerAddress[15] = '\0';
+             SERVER_ADDRESS_LENGTH - 1 );
+    State.DefaultServerAddress[SERVER_ADDRESS_LENGTH - 1] = '\0';
 
     HeapFree( ProcessHeap, 0, pNetInfo );
+
+    SelectDefaultServer();
 
     ret = WSAStartup( MAKEWORD(2, 2), &wsaData );
     if (ret != 0)

@@ -242,7 +242,17 @@ BOOLEAN
 AfdIsUnspecifiedIpAddress(
     _In_ PTRANSPORT_ADDRESS Address)
 {
+    static const USHORT Zero[8];
     PTDI_ADDRESS_IP Ip;
+    PTDI_ADDRESS_IP6 Ip6;
+
+    if (Address->TAAddressCount != 0 &&
+        Address->Address[0].AddressType == TDI_ADDRESS_TYPE_IP6 &&
+        Address->Address[0].AddressLength >= sizeof(TDI_ADDRESS_IP6))
+    {
+        Ip6 = (PTDI_ADDRESS_IP6)Address->Address[0].Address;
+        return Ip6->sin6_port == 0 && RtlCompareMemory(Ip6->sin6_addr, Zero, sizeof(Zero)) == sizeof(Zero);
+    }
 
     if (Address->TAAddressCount == 0 ||
         Address->Address[0].AddressType != TDI_ADDRESS_TYPE_IP ||
@@ -256,32 +266,54 @@ AfdIsUnspecifiedIpAddress(
 }
 
 static
-ULONG
+VOID
 AfdRouteSourceAddress(
+    _In_ PAFD_FCB FCB,
     _In_ PTRANSPORT_ADDRESS Address)
 {
     PTDI_ADDRESS_IP Ip;
+    PTDI_ADDRESS_IP6 Ip6;
     SOCKADDR_INET Destination, Source;
     MIB_IPFORWARD_ROW2 Route;
 
-    if (Address->TAAddressCount == 0 ||
-        Address->Address[0].AddressType != TDI_ADDRESS_TYPE_IP ||
+    if (Address->TAAddressCount == 0)
+        return;
+
+    RtlZeroMemory(&Destination, sizeof(Destination));
+    if (Address->Address[0].AddressType == TDI_ADDRESS_TYPE_IP6 &&
+        Address->Address[0].AddressLength >= sizeof(TDI_ADDRESS_IP6))
+    {
+        Ip6 = (PTDI_ADDRESS_IP6)Address->Address[0].Address;
+        Destination.Ipv6.sin6_family = AF_INET6;
+        Destination.Ipv6.sin6_port = Ip6->sin6_port;
+        RtlCopyMemory(&Destination.Ipv6.sin6_addr, Ip6->sin6_addr, sizeof(Ip6->sin6_addr));
+        Destination.Ipv6.sin6_scope_id = Ip6->sin6_scope_id;
+        if (!NT_SUCCESS(GetBestRoute2(NULL, 0, NULL, &Destination, 0, &Route, &Source)) ||
+            Source.si_family != AF_INET6)
+        {
+            return;
+        }
+        RtlCopyMemory(FCB->ConnectedSource6, &Source.Ipv6.sin6_addr, sizeof(FCB->ConnectedSource6));
+        FCB->ConnectedSourceScope = Source.Ipv6.sin6_scope_id;
+        return;
+    }
+
+    if (Address->Address[0].AddressType != TDI_ADDRESS_TYPE_IP ||
         Address->Address[0].AddressLength < sizeof(TDI_ADDRESS_IP))
     {
-        return 0;
+        return;
     }
 
     Ip = (PTDI_ADDRESS_IP)Address->Address[0].Address;
-    RtlZeroMemory(&Destination, sizeof(Destination));
     Destination.Ipv4.sin_family = AF_INET;
     Destination.Ipv4.sin_port = Ip->sin_port;
     Destination.Ipv4.sin_addr.s_addr = Ip->in_addr;
     if (!NT_SUCCESS(GetBestRoute2(NULL, 0, NULL, &Destination, 0, &Route, &Source)) ||
         Source.si_family != AF_INET)
     {
-        return 0;
+        return;
     }
-    return Source.Ipv4.sin_addr.s_addr;
+    FCB->ConnectedSourceAddress = Source.Ipv4.sin_addr.s_addr;
 }
 
 NTSTATUS
@@ -604,6 +636,8 @@ AfdStreamSocketConnect(PDEVICE_OBJECT DeviceObject, PIRP Irp,
             FCB->RemoteAddress = NULL;
         }
         FCB->ConnectedSourceAddress = 0;
+        RtlZeroMemory(FCB->ConnectedSource6, sizeof(FCB->ConnectedSource6));
+        FCB->ConnectedSourceScope = 0;
 
         if (AfdIsUnspecifiedIpAddress(&ConnectReq->RemoteAddress))
             return UnlockAndMaybeComplete( FCB, STATUS_SUCCESS, Irp, 0 );
@@ -617,7 +651,7 @@ AfdStreamSocketConnect(PDEVICE_OBJECT DeviceObject, PIRP Irp,
         }
         else
         {
-            FCB->ConnectedSourceAddress = AfdRouteSourceAddress(FCB->RemoteAddress);
+            AfdRouteSourceAddress(FCB, FCB->RemoteAddress);
             Status = STATUS_SUCCESS;
         }
 

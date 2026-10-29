@@ -27,6 +27,48 @@
 
 #define IPV6_FRAG_COPYHEADER            1
 
+#define LWIP_IPV6_NUM_ADDRESSES         10
+
+#define LWIP_ND6_NUM_NEIGHBORS          64
+
+#define LWIP_ND6_NUM_DESTINATIONS       64
+
+#define LWIP_ND6_NUM_PREFIXES           10
+
+#define LWIP_ND6_NUM_ROUTERS            8
+
+#define LWIP_HOOK_FILENAME              "lwiphooks.h"
+
+#define LWIP_HOOK_IP6_ROUTE(src, dest)  LibIP6RouteHook(src, dest)
+
+#define LWIP_HOOK_ND6_GET_GW(netif, dest) LibIP6GatewayHook(netif, dest)
+
+#define LWIP_HOOK_ND6_REACHABLE_TIME(netif, def) LibIP6ReachableTime(netif, def)
+
+#define LWIP_HOOK_ND6_DAD_TRANSMITS(netif, def) LibIP6DadTransmits(netif, def)
+
+#define LWIP_HOOK_ND6_AUTOCONF_SKIP(netif, i) LibIP6AddressIsManaged(netif, i)
+
+#define LWIP_HOOK_ND6_AUTOCONF_ADDRESS(netif, prefix, addr) LibIP6StableAddress(netif, prefix, addr)
+
+#define LWIP_HOOK_IP6_SOURCE_RANK(netif, i) LibIP6SourceRank(netif, i)
+
+#define LWIP_HOOK_ND6_RETRANS_TIME(netif, def) LibIP6RetransTime(netif, def)
+
+#define LWIP_HOOK_ND6_ROUTER_ALLOWED(netif) LibIP6RouterAllowed(netif)
+
+#define LWIP_HOOK_ND6_PMTU_TIMEOUT(nexthop) LibIP6PmtuTimeout(nexthop)
+
+#define LWIP_HOOK_IP6_FORWARD_ALLOWED(netif) LibIP6ForwardAllowed(netif)
+
+#define LWIP_HOOK_IP6_WEAK_RECEIVE(inp, netif) LibIP6WeakReceive(inp, netif)
+
+#define LWIP_HOOK_IP6_WEAK_SEND(src) LibIP6WeakSend(src)
+
+#define LWIP_IPV6_FORWARD               1
+
+#define LWIP_HOOK_IP6_NO_DEFAULT_NETIF  1
+
 #define ETH_PAD_SIZE                    2
 
 #define IP_REASS_MAX_PBUFS              0xFFFFFFFF

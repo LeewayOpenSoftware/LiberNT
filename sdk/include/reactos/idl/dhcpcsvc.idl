@@ -146,4 +146,18 @@ interface dhcpcsvc
         [in, unique] DHCPCAPI_PARAMS_ARRAY *SendParams,
         [in, unique] DHCPCAPI_PARAMS_ARRAY *RecdParams,
         [in, out, unique] LPDHCPCAPI_RESULT_ARRAY *RecdResults);
+
+    /* Function 8 */
+    DWORD
+    __stdcall
+    AcquireParametersV6(
+        [in, string, unique] PDHCP_SERVER_NAME ServerName,
+        [in, string] LPWSTR AdapterName);
+
+    /* Function 9 */
+    DWORD
+    __stdcall
+    ReleaseParametersV6(
+        [in, string, unique] PDHCP_SERVER_NAME ServerName,
+        [in, string] LPWSTR AdapterName);
 }

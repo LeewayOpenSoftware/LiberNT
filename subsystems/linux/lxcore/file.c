@@ -427,6 +427,9 @@ LxFileDereference(
         File->Ops->Release(File);
     if (File->PidProcess != NULL)
         LxProcessDereference(File->PidProcess);
+    if (File->MountsNs != NULL)
+        LxNsDereference(File->MountsNs);
+    LxFree(File->MountsRoot);
     LxMemfdDereference(File->Memfd);
     if (File->Handle != NULL)
         ZwClose(File->Handle);
@@ -633,6 +636,8 @@ LxMemfdSize(
     FILE_STANDARD_INFORMATION Standard;
     IO_STATUS_BLOCK Iosb;
 
+    if (LxTmpfsFileInode(File) != NULL)
+        return (LONG64)LxTmpfsInodeSize(LxTmpfsFileInode(File));
     if ((File->Handle == NULL) ||
         !NT_SUCCESS(ZwQueryInformationFile(File->Handle, &Iosb, &Standard, sizeof(Standard), FileStandardInformation)))
     {
@@ -664,6 +669,8 @@ LxMemfdCheckWrite(
         return 0;
     if (File->Flags & LX_O_APPEND)
         Position = Size;
+    else if ((Position < 0) && (LxTmpfsFileInode(File) != NULL))
+        Position = File->Position;
     else if ((Position < 0) &&
              NT_SUCCESS(ZwQueryInformationFile(File->Handle, &Iosb, &Current, sizeof(Current), FilePositionInformation)))
         Position = Current.CurrentByteOffset.QuadPart;
@@ -783,12 +790,17 @@ LxFileReadKernel(
     NTSTATUS Status = STATUS_SUCCESS;
     ULONG Total = 0;
 
+    if (LxTmpfsFileInode(File) != NULL)
+        return LxTmpfsReadKernel(LxTmpfsFileInode(File), Buffer, Length, Offset);
     if (File->Handle == NULL)
     {
-        if ((File->Data == NULL) || (Offset >= File->DataLength))
-            return 0;
-        Total = (ULONG)min(Length, File->DataLength - Offset);
-        RtlCopyMemory(Buffer, File->Data + Offset, Total);
+        KeWaitForSingleObject(&File->Lock, Executive, KernelMode, FALSE, NULL);
+        if ((File->Data != NULL) && (Offset < File->DataLength))
+        {
+            Total = (ULONG)min(Length, File->DataLength - Offset);
+            RtlCopyMemory(Buffer, File->Data + Offset, Total);
+        }
+        KeSetEvent(&File->Lock, IO_NO_INCREMENT, FALSE);
         return Total;
     }
 
@@ -1390,6 +1402,22 @@ LxDataRead(
 
     KeWaitForSingleObject(&File->Lock, Executive, KernelMode, FALSE, NULL);
     Position = (Offset != NULL) ? *Offset : File->Position;
+    if ((Position == 0) && (File->MountsNs != NULL))
+    {
+        if (File->MountsRead)
+        {
+            ULONG InfoLength;
+            PSTR Info = LxMountInfoNs(File->MountsNs, File->MountsRoot, File->MountsFull, &InfoLength);
+
+            if (Info != NULL)
+            {
+                LxFree(File->Data);
+                File->Data = (PUCHAR)Info;
+                File->DataLength = InfoLength;
+            }
+        }
+        File->MountsRead = TRUE;
+    }
     if ((Position < 0) || ((ULONG64)Position >= File->DataLength))
     {
         KeSetEvent(&File->Lock, IO_NO_INCREMENT, FALSE);
@@ -1650,9 +1678,22 @@ LxDeviceStat(
     return 0;
 }
 
+static
+ULONG
+LxDevicePoll(
+    _In_ PLX_FILE File,
+    _In_opt_ PLX_POLL_ENTRY Entry)
+{
+    UNREFERENCED_PARAMETER(Entry);
+
+    if ((LX_DEVICE_KIND)(ULONG_PTR)File->Object == LxDeviceKmsg)
+        return 0;
+    return LX_POLLIN | LX_POLLOUT | LX_POLLRDNORM | LX_POLLWRNORM;
+}
+
 static const LX_FILE_OPS LxDeviceOps =
 {
-    LxDeviceRead, LxDeviceWrite, NULL, NULL, LxDeviceStat, LxDeviceSeek, NULL, NULL, NULL
+    LxDeviceRead, LxDeviceWrite, NULL, LxDevicePoll, LxDeviceStat, LxDeviceSeek, NULL, NULL, NULL
 };
 
 PLX_FILE

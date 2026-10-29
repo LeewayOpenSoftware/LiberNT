@@ -214,7 +214,13 @@ HRESULT WINAPI CorBindToRuntimeHost(LPCWSTR pwszVersion, LPCWSTR pwszBuildFlavor
 
     if (SUCCEEDED(ret))
     {
+#ifdef __REACTOS__
+        ret = set_startup_flags(info, startupFlags, TRUE, pwszHostConfigFile);
+        if (SUCCEEDED(ret))
+            ret = ICLRRuntimeInfo_GetInterface(info, rclsid, riid, ppv);
+#else
         ret = ICLRRuntimeInfo_GetInterface(info, rclsid, riid, ppv);
+#endif
 
         ICLRRuntimeInfo_Release(info);
     }
@@ -566,7 +572,13 @@ HRESULT WINAPI CorBindToRuntimeEx(LPWSTR szVersion, LPWSTR szBuildFlavor, DWORD 
 
     if (SUCCEEDED(ret))
     {
+#ifdef __REACTOS__
+        ret = set_startup_flags(info, nflags, FALSE, NULL);
+        if (SUCCEEDED(ret))
+            ret = ICLRRuntimeInfo_GetInterface(info, rslsid, riid, ppv);
+#else
         ret = ICLRRuntimeInfo_GetInterface(info, rslsid, riid, ppv);
+#endif
 
         ICLRRuntimeInfo_Release(info);
     }

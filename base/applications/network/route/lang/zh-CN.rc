@@ -62,4 +62,9 @@ route add <target> [mask <mask>] <gw> [metric <m>]\n\
     IDS_ROUTES_HEADER "         网络目标         网络掩码             网关             接口  跃点数\n"
     IDS_PERSISTENT_HEADER "         网络目标         网络掩码             网关    跃点数\n"
     IDS_NONE "  无\n"
+    IDS_IPV6_ROUTE_TABLE "\nIPv6 Route Table\n"
+    IDS_ROUTES6_HEADER " If Metric Network Destination      Gateway\n"
+    IDS_ROUTES6_ENTRY "%3lu %6lu %-24s %s\n"
+    IDS_ROUTES6_LONG_ENTRY "%3lu %6lu %s\n                                    %s\n"
+    IDS_ONLINK "On-link"
 END

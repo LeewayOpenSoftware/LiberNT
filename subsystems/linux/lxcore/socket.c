@@ -69,6 +69,7 @@ struct _LX_UNIX_SOCKET
     PLX_INSTANCE Instance;
     PLX_NS NetNs;
     PLX_MOUNT BoundMount;
+    ULONG BoundDev;
     LONG64 BoundId;
     LIST_ENTRY BindLink;
     LONG Error;
@@ -722,6 +723,17 @@ LxUnixNodeId(
     HANDLE Handle;
     NTSTATUS Status;
 
+    if ((Node->Mount != NULL) && (Node->Mount->Kind == LxFsTmpfs))
+    {
+        PLX_TMPFS_INODE Inode;
+        LONG Error = LxTmpfsLookup(Node->Mount, Node->Relative, &Inode);
+
+        if (Error != 0)
+            return Error;
+        *Id = (LONG64)LxTmpfsInodeId(Inode);
+        LxTmpfsInodeDereference(Inode);
+        return 0;
+    }
     if ((Node->Mount == NULL) || (Node->Mount->Kind != LxFsNt))
         return -LX_ECONNREFUSED;
     InitializeObjectAttributes(&ObjectAttributes, &Node->NtPath, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
@@ -800,7 +812,7 @@ LxUnixLookupBound(
                 break;
             }
         }
-        else if ((Socket->BoundMount == Mount) && (Socket->BoundId == Id))
+        else if ((Socket->BoundMount != NULL) && (Socket->BoundDev == Mount->Dev) && (Socket->BoundId == Id))
         {
             Found = Socket;
             break;
@@ -853,7 +865,7 @@ LxUnixBindAddress(
             LxNodeFree(&Node);
             return -LX_EADDRINUSE;
         }
-        if ((Node.Mount == NULL) || (Node.Mount->Kind != LxFsNt))
+        if ((Node.Mount == NULL) || LxMountIsSynthetic(Node.Mount))
         {
             LxNodeFree(&Node);
             return -LX_EACCES;
@@ -889,7 +901,7 @@ LxUnixBindAddress(
         {
             PLX_UNIX_SOCKET Other = CONTAINING_RECORD(Entry, LX_UNIX_SOCKET, BindLink);
 
-            if ((Other->BoundMount == Mount) && (Other->BoundId == Id))
+            if ((Other->BoundMount != NULL) && (Other->BoundDev == Mount->Dev) && (Other->BoundId == Id))
             {
                 RemoveEntryList(&Other->BindLink);
                 InitializeListHead(&Other->BindLink);
@@ -901,6 +913,7 @@ LxUnixBindAddress(
     RtlCopyMemory(Socket->Address, Address->Raw, Address->RawLength);
     Socket->AddressLength = Address->RawLength;
     Socket->BoundMount = Mount;
+    Socket->BoundDev = (Mount != NULL) ? Mount->Dev : 0;
     Socket->BoundId = Id;
     Socket->Bound = TRUE;
     LxUnixReference(Socket);
@@ -1511,10 +1524,15 @@ LxUnixParseControl(
                 PLONG Values = (PLONG)(Message + 1);
                 PLX_FILE *Array;
 
-                if ((Count == 0) || (*FdCount + Count > LX_UNIX_MAX_FDS))
+                if (*FdCount + Count > LX_UNIX_MAX_FDS)
                 {
                     Result = -LX_EINVAL;
                     break;
+                }
+                if (Count == 0)
+                {
+                    Offset += LX_ALIGN_UP(Message->Length, 8);
+                    continue;
                 }
                 Array = LxAlloc(sizeof(PLX_FILE) * (*FdCount + Count));
                 if (Array == NULL)

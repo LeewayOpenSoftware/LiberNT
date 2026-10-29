@@ -52,6 +52,8 @@
 #include "winsvc.h"
 #include <winsvc_undoc.h>
 #include "dhcp.h"
+
+VOID ip_interface_extras( ADDRESS_FAMILY family, MIB_IPINTERFACE_ROW *row );
 #endif
 
 #include "wine/nsi.h"
@@ -868,10 +870,20 @@ static void address_lists_iterate( IP_ADAPTER_ADDRESSES *aa, void (*fn)(void *en
 static void adapters_addresses_free( IP_ADAPTER_ADDRESSES *info )
 {
     IP_ADAPTER_ADDRESSES *aa;
+#ifdef __REACTOS__
+    IP_ADAPTER_DNS_SUFFIX *suffix, *next;
+#endif
 
     for (aa = info; aa; aa = aa->Next)
     {
         address_lists_iterate( aa, address_entry_free, NULL );
+#ifdef __REACTOS__
+        for (suffix = aa->FirstDnsSuffix; suffix; suffix = next)
+        {
+            next = suffix->Next;
+            HeapFree( GetProcessHeap(), 0, suffix );
+        }
+#endif
 
         HeapFree( GetProcessHeap(), 0, aa->DnsSuffix );
     }
@@ -881,6 +893,9 @@ static void adapters_addresses_free( IP_ADAPTER_ADDRESSES *info )
 static ULONG adapters_addresses_size( IP_ADAPTER_ADDRESSES *info )
 {
     IP_ADAPTER_ADDRESSES *aa;
+#ifdef __REACTOS__
+    IP_ADAPTER_DNS_SUFFIX *suffix;
+#endif
     ULONG size = 0, align = sizeof(ULONGLONG) - 1;
 
     for (aa = info; aa; aa = aa->Next)
@@ -890,6 +905,10 @@ static ULONG adapters_addresses_size( IP_ADAPTER_ADDRESSES *info )
         if (aa->FriendlyName) size += (wcslen( aa->FriendlyName ) + 1) * sizeof(WCHAR);
         size = (size + align) & ~align;
         address_lists_iterate( aa, address_entry_size, &size );
+#ifdef __REACTOS__
+        for (suffix = aa->FirstDnsSuffix; suffix; suffix = suffix->Next)
+            size += (sizeof(*suffix) + align) & ~align;
+#endif
     }
     return size;
 }
@@ -927,6 +946,9 @@ static void adapters_addresses_copy( IP_ADAPTER_ADDRESSES *dst, IP_ADAPTER_ADDRE
     DWORD len, i;
     UINT_PTR align = sizeof(ULONGLONG) - 1;
     struct address_entry_copy_params params;
+#ifdef __REACTOS__
+    IP_ADAPTER_DNS_SUFFIX *suffix, **next_suffix;
+#endif
 
     for (i = 0; i < count; i++)
     {
@@ -960,6 +982,18 @@ static void adapters_addresses_copy( IP_ADAPTER_ADDRESSES *dst, IP_ADAPTER_ADDRE
         params.cur_offset = ~0u;
         address_lists_iterate( src[i], address_entry_copy, &params );
         ptr = params.ptr;
+
+#ifdef __REACTOS__
+        next_suffix = &dst->FirstDnsSuffix;
+        for (suffix = src[i]->FirstDnsSuffix; suffix; suffix = suffix->Next)
+        {
+            *next_suffix = (IP_ADAPTER_DNS_SUFFIX *)ptr;
+            memcpy( *next_suffix, suffix, sizeof(*suffix) );
+            next_suffix = &(*next_suffix)->Next;
+            ptr += (sizeof(*suffix) + align) & ~align;
+        }
+        *next_suffix = NULL;
+#endif
 
         if (i < count - 1)
         {
@@ -1255,6 +1289,33 @@ static void adapter_dns_suffix( const WCHAR *name, WCHAR *suffix )
     }
     RegCloseKey( key );
 }
+
+static DWORD dns_suffixes_alloc( IP_ADAPTER_ADDRESSES *aa, WCHAR *name )
+{
+    IP_ADAPTER_DNS_SUFFIX *entry, **next = &aa->FirstDnsSuffix;
+    WCHAR *list, *ptr;
+    DWORD size = 0, err = ERROR_SUCCESS;
+
+    if (DnsQueryConfig( DnsConfigSearchList, 0, name, NULL, NULL, &size ) || !(list = malloc( size )))
+        return ERROR_SUCCESS;
+    if (!DnsQueryConfig( DnsConfigSearchList, 0, name, NULL, list, &size ))
+    {
+        for (ptr = list; *ptr; ptr += wcslen( ptr ) + 1)
+        {
+            if (wcslen( ptr ) >= MAX_DNS_SUFFIX_STRING_LENGTH) continue;
+            if (!(entry = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*entry) )))
+            {
+                err = ERROR_NOT_ENOUGH_MEMORY;
+                break;
+            }
+            wcscpy( entry->String, ptr );
+            *next = entry;
+            next = &entry->Next;
+        }
+    }
+    free( list );
+    return err;
+}
 #endif
 
 static DWORD dns_info_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags )
@@ -1322,6 +1383,8 @@ static DWORD dns_info_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags
 
 #ifdef __REACTOS__
         adapter_dns_suffix( name, aa->DnsSuffix );
+        err = dns_suffixes_alloc( aa, name );
+        if (err) return err;
 #else
         if (!DnsQueryConfig( DnsConfigSearchList, 0, name, NULL, NULL, &size ) &&
             (search = malloc( size )))
@@ -1431,6 +1494,9 @@ static DWORD adapters_addresses_alloc( ULONG family, ULONG flags, IP_ADAPTER_ADD
         {
             aa[i].Flags |= IP_ADAPTER_IPV4_ENABLED;
             aa[i].Ipv4Metric = row.Metric;
+#ifdef __REACTOS__
+            memcpy( aa[i].ZoneIndices, row.ZoneIndices, sizeof(aa[i].ZoneIndices) );
+#endif
         }
         memset( &row, 0, sizeof(row) );
         row.Family = AF_INET6;
@@ -1440,6 +1506,9 @@ static DWORD adapters_addresses_alloc( ULONG family, ULONG flags, IP_ADAPTER_ADD
             aa[i].Flags |= IP_ADAPTER_IPV6_ENABLED;
             aa[i].Ipv6IfIndex = row.InterfaceIndex;
             aa[i].Ipv6Metric = row.Metric;
+#ifdef __REACTOS__
+            memcpy( aa[i].ZoneIndices, row.ZoneIndices, sizeof(aa[i].ZoneIndices) );
+#endif
         }
     }
 #endif
@@ -5091,8 +5160,12 @@ static void fill_ip_interface_table_row( ADDRESS_FAMILY fam, MIB_IPINTERFACE_ROW
     row->MaxRouterAdvertisementInterval = 600;
 
     /* Flags exact locations were not yet discovered in NSI table. */
+#ifdef __REACTOS__
+    ip_interface_extras( fam, row );
+#else
     row->UseAutomaticMetric = 1;
     row->UseNeighborUnreachabilityDetection = 1;
+#endif
     row->SupportsNeighborDiscovery = 1;
     row->SupportsRouterDiscovery = 1;
 }
@@ -5248,6 +5321,30 @@ static BOOL is_addr_unspecified( const SOCKADDR_INET *addr, BOOL v6 )
     return FALSE;
 }
 
+#ifdef __REACTOS__
+static BOOL route_ignored( const MIB_IPFORWARD_ROW2 *row )
+{
+    MIB_IPINTERFACE_ROW iface;
+
+    memset( &iface, 0, sizeof(iface) );
+    iface.Family = row->DestinationPrefix.Prefix.si_family;
+    iface.InterfaceIndex = row->InterfaceIndex;
+    return !GetIpInterfaceEntry( &iface ) && iface.DisableDefaultRoutes;
+}
+
+static ULONG route_preference( const MIB_IPFORWARD_ROW2 *row )
+{
+    MIB_IPINTERFACE_ROW iface;
+
+    memset( &iface, 0, sizeof(iface) );
+    iface.Family = row->DestinationPrefix.Prefix.si_family;
+    iface.InterfaceIndex = row->InterfaceIndex;
+    if (GetIpInterfaceEntry( &iface )) return row->Metric;
+    return row->Metric + iface.Metric;
+}
+
+#endif
+
 /******************************************************************
  *    GetBestRoute2 (IPHLPAPI.@)
  */
@@ -5397,9 +5494,19 @@ skip_system_route:
     for (i = 0; i < fwd->NumEntries; ++i)
     {
         if (index && fwd->Table[i].InterfaceIndex != index) continue;
+#ifdef __REACTOS__
+        if (!fwd->Table[i].DestinationPrefix.PrefixLength && route_ignored( &fwd->Table[i] )) continue;
+#endif
 
+#ifdef __REACTOS__
+        if (match_ip_address_with_prefix( dst, &fwd->Table[i].DestinationPrefix )
+            && (max_prefix_len < fwd->Table[i].DestinationPrefix.PrefixLength
+                || (max_prefix_len == fwd->Table[i].DestinationPrefix.PrefixLength
+                    && route_preference( &fwd->Table[i] ) < route_preference( &fwd->Table[best_idx] ))))
+#else
         if (match_ip_address_with_prefix( dst, &fwd->Table[i].DestinationPrefix )
             && max_prefix_len < fwd->Table[i].DestinationPrefix.PrefixLength )
+#endif
         {
             max_prefix_len = fwd->Table[i].DestinationPrefix.PrefixLength;
             best_idx = i;

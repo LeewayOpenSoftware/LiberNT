@@ -1,0 +1,103 @@
+--- a/mono/metadata/class.c
++++ b/mono/metadata/class.c
+@@ -39,6 +39,7 @@
+ #include <mono/metadata/security-manager.h>
+ #include <mono/metadata/security-core-clr.h>
+ #include <mono/metadata/attrdefs.h>
++#include <mono/metadata/reflection-internals.h>
+ #include <mono/metadata/gc-internals.h>
+ #include <mono/metadata/verify-internals.h>
+ #include <mono/metadata/mono-debug.h>
+@@ -5983,8 +5984,58 @@
+ }
+ 
+ static gboolean
++ignores_access_checks_to (MonoAssembly *accessing, MonoAssembly *accessed)
++{
++	ERROR_DECL (error);
++	MonoCustomAttrInfo *attrs;
++	gboolean result = FALSE;
++	int i;
++
++	if (!accessing || !accessed || accessing == accessed || !accessed->aname.name)
++		return FALSE;
++
++	attrs = mono_custom_attrs_from_assembly_checked (accessing, FALSE, error);
++	mono_error_cleanup (error);
++	if (!attrs)
++		return FALSE;
++
++	for (i = 0; i < attrs->num_attrs && !result; ++i) {
++		MonoCustomAttrEntry *attr = &attrs->attrs [i];
++		const char *data;
++		uint32_t data_length;
++
++		if (!attr->ctor || strcmp (m_class_get_name (attr->ctor->klass), "IgnoresAccessChecksToAttribute") ||
++		    strcmp (m_class_get_name_space (attr->ctor->klass), "System.Runtime.CompilerServices"))
++			continue;
++		if (attr->data_size < 4)
++			continue;
++		data = (const char*)attr->data;
++		if (data [0] != 1 || data [1] != 0 || (data [2] & 0xFF) == 0xFF)
++			continue;
++		data_length = mono_metadata_decode_value (data + 2, &data);
++		if (data + data_length > (const char*)attr->data + attr->data_size)
++			continue;
++		if (data_length == strlen (accessed->aname.name) && !g_ascii_strncasecmp (data, accessed->aname.name, data_length))
++			result = TRUE;
++	}
++	mono_custom_attrs_free (attrs);
++	return result;
++}
++
++static gboolean
++can_access_type_by_visibility (MonoClass *access_klass, MonoClass *member_klass);
++
++static gboolean
+ can_access_type (MonoClass *access_klass, MonoClass *member_klass)
+ {
++	if (can_access_type_by_visibility (access_klass, member_klass))
++		return TRUE;
++	return ignores_access_checks_to (m_class_get_image (access_klass)->assembly, m_class_get_image (member_klass)->assembly);
++}
++
++static gboolean
++can_access_type_by_visibility (MonoClass *access_klass, MonoClass *member_klass)
++{
+ 	int access_level;
+ 
+ 	if (access_klass == member_klass)
+@@ -6052,10 +6103,21 @@
+ 	return FALSE;
+ }
+ 
+-/* FIXME: check visibility of type, too */
++static gboolean
++can_access_member_by_visibility (MonoClass *access_klass, MonoClass *member_klass, MonoClass* context_klass, int access_level);
++
+ static gboolean
+ can_access_member (MonoClass *access_klass, MonoClass *member_klass, MonoClass* context_klass, int access_level)
+ {
++	if (can_access_member_by_visibility (access_klass, member_klass, context_klass, access_level))
++		return TRUE;
++	return ignores_access_checks_to (m_class_get_image (access_klass)->assembly, m_class_get_image (member_klass)->assembly);
++}
++
++/* FIXME: check visibility of type, too */
++static gboolean
++can_access_member_by_visibility (MonoClass *access_klass, MonoClass *member_klass, MonoClass* context_klass, int access_level)
++{
+ 	MonoClass *member_generic_def;
+ 	MonoAssembly *access_klass_assembly = m_class_get_image (access_klass)->assembly;
+ 	if (access_klass_assembly && access_klass_assembly->corlib_internal)
+--- a/mono/metadata/custom-attrs.c
++++ b/mono/metadata/custom-attrs.c
+@@ -102,7 +102,7 @@
+ 	/* FIXME: Need to do more checks */
+ 	if (*ctor_method) {
+ 		MonoClass *klass = (*ctor_method)->klass;
+-		if (m_class_get_image (klass) != image) {
++		if (m_class_get_image (klass) != image && m_class_get_image (klass)->assembly != image->assembly) {
+ 			const int visibility = (mono_class_get_flags (klass) & TYPE_ATTRIBUTE_VISIBILITY_MASK);
+ 			if ((visibility != TYPE_ATTRIBUTE_PUBLIC) && (visibility != TYPE_ATTRIBUTE_NESTED_PUBLIC))
+ 				return FALSE;

@@ -46,6 +46,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(shell);
 #define NP_MIN_WIDTH 60
 #define NP_DEFAULT_WIDTH 150
 #define SV_MIN_WIDTH 150
+#ifdef __REACTOS__
+#define EBM_NAVIGATEPARENT (WM_USER + 0x200)
+#endif
 
 typedef struct _event_client {
     struct list entry;
@@ -113,6 +116,8 @@ typedef struct _ExplorerBrowserImpl {
     IShellBrowserService IShellBrowserService_iface;
     IUnknown *punk_filter;
     PCIDLIST_ABSOLUTE view_pidl;
+    BOOL fs_explicit;
+    EXPLORERPANESTATE pane_states[5];
 #endif
 } ExplorerBrowserImpl;
 
@@ -419,7 +424,26 @@ static HRESULT create_new_shellview(ExplorerBrowserImpl *This, IShellItem *psi)
 #endif
 
             This->fs.fFlags |= FWF_USESEARCHFOLDER | FWF_FULLROWSELECT | FWF_NOCLIENTEDGE;
+#ifdef __REACTOS__
+            {
+                IShellView3 *psv3;
+                if (This->fs_explicit &&
+                    SUCCEEDED(IShellView_QueryInterface(psv, &IID_IShellView3, (void**)&psv3)))
+                {
+                    hr = IShellView3_CreateViewWindow3(psv3, psb, This->psv,
+                                                       SV3CVW3_FORCEVIEWMODE | SV3CVW3_FORCEFOLDERFLAGS,
+                                                       ~0u, This->fs.fFlags, This->fs.ViewMode, NULL,
+                                                       &This->sv_rc, &hwnd_new);
+                    IShellView3_Release(psv3);
+                }
+                else
+                {
+                    hr = IShellView_CreateViewWindow(psv, This->psv, &This->fs, psb, &This->sv_rc, &hwnd_new);
+                }
+            }
+#else
             hr = IShellView_CreateViewWindow(psv, This->psv, &This->fs, psb, &This->sv_rc, &hwnd_new);
+#endif
 #ifdef __REACTOS__
             This->view_pidl = NULL;
             ILFree(view_pidl);
@@ -431,6 +455,10 @@ static HRESULT create_new_shellview(ExplorerBrowserImpl *This, IShellItem *psi)
 
                 This->psv = psv;
                 This->hwnd_sv = hwnd_new;
+#ifdef __REACTOS__
+                if(This->pcdb3_site)
+                    ICommDlgBrowser3_OnPreviewCreated(This->pcdb3_site, psv);
+#endif
                 events_ViewCreated(This, psv);
             }
             else
@@ -513,6 +541,20 @@ static void update_panestate(ExplorerBrowserImpl *This)
     if(!This->pepv_site) return;
 
     IExplorerPaneVisibility_GetPaneState(This->pepv_site, (REFEXPLORERPANE) &EP_NavPane, &eps);
+#ifdef __REACTOS__
+    {
+        static const GUID *panes[] =
+        {
+            &EP_Commands, &EP_Commands_Organize, &EP_Commands_View, &EP_DetailsPane, &EP_PreviewPane,
+        };
+
+        for (UINT i = 0; i < ARRAY_SIZE(panes); ++i)
+        {
+            This->pane_states[i] = EPS_DONTCARE;
+            IExplorerPaneVisibility_GetPaneState(This->pepv_site, (REFEXPLORERPANE)panes[i], &This->pane_states[i]);
+        }
+    }
+#endif
     if( !(eps & EPS_DEFAULT_OFF) )
         show_navpane = TRUE;
     else
@@ -809,6 +851,12 @@ static LRESULT CALLBACK main_wndproc(HWND hWnd, UINT uMessage, WPARAM wParam, LP
     case WM_CREATE:           return main_on_wm_create(hWnd, (CREATESTRUCTW*)lParam);
     case WM_SIZE:             return main_on_wm_size(This);
     case CWM_GETISHELLBROWSER: return main_on_cwm_getishellbrowser(This);
+#ifdef __REACTOS__
+    case EBM_NAVIGATEPARENT:
+        if (This && This->current_pidl && !_ILIsDesktop(This->current_pidl))
+            IExplorerBrowser_BrowseToIDList(&This->IExplorerBrowser_iface, NULL, SBSP_PARENT);
+        return 0;
+#endif
     default:                  return DefWindowProcW(hWnd, uMessage, wParam, lParam);
     }
 
@@ -1096,6 +1144,9 @@ static HRESULT WINAPI IExplorerBrowser_fnSetFolderSettings(IExplorerBrowser *ifa
     if (pfs->ViewMode)
         browser->fs.ViewMode = pfs->ViewMode;
     browser->fs.fFlags = pfs->fFlags;
+#ifdef __REACTOS__
+    browser->fs_explicit = TRUE;
+#endif
 
     if (!browser->psv)
         return E_INVALIDARG;
@@ -2226,10 +2277,47 @@ static HRESULT WINAPI IInputObject_fnTranslateAcceleratorIO(IInputObject *iface,
 {
     ExplorerBrowserImpl *This = impl_from_IInputObject(iface);
 #ifdef __REACTOS__
+    HWND hwnd_focus;
+
     TRACE("%p (%p)\n", This, pMsg);
     if (!This->psv)
         return E_FAIL;
-    return IShellView_TranslateAccelerator(This->psv, pMsg) == S_OK ? S_OK : S_FALSE;
+    if (IShellView_TranslateAccelerator(This->psv, pMsg) == S_OK)
+        return S_OK;
+    if (pMsg->message != WM_KEYDOWN)
+        return S_FALSE;
+
+    hwnd_focus = GetFocus();
+    if (!hwnd_focus || (hwnd_focus != This->hwnd_sv && !IsChild(This->hwnd_sv, hwnd_focus)))
+    {
+        if (pMsg->wParam != VK_TAB)
+            return S_FALSE;
+        IShellView_UIActivate(This->psv, SVUIA_ACTIVATE_FOCUS);
+        return S_OK;
+    }
+    if (hwnd_focus != This->hwnd_sv && GetParent(hwnd_focus) != This->hwnd_sv)
+        return S_FALSE;
+
+    switch (pMsg->wParam)
+    {
+    case VK_BACK:
+        PostMessageW(This->hwnd_main, EBM_NAVIGATEPARENT, 0, 0);
+        return S_OK;
+    case VK_RETURN:
+    case VK_PRIOR:
+    case VK_NEXT:
+    case VK_END:
+    case VK_HOME:
+    case VK_LEFT:
+    case VK_UP:
+    case VK_RIGHT:
+    case VK_DOWN:
+        TranslateMessage(pMsg);
+        if (pMsg->hwnd == hwnd_focus)
+            DispatchMessageW(pMsg);
+        return S_OK;
+    }
+    return S_FALSE;
 #else
     FIXME("stub, %p (%p)\n", This, pMsg);
     return E_NOTIMPL;

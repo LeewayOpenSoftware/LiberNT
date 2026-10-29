@@ -561,6 +561,12 @@ LxMountFindLocked(
     _Out_opt_ PCSTR *Relative);
 
 static
+BOOLEAN
+LxMountIsBelow(
+    _In_ PLX_MOUNT Mount,
+    _In_ PLX_MOUNT Ancestor);
+
+static
 VOID
 LxMountPropagate(
     _In_ PLX_MOUNT Mount);
@@ -579,6 +585,11 @@ LxVfsNewOwner(
     _Inout_ PULONG Mode,
     _Out_ PULONG Uid,
     _Out_ PULONG Gid);
+
+static
+VOID
+LxMountSweepTmpfs(
+    _In_ PLX_INSTANCE Instance);
 
 static
 VOID
@@ -651,6 +662,40 @@ LxInstanceMountNt(
 }
 
 static
+PLX_MOUNT
+LxMountAllocate(
+    _In_ PCSTR Target,
+    _In_ PCSTR Source,
+    _In_ PCSTR FsType,
+    _In_ ULONG Flags,
+    _In_ LX_FS_KIND Kind,
+    _In_ ULONG64 Magic)
+{
+    PLX_MOUNT Mount = LxAlloc(sizeof(*Mount));
+
+    if (Mount == NULL)
+        return NULL;
+
+    Mount->Kind = Kind;
+    Mount->Target = LxStrDup(Target);
+    Mount->Source = LxStrDup(Source);
+    Mount->FsType = LxStrDup(FsType);
+    Mount->Root = LxStrDup("/");
+    Mount->Flags = Flags;
+    Mount->Magic = Magic;
+    if ((Mount->Target == NULL) || (Mount->Source == NULL) || (Mount->FsType == NULL) || (Mount->Root == NULL))
+    {
+        LxFree(Mount->Target);
+        LxFree(Mount->Source);
+        LxFree(Mount->FsType);
+        LxFree(Mount->Root);
+        LxFree(Mount);
+        return NULL;
+    }
+    return Mount;
+}
+
+static
 LONG
 LxInstanceMountSynthetic(
     _In_ PLX_NS Ns,
@@ -662,19 +707,33 @@ LxInstanceMountSynthetic(
     _In_ ULONG64 Magic,
     _Out_opt_ PLX_MOUNT *Out)
 {
-    PLX_MOUNT Mount = LxAlloc(sizeof(*Mount));
+    PLX_MOUNT Mount = LxMountAllocate(Target, Source, FsType, Flags, Kind, Magic);
 
     if (Mount == NULL)
         return -LX_ENOMEM;
 
-    Mount->Kind = Kind;
-    Mount->Target = LxStrDup(Target);
-    Mount->Source = LxStrDup(Source);
-    Mount->FsType = LxStrDup(FsType);
-    Mount->Root = LxStrDup("/");
-    Mount->Flags = Flags;
-    Mount->Magic = Magic;
-    if ((Mount->Target == NULL) || (Mount->Source == NULL) || (Mount->FsType == NULL) || (Mount->Root == NULL))
+    LxMountInsert(Ns, Mount, FALSE);
+    if (Out != NULL)
+        *Out = Mount;
+    return 0;
+}
+
+static
+LONG
+LxInstanceTmpfs(
+    _In_ PLX_NS Ns,
+    _In_ PCSTR Target,
+    _In_ PCSTR FsType,
+    _In_ ULONG Flags,
+    _In_ ULONG Mode,
+    _Out_opt_ PLX_MOUNT *Out)
+{
+    PLX_MOUNT Mount = LxMountAllocate(Target, FsType, FsType, Flags, LxFsTmpfs, LX_MAGIC_TMPFS);
+
+    if (Mount == NULL)
+        return -LX_ENOMEM;
+    Mount->Tmpfs = LxTmpfsCreate(Mode);
+    if (Mount->Tmpfs == NULL)
     {
         LxFree(Mount->Target);
         LxFree(Mount->Source);
@@ -691,51 +750,9 @@ LxInstanceMountSynthetic(
 }
 
 static
-LONG
-LxInstanceTmpfs(
-    _In_ PLX_NS Ns,
-    _In_ PCSTR Target,
-    _In_ PCSTR FsType,
-    _In_ ULONG Flags,
-    _In_ ULONG Mode,
-    _Out_opt_ PUNICODE_STRING Root,
-    _Out_opt_ PLX_MOUNT *Out)
-{
-    PLX_INSTANCE Instance = Ns->Instance;
-    UNICODE_STRING NtRoot;
-    WCHAR Suffix[16];
-    LONG Error;
-    ULONG Id;
-
-    ExAcquireFastMutex(&Instance->Lock);
-    Id = Instance->NextTmpId++;
-    ExReleaseFastMutex(&Instance->Lock);
-
-    RtlStringCbPrintfW(Suffix, sizeof(Suffix), L"\\%lu", Id);
-    NtRoot.MaximumLength = Instance->TmpNt.Length + (USHORT)(wcslen(Suffix) * sizeof(WCHAR)) + sizeof(WCHAR);
-    NtRoot.Length = 0;
-    NtRoot.Buffer = LxAlloc(NtRoot.MaximumLength);
-    if (NtRoot.Buffer == NULL)
-        return -LX_ENOMEM;
-    LxUnicodeAppend(&NtRoot, Instance->TmpNt.Buffer, Instance->TmpNt.Length);
-    LxUnicodeAppend(&NtRoot, Suffix, (ULONG)(wcslen(Suffix) * sizeof(WCHAR)));
-
-    Error = LxNtCreateDirectory(&NtRoot, Mode);
-    if (Error == 0)
-        Error = LxInstanceMountNt(Ns, Target, FsType, FsType, Flags, &NtRoot, LX_MAGIC_TMPFS, Out);
-    if ((Error == 0) && (Root != NULL))
-    {
-        *Root = NtRoot;
-        return 0;
-    }
-    LxFree(NtRoot.Buffer);
-    return Error;
-}
-
-static
 VOID
 LxPopulateDev(
-    _In_ PCUNICODE_STRING DevRoot)
+    _In_ PLX_MOUNT Dev)
 {
     static const struct
     {
@@ -767,66 +784,29 @@ LxPopulateDev(
 
     for (Index = 0; Index < RTL_NUMBER_OF(Nodes); Index++)
     {
-        LX_MOUNT Mount;
-        UNICODE_STRING Path;
-
-        RtlZeroMemory(&Mount, sizeof(Mount));
-        Mount.NtRoot = *DevRoot;
-        if (LxNtPath(&Mount, Nodes[Index].Name, &Path) == 0)
-        {
-            LxNtCreateNode(&Path, Nodes[Index].Mode, 0, 0, ((ULONG64)Nodes[Index].Major << 32) | Nodes[Index].Minor,
-                           Nodes[Index].Link);
-            LxFreePaged(Path.Buffer);
-        }
+        LxTmpfsCreateNode(Dev, Nodes[Index].Name, Nodes[Index].Mode, 0, 0,
+                          ((ULONG64)Nodes[Index].Major << 32) | Nodes[Index].Minor, Nodes[Index].Link, NULL);
     }
 
     for (Index = 0; Index < RTL_NUMBER_OF(Directories); Index++)
-    {
-        LX_MOUNT Mount;
-        UNICODE_STRING Path;
-
-        RtlZeroMemory(&Mount, sizeof(Mount));
-        Mount.NtRoot = *DevRoot;
-        if (LxNtPath(&Mount, Directories[Index], &Path) == 0)
-        {
-            LxNtCreateDirectory(&Path, (Index == 1) ? 01777 : 0755);
-            LxFreePaged(Path.Buffer);
-        }
-    }
+        LxTmpfsCreateNode(Dev, Directories[Index], LX_S_IFDIR | ((Index == 1) ? 01777 : 0755), 0, 0, 0, NULL, NULL);
 
     UsbCount = LxSysDevUsbNodes(UsbNodes, RTL_NUMBER_OF(UsbNodes));
     for (Index = 0; Index < UsbCount; Index++)
     {
         ULONG Bus = UsbNodes[Index] >> 16, Devnum = UsbNodes[Index] & 0xFFFF;
         CHAR Name[24];
-        LX_MOUNT Mount;
-        UNICODE_STRING Path;
 
-        RtlZeroMemory(&Mount, sizeof(Mount));
-        Mount.NtRoot = *DevRoot;
-        if ((Index == 0) && (LxNtPath(&Mount, "bus", &Path) == 0))
+        if (Index == 0)
         {
-            LxNtCreateDirectory(&Path, 0755);
-            LxFreePaged(Path.Buffer);
-        }
-        if ((Index == 0) && (LxNtPath(&Mount, "bus/usb", &Path) == 0))
-        {
-            LxNtCreateDirectory(&Path, 0755);
-            LxFreePaged(Path.Buffer);
+            LxTmpfsCreateNode(Dev, "bus", LX_S_IFDIR | 0755, 0, 0, 0, NULL, NULL);
+            LxTmpfsCreateNode(Dev, "bus/usb", LX_S_IFDIR | 0755, 0, 0, 0, NULL, NULL);
         }
         RtlStringCbPrintfA(Name, sizeof(Name), "bus/usb/%03lu", Bus);
-        if (LxNtPath(&Mount, Name, &Path) == 0)
-        {
-            LxNtCreateDirectory(&Path, 0755);
-            LxFreePaged(Path.Buffer);
-        }
+        LxTmpfsCreateNode(Dev, Name, LX_S_IFDIR | 0755, 0, 0, 0, NULL, NULL);
         RtlStringCbPrintfA(Name, sizeof(Name), "bus/usb/%03lu/%03lu", Bus, Devnum);
-        if (LxNtPath(&Mount, Name, &Path) == 0)
-        {
-            LxNtCreateNode(&Path, LX_S_IFCHR | 0664, 0, 0,
-                           ((ULONG64)LX_USB_DEVICE_MAJOR << 32) | ((Bus - 1) * 128 + (Devnum - 1)), NULL);
-            LxFreePaged(Path.Buffer);
-        }
+        LxTmpfsCreateNode(Dev, Name, LX_S_IFCHR | 0664, 0, 0,
+                          ((ULONG64)LX_USB_DEVICE_MAJOR << 32) | ((Bus - 1) * 128 + (Devnum - 1)), NULL, NULL);
     }
 }
 
@@ -837,7 +817,7 @@ LxInstanceCreate(
 {
     static const WCHAR TmpSuffix[] = L".lxtmp";
     PLX_INSTANCE Instance;
-    UNICODE_STRING DevRoot;
+    PLX_MOUNT Dev;
     UCHAR Random[16];
     ULONG Index;
     PLX_NS Ns;
@@ -929,15 +909,12 @@ LxInstanceCreate(
                              LxFsSys, LX_MAGIC_SYSFS, NULL);
     LxInstanceMountSynthetic(Ns, "/sys/fs/cgroup", "cgroup2", "cgroup2",
                              LX_MS_NOSUID | LX_MS_NODEV | LX_MS_NOEXEC, LxFsCgroup, LX_MAGIC_CGROUP2, NULL);
-    if (LxInstanceTmpfs(Ns, "/dev", "devtmpfs", LX_MS_NOSUID, 0755, &DevRoot, NULL) == 0)
-    {
-        LxPopulateDev(&DevRoot);
-        LxFree(DevRoot.Buffer);
-    }
+    if (LxInstanceTmpfs(Ns, "/dev", "devtmpfs", LX_MS_NOSUID, 0755, &Dev) == 0)
+        LxPopulateDev(Dev);
     LxInstanceMountSynthetic(Ns, "/dev/pts", "devpts", "devpts", LX_MS_NOSUID | LX_MS_NOEXEC,
                              LxFsDevpts, LX_MAGIC_DEVPTS, NULL);
-    LxInstanceTmpfs(Ns, "/dev/shm", "tmpfs", LX_MS_NOSUID | LX_MS_NODEV, 01777, NULL, NULL);
-    LxInstanceTmpfs(Ns, "/run", "tmpfs", LX_MS_NOSUID | LX_MS_NODEV, 0755, NULL, NULL);
+    LxInstanceTmpfs(Ns, "/dev/shm", "tmpfs", LX_MS_NOSUID | LX_MS_NODEV, 01777, NULL);
+    LxInstanceTmpfs(Ns, "/run", "tmpfs", LX_MS_NOSUID | LX_MS_NODEV, 0755, NULL);
 
     ExAcquireFastMutex(&LxInstanceListLock);
     InsertTailList(&LxInstanceList, &Instance->Link);
@@ -1000,6 +977,8 @@ LxInstanceDereference(
                 InterlockedDecrement(&Mount->NsFile->PassiveRefs);
             LxNsDereference(Mount->NsFile);
         }
+        if (Mount->Tmpfs != NULL)
+            LxTmpfsMountDereference(Mount->Tmpfs);
         LxFree(Mount->Target);
         LxFree(Mount->Source);
         LxFree(Mount->FsType);
@@ -1077,6 +1056,46 @@ LxInstanceAllocatePid(
 }
 
 static
+SIZE_T
+LxMountTargetLength(
+    _In_ PLX_MOUNT Mount)
+{
+    return (strcmp(Mount->Target, "/") == 0) ? 0 : strlen(Mount->Target);
+}
+
+static
+BOOLEAN
+LxMountCovered(
+    _In_ PLX_NS Ns,
+    _In_ PLX_MOUNT Mount)
+{
+    PLX_MOUNT Parent = Mount->Parent;
+    SIZE_T Length = LxMountTargetLength(Mount), ParentLength;
+    PLIST_ENTRY Entry;
+
+    if (Parent == NULL)
+        return FALSE;
+    ParentLength = LxMountTargetLength(Parent);
+    for (Entry = Ns->Mnt.Mounts.Flink; Entry != &Ns->Mnt.Mounts; Entry = Entry->Flink)
+    {
+        PLX_MOUNT Other = CONTAINING_RECORD(Entry, LX_MOUNT, Link);
+        SIZE_T OtherLength = LxMountTargetLength(Other);
+
+        if ((Other == Mount) || Other->Detached || (OtherLength < ParentLength) || (OtherLength > Length))
+            continue;
+        if ((OtherLength != 0) &&
+            ((strncmp(Mount->Target, Other->Target, OtherLength) != 0) ||
+             ((Mount->Target[OtherLength] != '\0') && (Mount->Target[OtherLength] != '/'))))
+        {
+            continue;
+        }
+        if (LxMountIsBelow(Other, Parent) && !LxMountIsBelow(Mount, Other))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static
 PLX_MOUNT
 LxMountFindLocked(
     _In_ PLX_NS Ns,
@@ -1097,6 +1116,8 @@ LxMountFindLocked(
             Match = TRUE;
         else
             Match = (strncmp(Path, Mount->Target, Length) == 0) && ((Path[Length] == '\0') || (Path[Length] == '/'));
+        if (Match && (Length != 0) && (Length >= BestLength) && LxMountCovered(Ns, Mount))
+            Match = FALSE;
         if (!Match && (Mount->Alias != NULL))
         {
             Length = strlen(Mount->Alias);
@@ -1176,7 +1197,7 @@ LxMountAdd(
 
     Existing = LxMountFind(Ns, Target, &Relative);
     if ((Existing != NULL) && (Relative[0] == '\0') && (strcmp(Existing->FsType, FsType) == 0) &&
-        (Existing->Kind != LxFsProc) && (Existing->Kind != LxFsCgroup))
+        (Existing->Kind != LxFsProc) && (Existing->Kind != LxFsCgroup) && (Ns == Ns->Instance->RootNs[LxNsMnt]))
     {
         return 0;
     }
@@ -1187,7 +1208,7 @@ LxMountAdd(
         (strcmp(FsType, "securityfs") == 0) || (strcmp(FsType, "pstore") == 0) || (strcmp(FsType, "bpf") == 0) ||
         (strcmp(FsType, "efivarfs") == 0) || (strcmp(FsType, "binfmt_misc") == 0) || (strcmp(FsType, "autofs") == 0))
     {
-        Error = LxInstanceTmpfs(Ns, Target, FsType, Flags, 01777, NULL, &Mount);
+        Error = LxInstanceTmpfs(Ns, Target, FsType, Flags, 01777, &Mount);
         if (Error == 0)
             LxMountPropagate(Mount);
         return Error;
@@ -1283,7 +1304,52 @@ LxMountUnmount(
     ExReleaseFastMutex(&Instance->Lock);
     LxEventSourceSignal(&Ns->Mnt.Events);
     LxVcacheInvalidate();
+    LxMountSweepTmpfs(Instance);
     return 0;
+}
+
+static
+VOID
+LxMountSweepTmpfs(
+    _In_ PLX_INSTANCE Instance)
+{
+    PLX_TMPFS Dead[16];
+    ULONG Count = 0, Index;
+    PLIST_ENTRY Entry, Other;
+
+    ExAcquireFastMutex(&Instance->Lock);
+    for (Entry = Instance->AllMounts.Flink; (Entry != &Instance->AllMounts) && (Count < RTL_NUMBER_OF(Dead));
+         Entry = Entry->Flink)
+    {
+        PLX_MOUNT Mount = CONTAINING_RECORD(Entry, LX_MOUNT, InstanceLink);
+        BOOLEAN Live = FALSE, Seen = FALSE;
+
+        if ((Mount->Tmpfs == NULL) || !IsListEmpty(&Mount->Link))
+            continue;
+        for (Index = 0; Index < Count; Index++)
+        {
+            if (Dead[Index] == Mount->Tmpfs)
+                Seen = TRUE;
+        }
+        for (Other = Instance->AllMounts.Flink; !Seen && (Other != &Instance->AllMounts); Other = Other->Flink)
+        {
+            PLX_MOUNT Peer = CONTAINING_RECORD(Other, LX_MOUNT, InstanceLink);
+
+            if ((Peer->Tmpfs == Mount->Tmpfs) && !IsListEmpty(&Peer->Link))
+                Live = TRUE;
+        }
+        if (!Seen && !Live)
+        {
+            LxTmpfsReference(Mount->Tmpfs);
+            Dead[Count++] = Mount->Tmpfs;
+        }
+    }
+    ExReleaseFastMutex(&Instance->Lock);
+    for (Index = 0; Index < Count; Index++)
+    {
+        LxTmpfsPurge(Dead[Index]);
+        LxTmpfsDereference(Dead[Index]);
+    }
 }
 
 static
@@ -1338,7 +1404,7 @@ LxMountCreateDetached(
     else if (strcmp(FsType, "mqueue") == 0)
         Error = LxInstanceMountSynthetic(Ns, Target, Source, "mqueue", Flags, LxFsMqueue, LX_MAGIC_MQUEUE, Mount);
     else if ((strcmp(FsType, "tmpfs") == 0) || (strcmp(FsType, "ramfs") == 0) || (strcmp(FsType, "devtmpfs") == 0))
-        Error = LxInstanceTmpfs(Ns, Target, FsType, Flags, Mode, NULL, Mount);
+        Error = LxInstanceTmpfs(Ns, Target, FsType, Flags, Mode, Mount);
     else
         Error = -LX_ENODEV;
 
@@ -1384,6 +1450,7 @@ LxMountClone(
     Mount->CgroupRoot = Source->CgroupRoot;
     Mount->PidNs = Source->PidNs;
     Mount->NsFile = Source->NsFile;
+    Mount->Tmpfs = Source->Tmpfs;
     if (Source->Kind == LxFsNt)
     {
         UNICODE_STRING Root;
@@ -1425,6 +1492,8 @@ LxMountClone(
         if (Mount->Kind == LxFsMqueue)
             InterlockedIncrement(&Mount->NsFile->PassiveRefs);
     }
+    if (Mount->Tmpfs != NULL)
+        LxTmpfsMountReference(Mount->Tmpfs);
     Mount->PeerGroup = Source->PeerGroup;
     Mount->MasterGroup = Source->MasterGroup;
     LxMountInsert(Ns, Mount, TRUE);
@@ -2059,6 +2128,7 @@ LxMountNsCopy(
         Copy->CgroupRoot = Source->CgroupRoot;
         Copy->PidNs = Source->PidNs;
         Copy->NsFile = Source->NsFile;
+        Copy->Tmpfs = Source->Tmpfs;
         Copy->Unbindable = Source->Unbindable;
         Copy->PeerGroup = Source->PeerGroup;
         Copy->MasterGroup = Source->MasterGroup;
@@ -2098,6 +2168,8 @@ LxMountNsCopy(
             if (Copy->Kind == LxFsMqueue)
                 InterlockedIncrement(&Copy->NsFile->PassiveRefs);
         }
+        if (Copy->Tmpfs != NULL)
+            LxTmpfsMountReference(Copy->Tmpfs);
         Copy->Instance = Instance;
         Copy->Ns = New;
     }
@@ -2153,6 +2225,30 @@ LxMountNsRelease(
     ExReleaseFastMutex(&Instance->Lock);
     LxVcachePurgeOwner(Ns);
     LxVcacheInvalidate();
+    LxMountSweepTmpfs(Instance);
+}
+
+static
+PSTR
+LxPathRebaseOld(
+    _In_ PCSTR Path,
+    _In_ PCSTR Root,
+    _In_ PCSTR PutOld)
+{
+    SIZE_T RootLength = (strcmp(Root, "/") == 0) ? 0 : strlen(Root);
+    PCSTR Rest;
+
+    if ((RootLength != 0) &&
+        ((strncmp(Path, Root, RootLength) != 0) || ((Path[RootLength] != '\0') && (Path[RootLength] != '/'))))
+    {
+        return LxStrDup(Path);
+    }
+    Rest = Path + RootLength;
+    if (strcmp(Rest, "/") == 0)
+        Rest = "";
+    if (strcmp(PutOld, "/") == 0)
+        return (RootLength != 0) ? LxStrPrintf("%s%s", Root, Rest) : LxStrDup((Rest[0] != '\0') ? Rest : "/");
+    return LxStrPrintf("%s%s%s", (RootLength != 0) ? Root : "", PutOld, Rest);
 }
 
 PSTR
@@ -2174,17 +2270,7 @@ LxPathRebase(
             return LxStrDup((Rest[0] != '\0') ? Rest : "/");
         return LxStrPrintf("%s%s", Root, Rest);
     }
-    if ((RootLength != 0) &&
-        ((strncmp(Path, Root, RootLength) != 0) || ((Path[RootLength] != '\0') && (Path[RootLength] != '/'))))
-    {
-        return LxStrDup(Path);
-    }
-    Rest = Path + RootLength;
-    if (strcmp(Rest, "/") == 0)
-        Rest = "";
-    if (strcmp(PutOld, "/") == 0)
-        return (RootLength != 0) ? LxStrPrintf("%s%s", Root, Rest) : LxStrDup((Rest[0] != '\0') ? Rest : "/");
-    return LxStrPrintf("%s%s%s", (RootLength != 0) ? Root : "", PutOld, Rest);
+    return LxPathRebaseOld(Path, Root, PutOld);
 }
 
 LONG
@@ -2242,7 +2328,10 @@ LxMountPivotRoot(
 
         if (Mount->Detached)
             continue;
-        Rebased = LxPathRebase(Mount->Target, Root, NewPath, OldRel);
+        if ((Mount == NewMount) || LxMountIsBelow(Mount, NewMount))
+            Rebased = LxPathRebase(Mount->Target, Root, NewPath, OldRel);
+        else
+            Rebased = LxPathRebaseOld(Mount->Target, Root, OldRel);
         if (Rebased != NULL)
         {
             LxFree(Mount->Target);
@@ -2299,9 +2388,24 @@ LxMountInfo(
     _In_ BOOLEAN Full,
     _Out_ PULONG Length)
 {
-    PLX_NS Ns = LxProcessNs(Process, LxNsMnt);
+    PSTR Root = LxProcessRoot(Process), Info;
+
+    *Length = 0;
+    if (Root == NULL)
+        return NULL;
+    Info = LxMountInfoNs(LxProcessNs(Process, LxNsMnt), Root, Full, Length);
+    LxFree(Root);
+    return Info;
+}
+
+PSTR
+LxMountInfoNs(
+    _In_ PLX_NS Ns,
+    _In_ PCSTR Root,
+    _In_ BOOLEAN Full,
+    _Out_ PULONG Length)
+{
     PLX_INSTANCE Instance = Ns->Instance;
-    PSTR Root = LxProcessRoot(Process);
     SIZE_T RootLength;
     SIZE_T Size = 16384, Used;
     PLIST_ENTRY Entry;
@@ -2309,17 +2413,12 @@ LxMountInfo(
     BOOLEAN Overflow;
 
     *Length = 0;
-    if (Root == NULL)
-        return NULL;
     RootLength = strlen(Root);
     for (;;)
     {
         Buffer = LxAlloc(Size);
         if (Buffer == NULL)
-        {
-            LxFree(Root);
             return NULL;
-        }
         Used = 0;
         Overflow = FALSE;
 
@@ -2382,7 +2481,6 @@ LxMountInfo(
         Size *= 4;
     }
 
-    LxFree(Root);
     *Length = (ULONG)Used;
     return Buffer;
 }
@@ -2420,6 +2518,10 @@ LxMountStatfs(
                     ((Mount->Flags & LX_MS_NODEV) ? 4 : 0) | ((Mount->Flags & LX_MS_NOEXEC) ? 8 : 0);
     Result->Files = 1000000;
     Result->Ffree = 900000;
+
+    if (Mount->Tmpfs != NULL)
+        LxTmpfsStatfs(Mount->Tmpfs, &Result->Blocks, &Result->Bfree, &Result->Files, &Result->Ffree);
+    Result->Bavail = Result->Bfree;
 
     if (Mount->Kind == LxFsNt)
     {
@@ -2520,6 +2622,8 @@ LxNodeQuery(
     if (Mount == NULL)
         return -LX_ENOENT;
 
+    if (Mount->Kind == LxFsTmpfs)
+        return LxTmpfsQuery(Mount, Relative, Type, LinkTarget);
     if (Mount->Kind != LxFsNt)
         return LxSynthQuery(Process, Mount, Relative, Type, LinkTarget);
 
@@ -2621,6 +2725,67 @@ LxFileBasePath(
 }
 
 static
+PSTR
+LxFileLookupBase(
+    _In_ PLX_PROCESS Process,
+    _In_ PLX_FILE File,
+    _Out_opt_ PBOOLEAN Foreign)
+{
+    PLX_NS Ns = LxProcessNs(Process, LxNsMnt);
+    PLX_MOUNT Origin = File->Mount, Match = NULL;
+    PSTR Path = LxFileBasePath(File), Rebased = NULL;
+    PCSTR OriginRoot, Rest;
+    PLIST_ENTRY Entry;
+    BOOLEAN Found = FALSE;
+    SIZE_T Length;
+
+    if (Foreign != NULL)
+        *Foreign = FALSE;
+    if ((Path == NULL) || (Origin == NULL) || (Origin->Ns == NULL) || (Ns == NULL) || (Origin->Ns == Ns))
+        return Path;
+    Length = (strcmp(Origin->Target, "/") == 0) ? 0 : strlen(Origin->Target);
+    if ((strncmp(Path, Origin->Target, Length) != 0) || ((Path[Length] != '\0') && (Path[Length] != '/')))
+        return Path;
+    Rest = Path + Length;
+    OriginRoot = (Origin->Root != NULL) ? Origin->Root : "/";
+
+    ExAcquireFastMutex(&Ns->Instance->Lock);
+    for (Entry = Ns->Mnt.Mounts.Flink; Entry != &Ns->Mnt.Mounts; Entry = Entry->Flink)
+    {
+        PLX_MOUNT Mount = CONTAINING_RECORD(Entry, LX_MOUNT, Link);
+
+        if ((Mount->Kind != Origin->Kind) || (Mount->Dev != Origin->Dev) || (Mount->Tmpfs != Origin->Tmpfs) ||
+            (strcmp((Mount->Root != NULL) ? Mount->Root : "/", OriginRoot) != 0))
+        {
+            continue;
+        }
+        Found = TRUE;
+        if (strcmp(Mount->Target, Origin->Target) == 0)
+        {
+            Match = NULL;
+            break;
+        }
+        if (Match == NULL)
+            Match = Mount;
+    }
+    if ((Foreign != NULL) && !Found)
+        *Foreign = TRUE;
+    if (Match != NULL)
+    {
+        if (strcmp(Match->Target, "/") == 0)
+            Rebased = LxStrDup((Rest[0] != '\0') ? Rest : "/");
+        else
+            Rebased = LxStrPrintf("%s%s", Match->Target, Rest);
+    }
+    ExReleaseFastMutex(&Ns->Instance->Lock);
+
+    if (Rebased == NULL)
+        return Path;
+    LxFree(Path);
+    return Rebased;
+}
+
+static
 LONG
 LxLookupWalk(
     _In_ PLX_PROCESS Process,
@@ -2681,7 +2846,7 @@ LxLookupWalk(
             LxFree(ProcRoot);
             return -LX_ENOTDIR;
         }
-        Current = LxFileBasePath(File);
+        Current = LxFileLookupBase(Process, File, NULL);
         LxFileDereference(File);
     }
     if (Current == NULL)
@@ -2721,7 +2886,7 @@ LxLookupWalk(
                 *Synthetic = TRUE;
             if ((Error == 0) &&
                 ((Type != LX_S_IFLNK) || !(Flags & LX_LOOKUP_FOLLOW) ||
-                 ((LinkTarget == NULL) && (Mount->Kind != LxFsNt))))
+                 ((LinkTarget == NULL) && LxMountIsSynthetic(Mount))))
             {
                 LxFree(Joined);
                 LxFree(Current);
@@ -2863,14 +3028,14 @@ LxLookupWalk(
             break;
         }
 
-        if ((Type == LX_S_IFLNK) && (LinkTarget == NULL) && (Mount->Kind != LxFsNt) &&
+        if ((Type == LX_S_IFLNK) && (LinkTarget == NULL) && LxMountIsSynthetic(Mount) &&
             (!Last || (Flags & LX_LOOKUP_FOLLOW)) &&
             !(Flags & (LX_LOOKUP_NO_MAGICLINKS | LX_LOOKUP_NO_SYMLINKS | LX_LOOKUP_BENEATH | LX_LOOKUP_IN_ROOT)))
         {
             LinkTarget = LxSynthFollowPath(Process, Mount, Relative);
         }
 
-        if ((Type == LX_S_IFLNK) && (LinkTarget == NULL) && (Mount->Kind != LxFsNt))
+        if ((Type == LX_S_IFLNK) && (LinkTarget == NULL) && LxMountIsSynthetic(Mount))
         {
             if ((Flags & (LX_LOOKUP_NO_MAGICLINKS | LX_LOOKUP_NO_SYMLINKS | LX_LOOKUP_BENEATH | LX_LOOKUP_IN_ROOT)) &&
                 (!Last || (Flags & LX_LOOKUP_FOLLOW)))
@@ -3221,7 +3386,7 @@ LxLookupCacheKey(
             if (File == NULL)
                 return NULL;
             Base = ((File->Type == LX_S_IFDIR) && (File->Path != NULL) && (File->Path[0] == '/')) ?
-                   LxFileBasePath(File) : NULL;
+                   LxFileLookupBase(Process, File, NULL) : NULL;
             LxFileDereference(File);
         }
         if (Base == NULL)
@@ -3241,8 +3406,9 @@ LxLookupCacheKey(
     return Key;
 }
 
+static
 LONG
-LxLookup(
+LxLookupIn(
     _In_ PLX_PROCESS Process,
     _In_ LONG DirFd,
     _In_ PCSTR Path,
@@ -3346,6 +3512,189 @@ LxLookup(
     return LxLookupWalk(Process, DirFd, Path, Flags, Node, &Synthetic);
 }
 
+static
+PLX_NS
+LxLookupDirNamespace(
+    _In_ PLX_PROCESS Process,
+    _In_ LONG DirFd)
+{
+    PLX_FILE File = LxFdGet(Process, DirFd);
+    PLX_NS Ns = NULL;
+    BOOLEAN Foreign = FALSE;
+    PSTR Base;
+
+    if (File == NULL)
+        return NULL;
+    if ((File->Type == LX_S_IFDIR) && (File->Path != NULL) && (File->Path[0] == '/'))
+    {
+        Base = LxFileLookupBase(Process, File, &Foreign);
+        LxFree(Base);
+        if (Foreign)
+        {
+            Ns = File->Mount->Ns;
+            LxNsReference(Ns);
+        }
+    }
+    LxFileDereference(File);
+    return Ns;
+}
+
+LONG
+LxLookup(
+    _In_ PLX_PROCESS Process,
+    _In_ LONG DirFd,
+    _In_ PCSTR Path,
+    _In_ ULONG Flags,
+    _Out_ PLX_NODE Node)
+{
+    PLX_THREAD Thread = LxCurrentThread();
+    PLX_NS Detour = NULL, Saved;
+    LONG Error;
+
+    if ((Path[0] != '/') && (DirFd != LX_AT_FDCWD) && (Thread != NULL) && (Thread->Process == Process))
+        Detour = LxLookupDirNamespace(Process, DirFd);
+    if (Detour == NULL)
+        return LxLookupIn(Process, DirFd, Path, Flags, Node);
+
+    Saved = Thread->NsOverride[LxNsMnt];
+    Thread->NsOverride[LxNsMnt] = Detour;
+    Error = LxLookupIn(Process, DirFd, Path, Flags, Node);
+    Thread->NsOverride[LxNsMnt] = Saved;
+    LxNsDereference(Detour);
+    return Error;
+}
+
+static
+LONG
+LxVfsOpenTmpfs(
+    _In_ PLX_PROCESS Process,
+    _Inout_ PLX_NODE Node,
+    _In_ ULONG Flags,
+    _In_ ULONG Mode,
+    _Out_ PLX_FILE *Result)
+{
+    LONG Generation = LxVfsDirRenameGeneration;
+    PLX_TMPFS_INODE Inode = NULL;
+    BOOLEAN Created = FALSE;
+    ULONG Type = Node->Type;
+    PLX_FILE File;
+    LONG Error;
+
+    if (Node->Exists)
+    {
+        if ((Flags & LX_O_CREAT) && (Flags & LX_O_EXCL))
+            return -LX_EEXIST;
+        Error = LxTmpfsLookup(Node->Mount, Node->Relative, &Inode);
+        if (Error != 0)
+            return Error;
+    }
+    else
+    {
+        ULONG NewMode = LX_S_IFREG | (Mode & ~Process->Umask & 07777), Uid, Gid;
+
+        if (!(Flags & LX_O_CREAT))
+            return -LX_ENOENT;
+        if (Node->Mount->Flags & LX_MS_RDONLY)
+            return -LX_EROFS;
+        LxVfsNewOwner(Process, Node->Path, &NewMode, &Uid, &Gid);
+        Error = LxTmpfsCreateNode(Node->Mount, Node->Relative, NewMode, Uid, Gid, 0, NULL, &Inode);
+        if ((Error == -LX_EEXIST) && !(Flags & LX_O_EXCL))
+            Error = LxTmpfsLookup(Node->Mount, Node->Relative, &Inode);
+        else if (Error == 0)
+            Created = TRUE;
+        if (Error != 0)
+            return Error;
+        Type = LX_S_IFREG;
+    }
+
+    if (!(Flags & LX_O_PATH))
+    {
+        ULONG FileMode, Uid, Gid;
+        ULONG64 Device;
+
+        LxTmpfsInodeAttributes(Inode, &FileMode, &Uid, &Gid, &Device);
+        Type = FileMode & LX_S_IFMT;
+        switch (Type)
+        {
+            case LX_S_IFLNK:
+                Error = -LX_ELOOP;
+                break;
+
+            case LX_S_IFDIR:
+                if ((Flags & LX_O_ACCMODE) != LX_O_RDONLY)
+                    Error = -LX_EISDIR;
+                break;
+
+            case LX_S_IFCHR:
+            case LX_S_IFBLK:
+            {
+                ULONG Access = ((Flags & LX_O_ACCMODE) == LX_O_WRONLY) ? 4 :
+                               ((Flags & LX_O_ACCMODE) == LX_O_RDWR) ? 6 : 2;
+
+                if (Node->Mount->Flags & LX_MS_NODEV)
+                {
+                    Error = -LX_EACCES;
+                    break;
+                }
+                Error = LxBpfDeviceCheck(Process, Type == LX_S_IFBLK, (ULONG)(Device >> 32), (ULONG)Device, Access);
+                if (Error != 0)
+                    break;
+                File = LxDeviceOpen(Process, Device, Flags, Node->Path);
+                if (File == NULL)
+                {
+                    Error = -LX_ENXIO;
+                    break;
+                }
+                File->Mount = Node->Mount;
+                File->Ino = LxTmpfsInodeId(Inode);
+                LxTmpfsInodeDereference(Inode);
+                *Result = File;
+                return 0;
+            }
+
+            case LX_S_IFIFO:
+                LxTmpfsInodeDereference(Inode);
+                return LxFifoOpen(Process, Node, Flags, Result);
+
+            case LX_S_IFSOCK:
+                Error = -LX_ENXIO;
+                break;
+
+            default:
+                if ((Flags & LX_O_DIRECTORY) && (Type != LX_S_IFDIR))
+                    Error = -LX_ENOTDIR;
+                break;
+        }
+        if ((Error == 0) && (Flags & LX_O_TRUNC) && ((Flags & LX_O_ACCMODE) != LX_O_RDONLY) && (Type == LX_S_IFREG))
+            Error = LxTmpfsInodeTruncate(Inode, 0);
+    }
+    else if ((Flags & LX_O_DIRECTORY) && (Type != LX_S_IFDIR))
+    {
+        Error = -LX_ENOTDIR;
+    }
+    if (Error == 0)
+        Error = LxTmpfsOpenFile(Inode, Flags & (LX_O_ACCMODE | LX_O_APPEND | LX_O_NONBLOCK | LX_O_PATH), &File);
+    LxTmpfsInodeDereference(Inode);
+    if (Error != 0)
+        return Error;
+
+    File->Path = LxStrDup(Node->Path);
+    File->Mount = Node->Mount;
+    File->PathGeneration = Generation;
+    if (File->Path == NULL)
+    {
+        LxFileDereference(File);
+        return -LX_ENOMEM;
+    }
+    if (Created)
+    {
+        LxVcacheInvalidate();
+        LxInotifyEvent(Process, Node->Path, 0x00000100, FALSE);
+    }
+    *Result = File;
+    return 0;
+}
+
 LONG
 LxVfsOpenNode(
     _In_ PLX_PROCESS Process,
@@ -3366,6 +3715,8 @@ LxVfsOpenNode(
     if (Node->Mount == NULL)
         return -LX_ENOENT;
 
+    if (Node->Mount->Kind == LxFsTmpfs)
+        return LxVfsOpenTmpfs(Process, Node, Flags, Mode, Result);
     if (Node->Mount->Kind != LxFsNt)
     {
         if (!Node->Exists && (Node->Mount->Kind == LxFsMqueue) && (Flags & LX_O_CREAT))
@@ -3669,6 +4020,39 @@ LxVfsReopen(
     LONG Error;
 
     *File = NULL;
+    if (LxTmpfsFileInode(Source) != NULL)
+    {
+        PLX_TMPFS_INODE Inode = LxTmpfsFileInode(Source);
+        ULONG Access = Flags & LX_O_ACCMODE;
+
+        if ((Source->Memfd != NULL) && (Flags & LX_O_TRUNC) && (Access != LX_O_RDONLY))
+        {
+            Error = LxMemfdCheckSize(Source, 0);
+            if (Error != 0)
+                return Error;
+        }
+        Error = LxTmpfsOpenFile(Inode, Flags & (LX_O_ACCMODE | LX_O_APPEND | LX_O_NONBLOCK | LX_O_PATH), File);
+        if (Error != 0)
+            return Error;
+        (*File)->Path = LxStrDup(Source->Path);
+        (*File)->Mount = Source->Mount;
+        (*File)->PathGeneration = Source->PathGeneration;
+        if (Source->Memfd != NULL)
+        {
+            InterlockedIncrement(&Source->Memfd->RefCount);
+            (*File)->Memfd = Source->Memfd;
+            (*File)->Mode = Source->Mode;
+        }
+        if ((Flags & LX_O_TRUNC) && (Access != LX_O_RDONLY) && ((*File)->Type == LX_S_IFREG))
+            Error = LxTmpfsInodeTruncate(Inode, 0);
+        if (((*File)->Path == NULL) || (Error != 0))
+        {
+            LxFileDereference(*File);
+            *File = NULL;
+            return (Error != 0) ? Error : -LX_ENOMEM;
+        }
+        return 0;
+    }
     if ((Source->Memfd != NULL) && (Source->Handle != NULL))
         return LxVfsReopenMemfd(Source, Flags, File);
     if ((Source->Mount == NULL) || (Source->Mount->Kind != LxFsNt) || (Source->Handle == NULL) || (Source->Path == NULL))
@@ -3727,6 +4111,17 @@ LxVfsStatNode(
     LONG64 Generation = LxVcacheGeneration, Now = (LONG64)KeQueryInterruptTime();
     ULONG Hash;
 
+    if (Node->Mount->Kind == LxFsTmpfs)
+    {
+        PLX_TMPFS_INODE Inode;
+
+        Error = LxTmpfsLookup(Node->Mount, Node->Relative, &Inode);
+        if (Error != 0)
+            return Error;
+        LxTmpfsInodeStat(Inode, Node->Mount, Stat);
+        LxTmpfsInodeDereference(Inode);
+        return 0;
+    }
     if (Node->Mount->Kind != LxFsNt)
         return LxSynthStat(Process, Node, Stat);
 
@@ -3902,6 +4297,8 @@ LxVfsMkdir(
     _In_ PLX_NODE Node,
     _In_ ULONG Mode)
 {
+    FILE_CASE_SENSITIVE_INFORMATION CaseSensitive;
+    IO_STATUS_BLOCK Iosb;
     HANDLE Handle;
     ULONG Uid, Gid;
     LONG Error;
@@ -3911,18 +4308,29 @@ LxVfsMkdir(
     Error = LxVfsParentPermission(Process, Node->Path, LX_MAY_WRITE | LX_MAY_EXEC, NULL);
     if (Error != 0)
         return Error;
-    if (Node->Mount->Kind != LxFsNt)
+    if (LxMountIsSynthetic(Node->Mount))
         return LxSynthMkdir(Process, Node);
     if (Node->Mount->Flags & LX_MS_RDONLY)
         return -LX_EROFS;
 
     Mode = LX_S_IFDIR | (Mode & ~Process->Umask & 07777);
     LxVfsNewOwner(Process, Node->Path, &Mode, &Uid, &Gid);
-    Error = LxNtOpenHandle(&Node->NtPath, FILE_LIST_DIRECTORY | FILE_WRITE_EA | FILE_READ_EA, FILE_CREATE,
-                           FILE_DIRECTORY_FILE, FILE_ATTRIBUTE_NORMAL, &Handle);
+    if (Node->Mount->Kind == LxFsTmpfs)
+    {
+        Error = LxTmpfsCreateNode(Node->Mount, Node->Relative, Mode, Uid, Gid, 0, NULL, NULL);
+        if (Error != 0)
+            return Error;
+        LxVcacheInvalidate();
+        LxInotifyEvent(Process, Node->Path, 0x00000100 | 0x40000000, FALSE);
+        return 0;
+    }
+    Error = LxNtOpenHandle(&Node->NtPath, FILE_LIST_DIRECTORY | FILE_WRITE_EA | FILE_READ_EA | FILE_WRITE_ATTRIBUTES,
+                           FILE_CREATE, FILE_DIRECTORY_FILE, FILE_ATTRIBUTE_NORMAL, &Handle);
     if (Error != 0)
         return Error;
     LxNtWriteLxAttributes(Handle, Mode, Uid, Gid, 0, FALSE);
+    CaseSensitive.Flags = FILE_CS_FLAG_CASE_SENSITIVE_DIR;
+    ZwSetInformationFile(Handle, &Iosb, &CaseSensitive, sizeof(CaseSensitive), FileCaseSensitiveInformation);
     ZwClose(Handle);
     LxVcacheInvalidate();
     LxInotifyEvent(Process, Node->Path, 0x00000100 | 0x40000000, FALSE);
@@ -3944,7 +4352,7 @@ LxVfsMknod(
     Error = LxVfsParentPermission(Process, Node->Path, LX_MAY_WRITE | LX_MAY_EXEC, NULL);
     if (Error != 0)
         return Error;
-    if (Node->Mount->Kind != LxFsNt)
+    if (LxMountIsSynthetic(Node->Mount))
         return -LX_EPERM;
     if (Type == 0)
         Type = LX_S_IFREG;
@@ -3957,7 +4365,10 @@ LxVfsMknod(
 
     Mode = Type | (Mode & ~Process->Umask & 07777);
     LxVfsNewOwner(Process, Node->Path, &Mode, &Uid, &Gid);
-    Error = LxNtCreateNode(&Node->NtPath, Mode, Uid, Gid, Device, NULL);
+    if (Node->Mount->Kind == LxFsTmpfs)
+        Error = LxTmpfsCreateNode(Node->Mount, Node->Relative, Mode, Uid, Gid, Device, NULL, NULL);
+    else
+        Error = LxNtCreateNode(&Node->NtPath, Mode, Uid, Gid, Device, NULL);
     LxVcacheInvalidate();
     if (Error == 0)
         LxInotifyEvent(Process, Node->Path, 0x00000100, FALSE);
@@ -3978,11 +4389,14 @@ LxVfsSymlink(
     Error = LxVfsParentPermission(Process, Node->Path, LX_MAY_WRITE | LX_MAY_EXEC, NULL);
     if (Error != 0)
         return Error;
-    if (Node->Mount->Kind != LxFsNt)
+    if (LxMountIsSynthetic(Node->Mount))
         return -LX_EPERM;
 
     LxVfsNewOwner(Process, Node->Path, &Mode, &Uid, &Gid);
-    Error = LxNtCreateNode(&Node->NtPath, LX_S_IFLNK | 0777, Uid, Gid, 0, Target);
+    if (Node->Mount->Kind == LxFsTmpfs)
+        Error = LxTmpfsCreateNode(Node->Mount, Node->Relative, LX_S_IFLNK | 0777, Uid, Gid, 0, Target, NULL);
+    else
+        Error = LxNtCreateNode(&Node->NtPath, LX_S_IFLNK | 0777, Uid, Gid, 0, Target);
     LxVcacheInvalidate();
     if (Error == 0)
         LxInotifyEvent(Process, Node->Path, 0x00000100, FALSE);
@@ -4075,10 +4489,19 @@ LxVfsUnlink(
     Error = LxVfsMayDelete(Process, Node);
     if (Error != 0)
         return Error;
-    if (Node->Mount->Kind != LxFsNt)
+    if (LxMountIsSynthetic(Node->Mount))
         return Directory ? LxSynthRmdir(Process, Node) : -LX_EPERM;
     if (Node->Relative[0] == '\0')
         return -LX_EBUSY;
+    if (Node->Mount->Kind == LxFsTmpfs)
+    {
+        Error = LxTmpfsUnlink(Node->Mount, Node->Relative, Directory);
+        LxVcacheInvalidate();
+        if (Error != 0)
+            return Error;
+        LxInotifyEvent(Process, Node->Path, 0x00000200 | (Directory ? 0x40000000 : 0), TRUE);
+        return 0;
+    }
     if (Directory && (Node->Type != LX_S_IFDIR))
         return -LX_ENOTDIR;
     if (!Directory && (Node->Type == LX_S_IFDIR))
@@ -4131,8 +4554,15 @@ LxVfsRename(
 
     if (!From->Exists)
         return -LX_ENOENT;
-    if ((From->Mount != To->Mount) || (From->Mount->Kind != LxFsNt))
+    if ((From->Mount->Kind == LxFsTmpfs) && (To->Mount->Kind == LxFsTmpfs))
+    {
+        if (From->Mount->Tmpfs != To->Mount->Tmpfs)
+            return -LX_EXDEV;
+    }
+    else if ((From->Mount != To->Mount) || (From->Mount->Kind != LxFsNt))
+    {
         return -LX_EXDEV;
+    }
     if (Flags & ~1UL)
         return -LX_EINVAL;
     if (strcmp(From->Path, To->Path) == 0)
@@ -4157,6 +4587,19 @@ LxVfsRename(
     }
     if (Error != 0)
         return Error;
+
+    if (From->Mount->Kind == LxFsTmpfs)
+    {
+        Error = LxTmpfsRename(From->Mount, From->Relative, To->Mount, To->Relative, Flags);
+        LxVcacheInvalidate();
+        if (Error != 0)
+            return Error;
+        if (From->Type == LX_S_IFDIR)
+            InterlockedIncrement(&LxVfsDirRenameGeneration);
+        LxInotifyEvent(Process, From->Path, 0x00000040, TRUE);
+        LxInotifyEvent(Process, To->Path, 0x00000080, FALSE);
+        return 0;
+    }
 
     if (To->Exists)
     {
@@ -4217,8 +4660,15 @@ LxVfsLink(
         return -LX_ENOENT;
     if (To->Exists)
         return -LX_EEXIST;
-    if ((From->Mount != To->Mount) || (From->Mount->Kind != LxFsNt))
+    if ((From->Mount->Kind == LxFsTmpfs) && (To->Mount->Kind == LxFsTmpfs))
+    {
+        if (From->Mount->Tmpfs != To->Mount->Tmpfs)
+            return -LX_EXDEV;
+    }
+    else if ((From->Mount != To->Mount) || (From->Mount->Kind != LxFsNt))
+    {
         return -LX_EXDEV;
+    }
     if (!(LxVfsDacBypass(Process) && LxCapable(Process, LX_CAP_FOWNER)))
     {
         LX_STAT Stat;
@@ -4241,6 +4691,15 @@ LxVfsLink(
         return Error;
     if (From->Type == LX_S_IFDIR)
         return -LX_EPERM;
+
+    if (From->Mount->Kind == LxFsTmpfs)
+    {
+        Error = LxTmpfsLink(From->Mount, From->Relative, To->Mount, To->Relative);
+        LxVcacheInvalidate();
+        if (Error == 0)
+            LxInotifyEvent(Process, To->Path, 0x00000100, FALSE);
+        return Error;
+    }
 
     Error = LxNtOpenHandle(&From->NtPath, FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES, FILE_OPEN, 0, 0, &Handle);
     if (Error != 0)
@@ -4277,13 +4736,25 @@ LxVfsSetAttributes(
     _In_ ULONG Gid)
 {
     HANDLE Handle = NULL;
+    PLX_TMPFS_INODE Inode = NULL;
     ULONG OldMode, OldUid, OldGid;
     ULONG64 Device;
     LX_STAT Stat;
     BOOLEAN Close = FALSE;
     LONG Error;
 
-    if ((File != NULL) && (File->Handle != NULL))
+    if (LxTmpfsFileInode(File) != NULL)
+    {
+        Inode = LxTmpfsFileInode(File);
+        LxTmpfsInodeReference(Inode);
+    }
+    else if ((File == NULL) && (Node != NULL) && (Node->Mount != NULL) && (Node->Mount->Kind == LxFsTmpfs))
+    {
+        Error = LxTmpfsLookup(Node->Mount, Node->Relative, &Inode);
+        if (Error != 0)
+            return Error;
+    }
+    else if ((File != NULL) && (File->Handle != NULL))
     {
         Handle = File->Handle;
     }
@@ -4303,7 +4774,11 @@ LxVfsSetAttributes(
         return 0;
     }
 
-    if ((LxNtReadLxAttributes(Handle, &OldMode, &OldUid, &OldGid, &Device) != 0) || (OldMode == MAXULONG))
+    if (Inode != NULL)
+    {
+        LxTmpfsInodeAttributes(Inode, &OldMode, &OldUid, &OldGid, &Device);
+    }
+    else if ((LxNtReadLxAttributes(Handle, &OldMode, &OldUid, &OldGid, &Device) != 0) || (OldMode == MAXULONG))
     {
         PLX_FILE Temporary = LxFileFromNtHandle(Handle, LX_O_PATH);
 
@@ -4341,6 +4816,8 @@ LxVfsSetAttributes(
     {
         if (Close)
             ZwClose(Handle);
+        if (Inode != NULL)
+            LxTmpfsInodeDereference(Inode);
         return Error;
     }
     if ((Mode != MAXULONG) && !LxInGroup(Process, (Gid != MAXULONG) ? Gid : OldGid) &&
@@ -4361,9 +4838,18 @@ LxVfsSetAttributes(
     if (Gid != MAXULONG)
         OldGid = Gid;
 
-    Error = LxNtWriteLxAttributes(Handle, OldMode, OldUid, OldGid, Device,
-                                  (Device != MAXULONG64) &&
-                                  (((OldMode & LX_S_IFMT) == LX_S_IFCHR) || ((OldMode & LX_S_IFMT) == 0060000)));
+    if (Inode != NULL)
+    {
+        LxTmpfsInodeSetAttributes(Inode, OldMode, OldUid, OldGid);
+        LxTmpfsInodeDereference(Inode);
+        Error = 0;
+    }
+    else
+    {
+        Error = LxNtWriteLxAttributes(Handle, OldMode, OldUid, OldGid, Device,
+                                      (Device != MAXULONG64) &&
+                                      (((OldMode & LX_S_IFMT) == LX_S_IFCHR) || ((OldMode & LX_S_IFMT) == 0060000)));
+    }
     if (Close)
         ZwClose(Handle);
     if ((Node != NULL) && (Node->Path != NULL))
@@ -4406,6 +4892,18 @@ LxVfsSetTimes(
     NTSTATUS Status;
     ULONG Index;
 
+    if ((LxTmpfsFileInode(File) != NULL) || ((File == NULL) && (Node != NULL) && (Node->Mount->Kind == LxFsTmpfs)))
+    {
+        PLX_TMPFS_INODE Inode = LxTmpfsFileInode(File);
+
+        if (Inode != NULL)
+            LxTmpfsInodeReference(Inode);
+        else if (LxTmpfsLookup(Node->Mount, Node->Relative, &Inode) != 0)
+            return -LX_ENOENT;
+        LxTmpfsInodeSetTimes(Inode, Times);
+        LxTmpfsInodeDereference(Inode);
+        return 0;
+    }
     if ((File != NULL) && (File->Handle != NULL))
     {
         Handle = File->Handle;
@@ -4456,6 +4954,19 @@ LxVfsTruncate(
     NTSTATUS Status;
     LONG Error;
 
+    if (Node->Mount->Kind == LxFsTmpfs)
+    {
+        PLX_TMPFS_INODE Inode;
+
+        if (Node->Mount->Flags & LX_MS_RDONLY)
+            return -LX_EROFS;
+        Error = LxTmpfsLookup(Node->Mount, Node->Relative, &Inode);
+        if (Error != 0)
+            return Error;
+        Error = LxTmpfsInodeTruncate(Inode, Length);
+        LxTmpfsInodeDereference(Inode);
+        return Error;
+    }
     if (Node->Mount->Kind != LxFsNt)
         return -LX_EINVAL;
     if (Node->Type == LX_S_IFDIR)
@@ -4482,7 +4993,7 @@ LxVfsReadlink(
     *Target = NULL;
     if (Node->Type != LX_S_IFLNK)
         return -LX_EINVAL;
-    if (Node->Mount->Kind != LxFsNt)
+    if (LxMountIsSynthetic(Node->Mount))
         return LxSynthReadlink(Process, Node, Target);
     if (Node->LinkTarget != NULL)
     {
@@ -4491,6 +5002,17 @@ LxVfsReadlink(
     }
     if (Node->Mount->Kind == LxFsNt)
         return LxNtReadLink(&Node->NtPath, Target);
+    if (Node->Mount->Kind == LxFsTmpfs)
+    {
+        PLX_TMPFS_INODE Inode;
+        LONG Error = LxTmpfsLookup(Node->Mount, Node->Relative, &Inode);
+
+        if (Error != 0)
+            return Error;
+        *Target = LxTmpfsInodeLinkTarget(Inode);
+        LxTmpfsInodeDereference(Inode);
+        return (*Target != NULL) ? 0 : -LX_ENOMEM;
+    }
     return -LX_EINVAL;
 }
 

@@ -4,6 +4,7 @@
  * FILE:             drivers/net/afd/afd/main.c
  * PURPOSE:          Ancillary functions driver
  * PROGRAMMER:       Art Yerkes (ayerkes@speakeasy.net)
+ *                   Ahmed ARIF (arif.ing@outlook.com)
  * UPDATE HISTORY:
  * 20040630 Created
  *
@@ -456,65 +457,9 @@ AfdCreateSocket(PDEVICE_OBJECT DeviceObject, PIRP Irp,
     return Status;
 }
 
-static NTSTATUS NTAPI
-AfdCleanupSocket(PDEVICE_OBJECT DeviceObject, PIRP Irp,
-                 PIO_STACK_LOCATION IrpSp)
+static VOID
+AfdRundownTdi(PAFD_FCB FCB, PFILE_OBJECT FileObject)
 {
-    PFILE_OBJECT FileObject = IrpSp->FileObject;
-    PAFD_FCB FCB = FileObject->FsContext;
-    PLIST_ENTRY CurrentEntry, NextEntry;
-    UINT Function;
-    PIRP CurrentIrp;
-
-    UNREFERENCED_PARAMETER(DeviceObject);
-
-    if( !SocketAcquireStateLock( FCB ) ) return LostSocket(Irp);
-
-    FCB->CleanedUp = TRUE;
-
-    if (!(FCB->Flags & AFD_ENDPOINT_CONNECTIONLESS) &&
-        FCB->SharedData.State == SOCKET_STATE_CONNECTED)
-    {
-        while (!IsListEmpty(&FCB->PendingIrpList[FUNCTION_RECV]))
-        {
-            CurrentEntry = RemoveHeadList(&FCB->PendingIrpList[FUNCTION_RECV]);
-            CurrentIrp = CONTAINING_RECORD(CurrentEntry, IRP, Tail.Overlay.ListEntry);
-            CleanupPendingIrp(FCB, CurrentIrp, IoGetCurrentIrpStackLocation(CurrentIrp), NULL);
-            CurrentIrp->IoStatus.Status = STATUS_CONNECTION_ABORTED;
-            CurrentIrp->IoStatus.Information = 0;
-            if (CurrentIrp->MdlAddress)
-                UnlockRequest(CurrentIrp, IoGetCurrentIrpStackLocation(CurrentIrp));
-            (void)IoSetCancelRoutine(CurrentIrp, NULL);
-            IoCompleteRequest(CurrentIrp, IO_NETWORK_INCREMENT);
-        }
-    }
-
-    for (Function = 0; Function < MAX_FUNCTIONS; Function++)
-    {
-        CurrentEntry = FCB->PendingIrpList[Function].Flink;
-        while (CurrentEntry != &FCB->PendingIrpList[Function])
-        {
-           NextEntry = CurrentEntry->Flink;
-           CurrentIrp = CONTAINING_RECORD(CurrentEntry, IRP, Tail.Overlay.ListEntry);
-
-           /* The cancel routine will remove the IRP from the list */
-           IoCancelIrp(CurrentIrp);
-
-           CurrentEntry = NextEntry;
-        }
-    }
-
-    KillSelectsForFCB( FCB->DeviceExt, FileObject, FALSE );
-
-    return UnlockAndMaybeComplete(FCB, STATUS_SUCCESS, Irp, 0);
-}
-
-static NTSTATUS NTAPI
-AfdCloseSocket(PDEVICE_OBJECT DeviceObject, PIRP Irp,
-               PIO_STACK_LOCATION IrpSp)
-{
-    PFILE_OBJECT FileObject = IrpSp->FileObject;
-    PAFD_FCB FCB = FileObject->FsContext;
     UINT i;
     PAFD_IN_FLIGHT_REQUEST InFlightRequest[IN_FLIGHT_REQUESTS];
     BOOLEAN WaitForCompletion = FALSE;
@@ -522,19 +467,13 @@ AfdCloseSocket(PDEVICE_OBJECT DeviceObject, PIRP Irp,
     PAFD_TDI_OBJECT_QELT Qelt;
     PLIST_ENTRY QeltEntry;
 
+    if( !SocketAcquireStateLock( FCB ) ) return;
 
-    AFD_DbgPrint(MID_TRACE,("AfdClose(DeviceObject %p Irp %p)\n",
-                            DeviceObject, Irp));
-
-    if (FCB)
+    if (FCB->SharedData.State == SOCKET_STATE_CLOSED)
     {
-        ExAcquireFastMutex(&AfdAddressListChangeLock);
-        if (!IsListEmpty(&FCB->AddressListChangeEntry))
-            RemoveEntryList(&FCB->AddressListChangeEntry);
-        ExReleaseFastMutex(&AfdAddressListChangeLock);
+        SocketStateUnlock(FCB);
+        return;
     }
-
-    if( !SocketAcquireStateLock( FCB ) ) return STATUS_FILE_CLOSED;
 
     FCB->SharedData.State = SOCKET_STATE_CLOSED;
 
@@ -588,6 +527,124 @@ AfdCloseSocket(PDEVICE_OBJECT DeviceObject, PIRP Irp,
     FCB->TdiRundownEvent = NULL;
     SocketStateUnlock(FCB);
 
+    if( FCB->Connection.Object )
+    {
+        TdiDisassociateAddressFile(FCB->Connection.Object);
+        ObDereferenceObject(FCB->Connection.Object);
+        FCB->Connection.Object = NULL;
+    }
+
+    if( FCB->AddressFile.Object )
+    {
+        ObDereferenceObject(FCB->AddressFile.Object);
+        FCB->AddressFile.Object = NULL;
+    }
+
+    if( FCB->AddressFile.Handle != INVALID_HANDLE_VALUE )
+    {
+        if (ZwClose(FCB->AddressFile.Handle) == STATUS_INVALID_HANDLE)
+        {
+            DbgPrint("INVALID ADDRESS FILE HANDLE VALUE: %p %p\n", FCB->AddressFile.Handle, FCB->AddressFile.Object);
+        }
+        FCB->AddressFile.Handle = INVALID_HANDLE_VALUE;
+    }
+
+    if( FCB->Connection.Handle != INVALID_HANDLE_VALUE )
+    {
+        if (ZwClose(FCB->Connection.Handle) == STATUS_INVALID_HANDLE)
+        {
+            DbgPrint("INVALID CONNECTION HANDLE VALUE: %p %p\n", FCB->Connection.Handle, FCB->Connection.Object);
+        }
+        FCB->Connection.Handle = INVALID_HANDLE_VALUE;
+    }
+}
+
+static NTSTATUS NTAPI
+AfdCleanupSocket(PDEVICE_OBJECT DeviceObject, PIRP Irp,
+                 PIO_STACK_LOCATION IrpSp)
+{
+    PFILE_OBJECT FileObject = IrpSp->FileObject;
+    PAFD_FCB FCB = FileObject->FsContext;
+    PLIST_ENTRY CurrentEntry, NextEntry;
+    UINT Function;
+    PIRP CurrentIrp;
+    BOOLEAN ConnectedStream;
+
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    if( !SocketAcquireStateLock( FCB ) ) return LostSocket(Irp);
+
+    FCB->CleanedUp = TRUE;
+
+    ConnectedStream = !(FCB->Flags & AFD_ENDPOINT_CONNECTIONLESS) &&
+                      FCB->SharedData.State == SOCKET_STATE_CONNECTED;
+    if (ConnectedStream)
+    {
+        while (!IsListEmpty(&FCB->PendingIrpList[FUNCTION_RECV]))
+        {
+            CurrentEntry = RemoveHeadList(&FCB->PendingIrpList[FUNCTION_RECV]);
+            CurrentIrp = CONTAINING_RECORD(CurrentEntry, IRP, Tail.Overlay.ListEntry);
+            CleanupPendingIrp(FCB, CurrentIrp, IoGetCurrentIrpStackLocation(CurrentIrp), NULL);
+            CurrentIrp->IoStatus.Status = STATUS_CONNECTION_ABORTED;
+            CurrentIrp->IoStatus.Information = 0;
+            if (CurrentIrp->MdlAddress)
+                UnlockRequest(CurrentIrp, IoGetCurrentIrpStackLocation(CurrentIrp));
+            (void)IoSetCancelRoutine(CurrentIrp, NULL);
+            IoCompleteRequest(CurrentIrp, IO_NETWORK_INCREMENT);
+        }
+    }
+
+    for (Function = 0; Function < MAX_FUNCTIONS; Function++)
+    {
+        CurrentEntry = FCB->PendingIrpList[Function].Flink;
+        while (CurrentEntry != &FCB->PendingIrpList[Function])
+        {
+           NextEntry = CurrentEntry->Flink;
+           CurrentIrp = CONTAINING_RECORD(CurrentEntry, IRP, Tail.Overlay.ListEntry);
+
+           /* The cancel routine will remove the IRP from the list */
+           IoCancelIrp(CurrentIrp);
+
+           CurrentEntry = NextEntry;
+        }
+    }
+
+    KillSelectsForFCB( FCB->DeviceExt, FileObject, FALSE );
+
+    SocketStateUnlock( FCB );
+
+    if (!ConnectedStream)
+        AfdRundownTdi(FCB, FileObject);
+
+    Irp->IoStatus.Status = STATUS_SUCCESS;
+    Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NETWORK_INCREMENT);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS NTAPI
+AfdCloseSocket(PDEVICE_OBJECT DeviceObject, PIRP Irp,
+               PIO_STACK_LOCATION IrpSp)
+{
+    PFILE_OBJECT FileObject = IrpSp->FileObject;
+    PAFD_FCB FCB = FileObject->FsContext;
+
+
+    AFD_DbgPrint(MID_TRACE,("AfdClose(DeviceObject %p Irp %p)\n",
+                            DeviceObject, Irp));
+
+    if (FCB)
+    {
+        ExAcquireFastMutex(&AfdAddressListChangeLock);
+        if (!IsListEmpty(&FCB->AddressListChangeEntry))
+            RemoveEntryList(&FCB->AddressListChangeEntry);
+        ExReleaseFastMutex(&AfdAddressListChangeLock);
+    }
+
+    if( !FCB ) return STATUS_FILE_CLOSED;
+
+    AfdRundownTdi(FCB, FileObject);
+
     if( FCB->EventSelect )
         ObDereferenceObject( FCB->EventSelect );
 
@@ -635,31 +692,6 @@ AfdCloseSocket(PDEVICE_OBJECT DeviceObject, PIRP Irp,
 
     if (FCB->OnConnectSendBuffer)
         ExFreePoolWithTag(FCB->OnConnectSendBuffer, TAG_AFD_SUPER_CONNECT_BUFFER);
-
-    if( FCB->Connection.Object )
-    {
-        TdiDisassociateAddressFile(FCB->Connection.Object);
-        ObDereferenceObject(FCB->Connection.Object);
-    }
-
-    if( FCB->AddressFile.Object )
-        ObDereferenceObject(FCB->AddressFile.Object);
-
-    if( FCB->AddressFile.Handle != INVALID_HANDLE_VALUE )
-    {
-        if (ZwClose(FCB->AddressFile.Handle) == STATUS_INVALID_HANDLE)
-        {
-            DbgPrint("INVALID ADDRESS FILE HANDLE VALUE: %p %p\n", FCB->AddressFile.Handle, FCB->AddressFile.Object);
-        }
-    }
-
-    if( FCB->Connection.Handle != INVALID_HANDLE_VALUE )
-    {
-        if (ZwClose(FCB->Connection.Handle) == STATUS_INVALID_HANDLE)
-        {
-            DbgPrint("INVALID CONNECTION HANDLE VALUE: %p %p\n", FCB->Connection.Handle, FCB->Connection.Object);
-        }
-    }
 
     if (FCB->TdiDeviceName.Buffer)
     {
@@ -831,6 +863,7 @@ AfdDisconnect(PDEVICE_OBJECT DeviceObject, PIRP Irp,
 
         /* Mark that we can't issue another receive request */
         FCB->TdiReceiveClosed = TRUE;
+        FCB->ReceiveShutdown = TRUE;
 
         /* Try to cancel a pending TDI receive IRP if there was one in progress */
         if (FCB->ReceiveIrp.InFlightRequest)

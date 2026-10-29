@@ -1,0 +1,27 @@
+--- a/mono/metadata/cominterop.c
++++ b/mono/metadata/cominterop.c
+@@ -3569,6 +3569,12 @@
+ 	if (!mono_domain_get ())
+ 		mono_thread_attach_external_native_thread (mono_get_root_domain (), FALSE);
+ 
++	if (!rgszNames [0]) {
++		for (i = 0; i < cNames; i++)
++			rgDispId [i] = MONO_E_DISPID_UNKNOWN;
++		return MONO_E_DISP_E_UNKNOWNNAME;
++	}
++
+ 	req_name = mono_unicode_to_external (rgszNames [0]);
+ 
+ 	for (i = ccwe->methods_count; i--;) {
+@@ -3594,6 +3600,11 @@
+ 					mono_method_get_param_names (method, arg_names);
+ 				}
+ 				for (i = 1; i < cNames; i++) {
++					if (!rgszNames [i]) {
++						rgDispId [i] = MONO_E_DISPID_UNKNOWN;
++						ret = MONO_E_DISP_E_UNKNOWNNAME;
++						continue;
++					}
+ 					req_name = mono_unicode_to_external (rgszNames [i]);
+ 					for (j = 0; j < argc; j++) {
+ 						if (!g_strcasecmp (req_name, arg_names [j])) {

@@ -340,6 +340,26 @@ static BOOLEAN AddrPortInUseLocked(
     return FALSE;
 }
 
+static BOOLEAN AddrTcpPortInUseLocked(
+    PADDRESS_FILE AddrFile)
+{
+    PLIST_ENTRY Entry;
+    PADDRESS_FILE Current;
+
+    for (Entry = AddressFileListHead.Flink;
+         Entry != &AddressFileListHead;
+         Entry = Entry->Flink)
+    {
+        Current = CONTAINING_RECORD(Entry, ADDRESS_FILE, ListEntry);
+        if (Current->Protocol == IPPROTO_TCP &&
+            Current->Port == AddrFile->Port &&
+            (Current->Address.Type == IP_ADDRESS_V6) == (AddrFile->Address.Type == IP_ADDRESS_V6))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 NTSTATUS AddrCheckSharing(
     PIP_ADDRESS BindAddress,
     USHORT Port,
@@ -347,7 +367,8 @@ NTSTATUS AddrCheckSharing(
     BOOLEAN Reuse,
     BOOLEAN Exclusive,
     BOOLEAN DualStack,
-    PADDRESS_FILE *SharedFile)
+    PADDRESS_FILE *SharedFile,
+    PBOOLEAN PortHeld)
 {
     PLIST_ENTRY CurrentEntry;
     KIRQL OldIrql;
@@ -355,6 +376,7 @@ NTSTATUS AddrCheckSharing(
     NTSTATUS Status = STATUS_SUCCESS;
 
     *SharedFile = NULL;
+    *PortHeld = FALSE;
 
     TcpipAcquireSpinLock(&AddressFileListLock, &OldIrql);
 
@@ -399,7 +421,15 @@ NTSTATUS AddrCheckSharing(
             break;
         }
 
-        if (Reuse && !Candidate)
+        if (Exclusive && AddrIsUnspecified(BindAddress))
+        {
+            Status = STATUS_ADDRESS_ALREADY_EXISTS;
+            break;
+        }
+
+        if (BindAddress->Type != IP_ADDRESS_V6)
+            *PortHeld = TRUE;
+        else if (Reuse && !Candidate)
             Candidate = Current;
     }
 
@@ -524,6 +554,7 @@ VOID AddrFileFree(
   PDATAGRAM_RECEIVE_REQUEST ReceiveRequest;
   // PDATAGRAM_SEND_REQUEST SendRequest; See WTF below
   PLIST_ENTRY CurrentEntry;
+  BOOLEAN FreeTcpPort;
 
   TI_DbgPrint(MID_TRACE, ("Called.\n"));
 
@@ -539,6 +570,7 @@ VOID AddrFileFree(
   {
       UDPFreePort(AddrFile->Port);
   }
+  FreeTcpPort = AddrFile->Protocol == IPPROTO_TCP && AddrFile->Port && !AddrTcpPortInUseLocked(AddrFile);
   TcpipReleaseSpinLock(&AddressFileListLock, OldIrql);
 
   WfpShimEndpointClosed(AddrFile->WfpEndpointId);
@@ -577,7 +609,7 @@ VOID AddrFileFree(
   /* Protocol specific handling */
   switch (AddrFile->Protocol) {
   case IPPROTO_TCP:
-    if (AddrFile->Port)
+    if (FreeTcpPort)
     {
         TCPFreePortForAddress(&AddrFile->Address, AddrFile->Port);
     }
@@ -634,7 +666,7 @@ NTSTATUS FileOpenAddress(
   IP_ADDRESS BindAddress;
   USHORT BindPort;
   NTSTATUS Status;
-  BOOLEAN DualStack;
+  BOOLEAN DualStack, PortHeld = FALSE;
 
   TI_DbgPrint(MID_TRACE, ("Called (Proto %d).\n", Protocol));
 
@@ -647,7 +679,7 @@ NTSTATUS FileOpenAddress(
   /* If it's shared and has a port specified, look for a match */
   if (BindPort != 0)
   {
-    Status = AddrCheckSharing(&BindAddress, BindPort, Protocol, Shared, Exclusive, DualStack, &SharedFile);
+    Status = AddrCheckSharing(&BindAddress, BindPort, Protocol, Shared, Exclusive, DualStack, &SharedFile, &PortHeld);
     if (!NT_SUCCESS(Status))
         return Status;
     if (SharedFile != NULL && Protocol != IPPROTO_UDP)
@@ -731,6 +763,8 @@ NTSTATUS FileOpenAddress(
       {
           /* The client specified an explicit port so we force a bind to this */
           AllocatedPort = TCPAllocatePortForAddress(&AddrFile->Address, BindPort);
+          if (AllocatedPort == (UINT)-1 && PortHeld)
+              AllocatedPort = BindPort;
 
           /* Check for bind success */
           if (AllocatedPort == (UINT)-1)
@@ -805,6 +839,8 @@ NTSTATUS FileOpenAddress(
           AllocatedPort = BindPort;
       else
           AllocatedPort = UDPAllocatePort(BindPort);
+      if (AllocatedPort == (UINT)-1 && PortHeld)
+          AllocatedPort = BindPort;
 
       if ((BindPort &&
            AllocatedPort != BindPort) ||

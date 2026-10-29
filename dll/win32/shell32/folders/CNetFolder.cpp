@@ -234,6 +234,11 @@ static HRESULT CALLBACK CNetFolderBackgroundMenuCB(IShellFolder *psf, HWND hwnd,
  * CNetFolder
  */
 
+HRESULT WINAPI CNetFolder::CallBack(IShellFolder *psf, HWND hwndOwner, IDataObject *pdtobj, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    return CNetFolderBackgroundMenuCB(psf, hwndOwner, pdtobj, uMsg, wParam, lParam);
+}
+
 CNetFolder::CNetFolder()
 {
     pidlRoot = NULL;
@@ -355,8 +360,7 @@ HRESULT WINAPI CNetFolder::CreateViewObject(HWND hwndOwner, REFIID riid, LPVOID 
     }
     else if (IsEqualIID(riid, IID_IContextMenu))
     {
-        hr = CDefFolderMenu_Create2(pidlRoot, hwndOwner, 0, NULL, this, CNetFolderBackgroundMenuCB,
-                                    0, NULL, (IContextMenu**)ppvOut);
+        hr = E_NOINTERFACE;
     }
     else if (IsEqualIID(riid, IID_IShellView))
     {

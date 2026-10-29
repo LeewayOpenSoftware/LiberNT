@@ -40,6 +40,9 @@ typedef struct _entityref
     IXMLDOMEntityReference IXMLDOMEntityReference_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 } entityref;
 
 static const tid_t domentityref_se_tids[] =
@@ -54,11 +57,24 @@ static inline entityref *impl_from_IXMLDOMEntityReference( IXMLDOMEntityReferenc
     return CONTAINING_RECORD(iface, entityref, IXMLDOMEntityReference_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const entityref_typed_iids[] =
+{
+    &IID_IXMLDOMEntityReference,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI entityref_QueryInterface(IXMLDOMEntityReference *iface, REFIID riid, void **obj)
 {
     entityref *ref = impl_from_IXMLDOMEntityReference( iface );
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&ref->tearoff, (IUnknown *)iface, &ref->dispex, ref->node,
+            entityref_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if (IsEqualGUID(riid, &IID_IXMLDOMEntityReference) ||
         IsEqualGUID(riid, &IID_IXMLDOMNode) ||
@@ -97,23 +113,39 @@ static ULONG WINAPI entityref_AddRef(IXMLDOMEntityReference *iface)
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&ref->tearoff, ref->node, refcount);
+#else
     return refcount;
+#endif
 }
 
 static ULONG WINAPI entityref_Release(IXMLDOMEntityReference *iface)
 {
     entityref *ref = impl_from_IXMLDOMEntityReference(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG refcount = node_tearoff_decrement(&ref->tearoff, ref->node, &ref->refcount, &reported);
+#else
     ULONG refcount = InterlockedDecrement(&ref->refcount);
+#endif
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&ref->tearoff);
+#endif
         domnode_release(ref->node);
         free(ref);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return refcount;
+#endif
 }
 
 static HRESULT WINAPI entityref_GetTypeInfoCount(IXMLDOMEntityReference *iface, UINT *count)

@@ -114,6 +114,8 @@ ResolveTarget()
     if (Status != 0)
         return false;
 
+    Info.Family = Info.Target->ai_family;
+
     Status = GetNameInfoW(Info.Target->ai_addr,
                           (socklen_t)Info.Target->ai_addrlen,
                           Info.TargetIP,

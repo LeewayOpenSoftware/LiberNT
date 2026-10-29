@@ -34,6 +34,8 @@ UDP_STATISTICS UDPStats;
 /* Network timers */
 KTIMER IPTimer;
 KDPC IPTimeoutDpc;
+KTIMER NeighborTimer;
+KDPC NeighborTimeoutDpc;
 
 VOID TiWriteErrorLog(
     PDRIVER_OBJECT DriverContext,
@@ -602,6 +604,74 @@ TiDispatch(
                 Status = STATUS_INVALID_PARAMETER;
                 break;
 
+            case IOCTL_IP6_SET_ADDRESS:
+                if (DeviceObject != IP6DeviceObject)
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                else if (IrpSp->Parameters.DeviceIoControl.InputBufferLength < sizeof(IP6_ADDRESS_SET))
+                    Status = STATUS_INVALID_PARAMETER;
+                else
+                    Status = LibIP6SetAddress(Irp->AssociatedIrp.SystemBuffer);
+                break;
+
+            case IOCTL_IP6_SET_ROUTE:
+                if (DeviceObject != IP6DeviceObject)
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                else if (IrpSp->Parameters.DeviceIoControl.InputBufferLength < sizeof(IP6_ROUTE_SET))
+                    Status = STATUS_INVALID_PARAMETER;
+                else
+                    Status = LibIP6SetRoute(Irp->AssociatedIrp.SystemBuffer);
+                break;
+
+            case IOCTL_IP6_SET_INTERFACE:
+                if (DeviceObject != IP6DeviceObject)
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                else if (IrpSp->Parameters.DeviceIoControl.InputBufferLength < sizeof(IP6_INTERFACE_SET))
+                    Status = STATUS_INVALID_PARAMETER;
+                else
+                    Status = LibIP6SetInterface(Irp->AssociatedIrp.SystemBuffer);
+                break;
+
+            case IOCTL_IP6_SET_NEIGHBOR:
+                if (DeviceObject != IP6DeviceObject)
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                else if (IrpSp->Parameters.DeviceIoControl.InputBufferLength < sizeof(IP6_NEIGHBOR_SET))
+                    Status = STATUS_INVALID_PARAMETER;
+                else
+                    Status = LibIP6SetNeighbor(Irp->AssociatedIrp.SystemBuffer);
+                break;
+
+            case IOCTL_IP_QUERY_INTERFACE:
+            case IOCTL_IP_SET_INTERFACE:
+                if (DeviceObject != IPDeviceObject)
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                else if (IrpSp->Parameters.DeviceIoControl.InputBufferLength < sizeof(IP4_INTERFACE_INFO) ||
+                         (IrpSp->Parameters.DeviceIoControl.IoControlCode == IOCTL_IP_QUERY_INTERFACE &&
+                          IrpSp->Parameters.DeviceIoControl.OutputBufferLength < sizeof(IP4_INTERFACE_INFO)))
+                    Status = STATUS_INVALID_PARAMETER;
+                else if (IrpSp->Parameters.DeviceIoControl.IoControlCode == IOCTL_IP_SET_INTERFACE)
+                    Status = IPSetInterfaceV4(Irp->AssociatedIrp.SystemBuffer);
+                else
+                {
+                    Status = IPQueryInterfaceV4(Irp->AssociatedIrp.SystemBuffer);
+                    if (NT_SUCCESS(Status))
+                        Irp->IoStatus.Information = sizeof(IP4_INTERFACE_INFO);
+                }
+                break;
+
+            case IOCTL_IP6_GET_BEST_ROUTE:
+                if (DeviceObject != IP6DeviceObject)
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                else if (IrpSp->Parameters.DeviceIoControl.InputBufferLength < sizeof(IP6_BEST_ROUTE) ||
+                         IrpSp->Parameters.DeviceIoControl.OutputBufferLength < sizeof(IP6_BEST_ROUTE))
+                    Status = STATUS_INVALID_PARAMETER;
+                else
+                {
+                    Status = LibIP6GetBestRoute(Irp->AssociatedIrp.SystemBuffer);
+                    if (NT_SUCCESS(Status))
+                        Irp->IoStatus.Information = sizeof(IP6_BEST_ROUTE);
+                }
+                break;
+
             case IOCTL_IP6_QUERY_TABLE:
             {
                 ULONG TableId;
@@ -882,6 +952,7 @@ VOID NTAPI TiUnload(
 #endif
     /* Cancel timer */
     KeCancelTimer(&IPTimer);
+    KeCancelTimer(&NeighborTimer);
 
     /* Unregister loopback adapter */
     LoopUnregisterAdapter(NULL);
@@ -986,6 +1057,8 @@ DriverEntry(
         timer expires, the IPTimeout deferred procedure call (DPC) is queued */
     KeInitializeDpc(&IPTimeoutDpc, IPTimeoutDpcFn, NULL);
     KeInitializeTimer(&IPTimer);
+    KeInitializeDpc(&NeighborTimeoutDpc, NeighborTimeoutDpcFn, NULL);
+    KeInitializeTimer(&NeighborTimer);
 
     /* Create IP device object */
     Status = IoCreateDevice(DriverObject, 0, &strIpDeviceName,
@@ -1174,6 +1247,8 @@ DriverEntry(
         relative expiration time of IP_TIMEOUT milliseconds */
     DueTime.QuadPart = -(LONGLONG)IP_TIMEOUT * 10000;
     KeSetTimerEx(&IPTimer, DueTime, IP_TIMEOUT, &IPTimeoutDpc);
+    DueTime.QuadPart = -(LONGLONG)NB_FAST_TIMEOUT * 10000;
+    KeSetTimerEx(&NeighborTimer, DueTime, NB_FAST_TIMEOUT, &NeighborTimeoutDpc);
 
     TI_DbgPrint(MAX_TRACE, ("[TCPIP, DriverEntry] Finished\n"));
 

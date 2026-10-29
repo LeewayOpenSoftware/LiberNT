@@ -308,6 +308,7 @@ VOID ProcessFragment(
  *     be assembled, passes the datagram on to the IP protocol dispatcher
  */
 {
+  BOOLEAN Forward;
   KIRQL OldIrql;
   PIPDATAGRAM_REASSEMBLY IPDR;
   PLIST_ENTRY CurrentEntry;
@@ -511,7 +512,10 @@ VOID ProcessFragment(
     DISPLAY_IP_PACKET(&Datagram);
 
     /* Give the packet to the protocol dispatcher */
-    IPDispatchProtocol(IF, &Datagram);
+    if (IPv4AcceptDestination(IF, &Datagram.DstAddr, &Forward))
+        IPDispatchProtocol(IF, &Datagram);
+    else if (Forward)
+        IPv4Forward(IF, &Datagram);
 
     /* We're done with this datagram */
     TI_DbgPrint(MAX_TRACE, ("Freeing datagram at (0x%X).\n", Datagram));
@@ -609,6 +613,49 @@ VOID IPDatagramReassemblyTimeout(
     }
 }
 
+VOID IPv4Forward(PIP_INTERFACE IF, PIP_PACKET IPPacket)
+{
+    PNEIGHBOR_CACHE_ENTRY NCE;
+    IP_PACKET NewPacket;
+    PCHAR Buffer = NULL;
+    UINT BufferSize = 0;
+
+    if (((PIPv4_HEADER)IPPacket->Header)->Ttl <= 1 || IPPacket->TotalSize < IPPacket->HeaderSize)
+        return;
+
+    NCE = RouteGetRouteToDestination(&IPPacket->DstAddr);
+    if (!NCE)
+        return;
+    if (NCE->Interface == IF || !NCE->Interface->Forwarding)
+    {
+        NBDereferenceNeighbor(NCE);
+        return;
+    }
+
+    IPInitializePacket(&NewPacket, IP_ADDRESS_V4);
+    NewPacket.TotalSize = IPPacket->TotalSize;
+    if (!NT_SUCCESS(AllocatePacketWithBuffer(&NewPacket.NdisPacket, NULL, NewPacket.TotalSize)))
+    {
+        NBDereferenceNeighbor(NCE);
+        return;
+    }
+    GetDataPtr(NewPacket.NdisPacket, 0, &Buffer, &BufferSize);
+    RtlCopyMemory(Buffer, IPPacket->Header, IPPacket->HeaderSize);
+    RtlCopyMemory(Buffer + IPPacket->HeaderSize, IPPacket->Data, IPPacket->TotalSize - IPPacket->HeaderSize);
+    ((PIPv4_HEADER)Buffer)->Ttl--;
+
+    NewPacket.Header = Buffer;
+    NewPacket.MappedHeader = TRUE;
+    NewPacket.HeaderSize = IPPacket->HeaderSize;
+    NewPacket.Data = Buffer + IPPacket->HeaderSize;
+    NewPacket.SrcAddr = IPPacket->SrcAddr;
+    NewPacket.DstAddr = IPPacket->DstAddr;
+    NewPacket.Flags |= IP_PACKET_FLAG_RAW;
+
+    IPSendDatagram(&NewPacket, NCE);
+    NBDereferenceNeighbor(NCE);
+}
+
 VOID IPv4Receive(PIP_INTERFACE IF, PIP_PACKET IPPacket)
 /*
  * FUNCTION: Receives an IPv4 datagram (or fragment)
@@ -623,6 +670,7 @@ VOID IPv4Receive(PIP_INTERFACE IF, PIP_PACKET IPPacket)
     UINT ContiguousSize;
     ULONG BytesCopied;
     USHORT FragmentOffset;
+    BOOLEAN Forward;
 
     AvailableSize = IPPacket->TotalSize >= IPPacket->Position ?
                     IPPacket->TotalSize - IPPacket->Position : 0;
@@ -689,6 +737,29 @@ VOID IPv4Receive(PIP_INTERFACE IF, PIP_PACKET IPPacket)
 
     AddrInitIPv4(&IPPacket->SrcAddr, ((PIPv4_HEADER)IPPacket->Header)->SrcAddr);
     AddrInitIPv4(&IPPacket->DstAddr, ((PIPv4_HEADER)IPPacket->Header)->DstAddr);
+
+    if (!IPv4AcceptDestination(IF, &IPPacket->DstAddr, &Forward))
+    {
+        if (!Forward)
+            return;
+        if ((WN2H(((PIPv4_HEADER)IPPacket->Header)->FlagsFragOfs) & (IPv4_FRAGOFS_MASK | IPv4_MF_MASK)) == 0)
+        {
+            PacketData = NULL;
+            ContiguousSize = 0;
+            GetDataPtr(IPPacket->NdisPacket, IPPacket->Position, &PacketData, &ContiguousSize);
+            if (PacketData != NULL && ContiguousSize >= IPPacket->TotalSize)
+            {
+                ExFreePoolWithTag(IPPacket->Header, PACKET_BUFFER_TAG);
+                IPPacket->Header = PacketData;
+                IPPacket->MappedHeader = TRUE;
+                IPPacket->Data = PacketData + IPPacket->HeaderSize;
+                IPv4Forward(IF, IPPacket);
+                return;
+            }
+        }
+        ProcessFragment(IF, IPPacket);
+        return;
+    }
 
     /* FIXME: Possibly forward packets with multicast addresses */
 

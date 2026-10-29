@@ -1,0 +1,24 @@
+--- a/mono/metadata/cominterop.c
++++ b/mono/metadata/cominterop.c
+@@ -2292,12 +2292,18 @@
+ 		g_hash_table_remove (rcw_hash, MONO_HANDLE_GETVAL (obj, iunknown));
+ 	}
+ 
+-	g_hash_table_foreach_remove (MONO_HANDLE_GETVAL (obj, itf_hash), cominterop_rcw_interface_finalizer, NULL);
+-	g_hash_table_destroy (MONO_HANDLE_GETVAL (obj, itf_hash));
+-	mono_IUnknown_Release (MONO_HANDLE_GETVAL (obj, iunknown));
++	GHashTable *itf_hash = MONO_HANDLE_GETVAL (obj, itf_hash);
++	MonoIUnknown *iunknown = MONO_HANDLE_GETVAL (obj, iunknown);
+ 	MONO_HANDLE_SETVAL (obj, iunknown, MonoIUnknown*, NULL);
+ 	MONO_HANDLE_SETVAL (obj, itf_hash, GHashTable*, NULL);
+ 	mono_cominterop_unlock ();
++
++	if (itf_hash) {
++		g_hash_table_foreach_remove (itf_hash, cominterop_rcw_interface_finalizer, NULL);
++		g_hash_table_destroy (itf_hash);
++	}
++	if (iunknown)
++		mono_IUnknown_Release (iunknown);
+ }
+ 
+ void

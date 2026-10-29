@@ -12,6 +12,43 @@
 
 #define IOCTL_IP_GET_BEST_SOURCE _TCP_CTL_CODE(0x803, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
+#define IOCTL_IP6_SET_ADDRESS _TCP_CTL_CODE(0x804, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+#define IOCTL_IP6_SET_ROUTE _TCP_CTL_CODE(0x805, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+#define IOCTL_IP6_SET_INTERFACE _TCP_CTL_CODE(0x806, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+#define IOCTL_IP6_SET_NEIGHBOR _TCP_CTL_CODE(0x807, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+#define IOCTL_IP6_GET_BEST_ROUTE _TCP_CTL_CODE(0x808, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+#define IOCTL_IP_QUERY_INTERFACE _TCP_CTL_CODE(0x809, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+#define IOCTL_IP_SET_INTERFACE _TCP_CTL_CODE(0x80A, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+typedef struct _IP4_INTERFACE_INFO
+{
+    ULONG Index;
+    ULONG Metric;
+    ULONG Mtu;
+    ULONG RetransmitTime;
+    ULONG BaseReachableTime;
+    ULONG ReachableTime;
+    ULONG DadTransmits;
+    ULONG RouterDiscoveryBehavior;
+    ULONG PathMtuDiscoveryTimeout;
+    ULONG LinkLocalAddressTimeout;
+    ULONG SitePrefixLength;
+    ULONG ZoneIndices[16];
+    BOOLEAN UseAutomaticMetric;
+    BOOLEAN Forwarding;
+    BOOLEAN WeakHostSend;
+    BOOLEAN WeakHostReceive;
+    BOOLEAN DisableDefaultRoutes;
+    BOOLEAN AdvertiseDefaultRoute;
+    BOOLEAN Reserved[2];
+} IP4_INTERFACE_INFO, *PIP4_INTERFACE_INFO;
+
 typedef struct _IP_BEST_SOURCE
 {
     ULONG Destination;
@@ -27,8 +64,113 @@ typedef enum _IP6_TABLE_ID
     Ip6TableRoutes,
     Ip6TableNeighbors,
     Ip6TableStatistics,
-    Ip6TableEndpoints
+    Ip6TableEndpoints,
+    Ip6TableDnsServers,
+    Ip6TableDnsSuffixes
 } IP6_TABLE_ID;
+
+typedef enum _IP6_SET_OPERATION
+{
+    Ip6SetAdd,
+    Ip6SetDelete,
+    Ip6SetUpdate,
+    Ip6SetFlush
+} IP6_SET_OPERATION;
+
+typedef struct _IP6_ADDRESS_SET
+{
+    ULONG Operation;
+    ULONG Index;
+    UCHAR Address[16];
+    ULONG PrefixLength;
+    ULONG ValidLifetime;
+    ULONG PreferredLifetime;
+    ULONG PrefixOrigin;
+    ULONG SuffixOrigin;
+    BOOLEAN SkipAsSource;
+    BOOLEAN Reserved[3];
+} IP6_ADDRESS_SET, *PIP6_ADDRESS_SET;
+
+typedef struct _IP6_ROUTE_SET
+{
+    ULONG Operation;
+    ULONG Index;
+    UCHAR Prefix[16];
+    ULONG PrefixLength;
+    UCHAR NextHop[16];
+    ULONG Metric;
+    ULONG Protocol;
+    ULONG ValidLifetime;
+    ULONG PreferredLifetime;
+    BOOLEAN Publish;
+    BOOLEAN Reserved[3];
+} IP6_ROUTE_SET, *PIP6_ROUTE_SET;
+
+typedef struct _IP6_INTERFACE_SET
+{
+    ULONG Index;
+    ULONG Metric;
+    ULONG Mtu;
+    ULONG DadTransmits;
+    ULONG BaseReachableTime;
+    ULONG RetransmitTime;
+    ULONG SitePrefixLength;
+    BOOLEAN UseAutomaticMetric;
+    BOOLEAN RouterDiscovery;
+    BOOLEAN Forwarding;
+    BOOLEAN WeakHostSend;
+    BOOLEAN WeakHostReceive;
+    BOOLEAN Advertising;
+    BOOLEAN AdvertiseDefaultRoute;
+    BOOLEAN DisableDefaultRoutes;
+    BOOLEAN ManagedAddressConfiguration;
+    BOOLEAN OtherStatefulConfiguration;
+    BOOLEAN Reserved[2];
+    ULONG RouterDiscoveryBehavior;
+    ULONG PathMtuDiscoveryTimeout;
+    ULONG LinkLocalAddressTimeout;
+    ULONG ZoneIndices[16];
+} IP6_INTERFACE_SET, *PIP6_INTERFACE_SET;
+
+typedef struct _IP6_NEIGHBOR_SET
+{
+    ULONG Operation;
+    ULONG Index;
+    UCHAR Address[16];
+    UCHAR PhysicalAddress[32];
+    ULONG PhysicalAddressLength;
+    BOOLEAN Permanent;
+    BOOLEAN IsRouter;
+    BOOLEAN Reserved[2];
+} IP6_NEIGHBOR_SET, *PIP6_NEIGHBOR_SET;
+
+typedef struct _IP6_BEST_ROUTE
+{
+    UCHAR Destination[16];
+    ULONG ScopeId;
+    ULONG InterfaceIndex;
+    UCHAR Source[16];
+    UCHAR Prefix[16];
+    ULONG PrefixLength;
+    UCHAR NextHop[16];
+    ULONG Metric;
+    ULONG Protocol;
+    ULONG Origin;
+} IP6_BEST_ROUTE, *PIP6_BEST_ROUTE;
+
+typedef struct _IP6_DNS_SERVER_ROW
+{
+    ULONG Index;
+    UCHAR Address[16];
+    ULONG Lifetime;
+} IP6_DNS_SERVER_ROW, *PIP6_DNS_SERVER_ROW;
+
+typedef struct _IP6_DNS_SUFFIX_ROW
+{
+    ULONG Index;
+    ULONG Lifetime;
+    WCHAR Suffix[256];
+} IP6_DNS_SUFFIX_ROW, *PIP6_DNS_SUFFIX_ROW;
 
 typedef struct _IP6_TABLE_HEADER
 {
@@ -50,6 +192,26 @@ typedef struct _IP6_INTERFACE_ROW
     BOOLEAN Autoconfiguration;
     BOOLEAN Reserved;
     ULONG64 LinkSpeed;
+    BOOLEAN ManagedAddressConfiguration;
+    BOOLEAN OtherStatefulConfiguration;
+    BOOLEAN RouterAdvertised;
+    BOOLEAN Reserved2;
+    ULONG Metric;
+    BOOLEAN UseAutomaticMetric;
+    BOOLEAN RouterDiscovery;
+    BOOLEAN Reserved3[2];
+    ULONG SitePrefixLength;
+    BOOLEAN Forwarding;
+    BOOLEAN WeakHostSend;
+    BOOLEAN WeakHostReceive;
+    BOOLEAN Advertising;
+    BOOLEAN AdvertiseDefaultRoute;
+    BOOLEAN DisableDefaultRoutes;
+    BOOLEAN Reserved4[2];
+    ULONG RouterDiscoveryBehavior;
+    ULONG PathMtuDiscoveryTimeout;
+    ULONG LinkLocalAddressTimeout;
+    ULONG ZoneIndices[16];
 } IP6_INTERFACE_ROW, *PIP6_INTERFACE_ROW;
 
 typedef struct _IP6_ADDRESS_ROW
@@ -62,6 +224,8 @@ typedef struct _IP6_ADDRESS_ROW
     ULONG PreferredLifetime;
     ULONG PrefixOrigin;
     ULONG SuffixOrigin;
+    BOOLEAN SkipAsSource;
+    BOOLEAN Reserved[3];
 } IP6_ADDRESS_ROW, *PIP6_ADDRESS_ROW;
 
 typedef struct _IP6_ROUTE_ROW

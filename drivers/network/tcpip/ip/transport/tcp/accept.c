@@ -141,11 +141,13 @@ NTSTATUS TCPAccept ( PTDI_REQUEST Request,
                      PCONNECTION_ENDPOINT Listener,
                      PCONNECTION_ENDPOINT Connection,
                      PTCP_COMPLETION_ROUTINE Complete,
-                     PVOID Context )
+                     PVOID Context,
+                     PCONNECTION_ENDPOINT *DrainListener )
 {
     NTSTATUS Status;
     PTDI_BUCKET Bucket;
-    BOOLEAN DrainPending = FALSE;
+
+    *DrainListener = NULL;
 
     LockObject(Listener);
 
@@ -162,7 +164,7 @@ NTSTATUS TCPAccept ( PTDI_REQUEST Request,
         if (!IsListEmpty(&Listener->PendingAccepts))
         {
             ReferenceObject(Listener);
-            DrainPending = TRUE;
+            *DrainListener = Listener;
         }
         Status = STATUS_PENDING;
     }
@@ -171,11 +173,11 @@ NTSTATUS TCPAccept ( PTDI_REQUEST Request,
 
     UnlockObject(Listener);
 
-    if (DrainPending)
-    {
-        LibTCPDrainPendingAccept(Listener);
-        DereferenceObject(Listener);
-    }
-
     return Status;
+}
+
+VOID TCPDrainPendingAccept( PCONNECTION_ENDPOINT Listener )
+{
+    LibTCPDrainPendingAccept(Listener);
+    DereferenceObject(Listener);
 }

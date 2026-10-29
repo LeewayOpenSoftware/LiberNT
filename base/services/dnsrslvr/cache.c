@@ -125,11 +125,11 @@ DnsIntFlushCacheEntry(
         CacheEntry = CONTAINING_RECORD(Entry, RESOLVER_CACHE_ENTRY, CacheLink);
 
         /* Remove it from the list */
-        if ((_wcsicmp(CacheEntry->Record->pName, pszName) == 0) &&
+        if ((_wcsicmp(CacheEntry->Name, pszName) == 0) &&
             (CacheEntry->bHostsFileEntry == FALSE))
         {
             if ((wType == DNS_TYPE_ANY) ||
-                (CacheEntry->Record->wType == wType))
+                (CacheEntry->Type == wType))
             {
                 DnsIntCacheRemoveEntryItem(CacheEntry);
             }
@@ -146,6 +146,33 @@ DnsIntFlushCacheEntry(
 }
 
 
+static
+PRESOLVER_CACHE_ENTRY
+DnsIntCacheFindEntry(
+    _In_ LPCWSTR Name,
+    _In_ WORD Type)
+{
+    ULONGLONG Now = GetTickCount64();
+    PRESOLVER_CACHE_ENTRY CacheEntry;
+    PLIST_ENTRY NextEntry = DnsCache.RecordList.Flink;
+
+    while (NextEntry != &DnsCache.RecordList)
+    {
+        CacheEntry = CONTAINING_RECORD(NextEntry, RESOLVER_CACHE_ENTRY, CacheLink);
+        NextEntry = NextEntry->Flink;
+
+        if (!CacheEntry->bHostsFileEntry && CacheEntry->Expires <= Now)
+        {
+            DnsIntCacheRemoveEntryItem(CacheEntry);
+            continue;
+        }
+        if (CacheEntry->Type == Type && _wcsicmp(CacheEntry->Name, Name) == 0)
+            return CacheEntry;
+    }
+
+    return NULL;
+}
+
 DNS_STATUS
 DnsIntCacheGetEntryByName(
     LPCWSTR Name,
@@ -155,37 +182,21 @@ DnsIntCacheGetEntryByName(
 {
     DNS_STATUS Status = DNS_INFO_NO_RECORDS;
     PRESOLVER_CACHE_ENTRY CacheEntry;
-    PLIST_ENTRY NextEntry;
 
     DPRINT("DnsIntCacheGetEntryByName(%S %hu 0x%lx %p)\n",
            Name, wType, dwFlags, Record);
 
-    /* Assume failure */
     *Record = NULL;
 
-    /* Lock the cache */
     DnsCacheLock();
 
-    /* Match the Id with all the entries in the List */
-    NextEntry = DnsCache.RecordList.Flink;
-    while (NextEntry != &DnsCache.RecordList)
+    CacheEntry = DnsIntCacheFindEntry(Name, wType);
+    if (CacheEntry)
     {
-        /* Get the Current Entry */
-        CacheEntry = CONTAINING_RECORD(NextEntry, RESOLVER_CACHE_ENTRY, CacheLink);
-
-        /* Check if this is the Catalog Entry ID we want */
-        if (_wcsicmp(CacheEntry->Record->pName, Name) == 0)
-        {
-            /* Copy the entry and return it */
-            *Record = DnsRecordSetCopyEx(CacheEntry->Record, DnsCharSetUnicode, DnsCharSetUnicode);
-            Status = ERROR_SUCCESS;
-            break;
-        }
-
-        NextEntry = NextEntry->Flink;
+        *Record = DnsRecordSetCopyEx(CacheEntry->Record, DnsCharSetUnicode, DnsCharSetUnicode);
+        Status = *Record ? ERROR_SUCCESS : ERROR_OUTOFMEMORY;
     }
 
-    /* Release the cache */
     DnsCacheUnlock();
 
     return Status;
@@ -200,63 +211,90 @@ DnsIntCacheRemoveEntryByName(LPCWSTR Name)
 
     DPRINT("DnsIntCacheRemoveEntryByName(%S)\n", Name);
 
-    /* Lock the cache */
     DnsCacheLock();
 
-    /* Match the Id with all the entries in the List */
     NextEntry = DnsCache.RecordList.Flink;
     while (NextEntry != &DnsCache.RecordList)
     {
-        /* Get the Current Entry */
         CacheEntry = CONTAINING_RECORD(NextEntry, RESOLVER_CACHE_ENTRY, CacheLink);
+        NextEntry = NextEntry->Flink;
 
-        /* Check if this is the Catalog Entry ID we want */
-        if (_wcsicmp(CacheEntry->Record->pName, Name) == 0)
+        if (_wcsicmp(CacheEntry->Name, Name) == 0)
         {
-            /* Remove the entry */
             DnsIntCacheRemoveEntryItem(CacheEntry);
             Ret = TRUE;
-            break;
         }
-
-        NextEntry = NextEntry->Flink;
     }
 
-    /* Release the cache */
     DnsCacheUnlock();
 
-    /* Return */
     return Ret;
 }
 
 VOID
 DnsIntCacheAddEntry(
+    _In_ LPCWSTR Name,
+    _In_ WORD Type,
     _In_ PDNS_RECORDW Record,
     _In_ BOOL bHostsFileEntry)
 {
     PRESOLVER_CACHE_ENTRY Entry;
+    PDNS_RECORDW Copy, Tail;
+    ULONGLONG Expires = MAXULONGLONG;
+    DWORD Ttl = MAXDWORD;
+    SIZE_T NameSize;
 
-    DPRINT("DnsIntCacheAddEntry(%p %u)\n",
-           Record, bHostsFileEntry);
+    DPRINT("DnsIntCacheAddEntry(%S %u %p %u)\n", Name, Type, Record, bHostsFileEntry);
 
-    DPRINT("Name: %S\n", Record->pName);
-    DPRINT("TTL: %lu\n", Record->dwTtl);
+    if (!bHostsFileEntry)
+    {
+        for (Tail = Record; Tail; Tail = Tail->pNext)
+            Ttl = min(Ttl, Tail->dwTtl);
+        if (!Ttl)
+            return;
+        Expires = GetTickCount64() + (ULONGLONG)min(Ttl, 86400) * 1000;
+    }
 
-    /* Lock the cache */
-    DnsCacheLock();
-
-    /* Match the Id with all the entries in the List */
-    Entry = (PRESOLVER_CACHE_ENTRY)HeapAlloc(GetProcessHeap(), 0, sizeof(*Entry));
-    if (!Entry)
+    Copy = DnsRecordSetCopyEx(Record, DnsCharSetUnicode, DnsCharSetUnicode);
+    if (!Copy)
         return;
 
-    Entry->bHostsFileEntry = bHostsFileEntry;
-    Entry->Record = DnsRecordSetCopyEx(Record, DnsCharSetUnicode, DnsCharSetUnicode);
+    DnsCacheLock();
 
-    /* Insert it to our List */
+    Entry = DnsIntCacheFindEntry(Name, Type);
+    if (Entry && Entry->bHostsFileEntry)
+    {
+        if (bHostsFileEntry)
+        {
+            for (Tail = Entry->Record; Tail->pNext; Tail = Tail->pNext);
+            Tail->pNext = Copy;
+        }
+        else
+        {
+            DnsRecordListFree(Copy, DnsFreeRecordList);
+        }
+        DnsCacheUnlock();
+        return;
+    }
+    if (Entry)
+        DnsIntCacheRemoveEntryItem(Entry);
+
+    NameSize = (wcslen(Name) + 1) * sizeof(WCHAR);
+    Entry = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(RESOLVER_CACHE_ENTRY, Name) + NameSize);
+    if (!Entry)
+    {
+        DnsRecordListFree(Copy, DnsFreeRecordList);
+        DnsCacheUnlock();
+        return;
+    }
+
+    Entry->bHostsFileEntry = bHostsFileEntry;
+    Entry->Record = Copy;
+    Entry->Type = Type;
+    Entry->Expires = Expires;
+    CopyMemory(Entry->Name, Name, NameSize);
     InsertTailList(&DnsCache.RecordList, &Entry->CacheLink);
 
-    /* Release the cache */
     DnsCacheUnlock();
 }
 
@@ -288,17 +326,21 @@ DnsIntCacheGetEntries(
         pNewEntry = midl_user_allocate(sizeof(DNS_CACHE_ENTRY));
         if (pNewEntry == NULL)
         {
+            DnsCacheUnlock();
             return ERROR_OUTOFMEMORY;
         }
 
-        pNewEntry->pszName = midl_user_allocate((wcslen(CacheEntry->Record->pName) + 1) * sizeof(WCHAR));
+        pNewEntry->pNext = NULL;
+        pNewEntry->pszName = midl_user_allocate((wcslen(CacheEntry->Name) + 1) * sizeof(WCHAR));
         if (pNewEntry->pszName == NULL)
         {
+            midl_user_free(pNewEntry);
+            DnsCacheUnlock();
             return ERROR_OUTOFMEMORY;
         }
 
-        wcscpy(pNewEntry->pszName, CacheEntry->Record->pName);
-        pNewEntry->wType1 = CacheEntry->Record->wType;
+        wcscpy(pNewEntry->pszName, CacheEntry->Name);
+        pNewEntry->wType1 = CacheEntry->Type;
         pNewEntry->wType2 = 0;
         pNewEntry->wFlags = 0;
 

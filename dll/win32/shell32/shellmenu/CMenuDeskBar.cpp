@@ -353,6 +353,7 @@ HRESULT STDMETHODCALLTYPE CMenuDeskBar::Popup(POINTL *ppt, RECTL *prcExclude, MP
     hr = dbc->UIActivateDBC(TRUE);
     if (FAILED_UNEXPECTEDLY(hr))
         return hr;
+    HRESULT hrActivate = hr;
 
     RECT rc = { 0 };
     hr = dbc->GetSize(0, &rc);
@@ -533,7 +534,7 @@ HRESULT STDMETHODCALLTYPE CMenuDeskBar::Popup(POINTL *ppt, RECTL *prcExclude, MP
         IUnknown_QueryServiceExec(m_Client, SID_SMenuBandChild, &CLSID_MenuBand, CMD_SELECT, CMD_SELECT_OPTS, NULL, NULL);
     }
 
-    return S_OK;
+    return hrActivate;
 }
 
 HRESULT STDMETHODCALLTYPE CMenuDeskBar::SetIconSize(THIS_ DWORD iIcon)

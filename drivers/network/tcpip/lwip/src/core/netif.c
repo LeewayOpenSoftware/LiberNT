@@ -1452,6 +1452,10 @@ netif_ip6_addr_set_state(struct netif *netif, s8_t addr_idx, u8_t state)
   LWIP_ASSERT("invalid index", addr_idx < LWIP_IPV6_NUM_ADDRESSES);
 
   old_state = netif_ip6_addr_state(netif, addr_idx);
+  if (ip6_addr_istentative(state) && !ip6_addr_istentative(old_state)) {
+    netif->ip6_dad_sent[addr_idx] = 0;
+    netif->ip6_dad_next[addr_idx] = sys_now();
+  }
   /* state is actually being changed? */
   if (old_state != state) {
     u8_t old_valid = old_state & IP6_ADDR_VALID;

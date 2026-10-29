@@ -97,12 +97,29 @@ typedef struct
 
     /* IObjectSafety */
     DWORD safeopt;
+#ifdef __REACTOS__
+    MSXML_VERSION version;
+#endif
 } httprequest;
+
+#ifdef __REACTOS__
+#define XHR_E_NOT_OPENED   ((HRESULT)0xc00c023e)
+#define XHR_E_NO_DATA      ((HRESULT)0xc00c023f)
+#define XHR_E_ALREADY_SENT ((HRESULT)0xc00c0240)
+
+static HRESULT httprequest_state_error(const httprequest *This, HRESULT msxml6_hr, HRESULT hr)
+{
+    return This->version == MSXML6 ? msxml6_hr : hr;
+}
+#endif
 
 typedef struct
 {
     httprequest req;
     IServerXMLHTTPRequest IServerXMLHTTPRequest_iface;
+#ifdef __REACTOS__
+    DispatchEx dispex;
+#endif
 } serverhttp;
 
 static inline httprequest *impl_from_IXMLHTTPRequest( IXMLHTTPRequest *iface )
@@ -979,6 +996,9 @@ static HRESULT httprequest_setRequestHeader(httprequest *This, BSTR header, BSTR
     struct httpheader *entry;
 
     if (!header || !*header) return E_INVALIDARG;
+#ifdef __REACTOS__
+    if (This->state == READYSTATE_UNINITIALIZED) return httprequest_state_error(This, XHR_E_NOT_OPENED, E_FAIL);
+#endif
     if (This->state != READYSTATE_LOADING) return E_FAIL;
     if (!value) return E_INVALIDARG;
 
@@ -1066,6 +1086,10 @@ static HRESULT httprequest_send(httprequest *This, VARIANT body)
     BindStatusCallback *bsc = NULL;
     HRESULT hr;
 
+#ifdef __REACTOS__
+    if (This->state == READYSTATE_UNINITIALIZED) return httprequest_state_error(This, XHR_E_NOT_OPENED, E_FAIL);
+    if (This->state == READYSTATE_COMPLETE) return httprequest_state_error(This, XHR_E_ALREADY_SENT, E_FAIL);
+#endif
     if (This->state != READYSTATE_LOADING) return E_FAIL;
 
     hr = BindStatusCallback_create(This, &bsc, &body);
@@ -1091,12 +1115,19 @@ static HRESULT httprequest_get_status(httprequest *This, LONG *status)
 
     *status = This->status;
 
+#ifdef __REACTOS__
+    return This->state == READYSTATE_COMPLETE ? S_OK : httprequest_state_error(This, XHR_E_NO_DATA, E_FAIL);
+#else
     return This->state == READYSTATE_COMPLETE ? S_OK : E_FAIL;
+#endif
 }
 
 static HRESULT httprequest_get_statusText(httprequest *This, BSTR *status)
 {
     if (!status) return E_POINTER;
+#ifdef __REACTOS__
+    if (This->state != READYSTATE_COMPLETE) return httprequest_state_error(This, XHR_E_NO_DATA, E_FAIL);
+#endif
     if (This->state != READYSTATE_COMPLETE) return E_FAIL;
 
     *status = SysAllocString(This->status_text);
@@ -1241,6 +1272,9 @@ static HRESULT httprequest_get_responseBody(httprequest *This, VARIANT *body)
     if (!body) return E_INVALIDARG;
     V_VT(body) = VT_EMPTY;
 
+#ifdef __REACTOS__
+    if (This->state != READYSTATE_COMPLETE) return httprequest_state_error(This, XHR_E_NO_DATA, E_PENDING);
+#endif
     if (This->state != READYSTATE_COMPLETE) return E_PENDING;
 
     hr = GetHGlobalFromStream(This->bsc->stream, &hglobal);
@@ -1292,6 +1326,9 @@ static HRESULT httprequest_get_responseStream(httprequest *This, VARIANT *body)
     if (!body) return E_INVALIDARG;
     V_VT(body) = VT_EMPTY;
 
+#ifdef __REACTOS__
+    if (This->state != READYSTATE_COMPLETE) return httprequest_state_error(This, XHR_E_NO_DATA, E_PENDING);
+#endif
     if (This->state != READYSTATE_COMPLETE) return E_PENDING;
 
     hr = IStream_Clone(This->bsc->stream, &stream);
@@ -1496,8 +1533,16 @@ static HRESULT WINAPI XMLHTTPRequest_getAllResponseHeaders(IXMLHTTPRequest *ifac
 static HRESULT WINAPI XMLHTTPRequest_send(IXMLHTTPRequest *iface, VARIANT body)
 {
     httprequest *This = impl_from_IXMLHTTPRequest( iface );
+#ifdef __REACTOS__
+    HRESULT hr;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&body));
+    hr = httprequest_send(This, body);
+    return hr == HRESULT_FROM_WIN32(ERROR_INTERNET_NAME_NOT_RESOLVED) ? INET_E_RESOURCE_NOT_FOUND : hr;
+#else
     TRACE("(%p)->(%s)\n", This, debugstr_variant(&body));
     return httprequest_send(This, body);
+#endif
 }
 
 static HRESULT WINAPI XMLHTTPRequest_abort(IXMLHTTPRequest *iface)
@@ -1795,6 +1840,12 @@ static HRESULT WINAPI ServerXMLHTTPRequest_QueryInterface(IServerXMLHTTPRequest 
     {
         *obj = &This->req.ISupportErrorInfo_iface;
     }
+#ifdef __REACTOS__
+    else if (This->req.version == MSXML6 && dispex_query_interface(&This->dispex, riid, obj))
+    {
+        return *obj ? S_OK : E_NOINTERFACE;
+    }
+#endif
     else
     {
         TRACE("Unsupported interface %s\n", debugstr_guid(riid));
@@ -2077,6 +2128,9 @@ static void init_httprequest(httprequest *req)
 
     req->site = NULL;
     req->safeopt = 0;
+#ifdef __REACTOS__
+    req->version = MSXML_DEFAULT;
+#endif
 }
 
 HRESULT XMLHTTPRequest_create(void **obj)
@@ -2116,3 +2170,44 @@ HRESULT ServerXMLHTTP_create(void **obj)
 
     return S_OK;
 }
+
+#ifdef __REACTOS__
+static const tid_t serverhttp_iface_tids[] =
+{
+    IServerXMLHTTPRequest_tid,
+    0
+};
+
+static dispex_static_data_t serverhttp_dispex =
+{
+    NULL,
+    IServerXMLHTTPRequest_tid,
+    NULL,
+    serverhttp_iface_tids
+};
+
+HRESULT XMLHTTPRequest_create_version(MSXML_VERSION version, void **obj)
+{
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = XMLHTTPRequest_create(obj)))
+        impl_from_IXMLHTTPRequest(*obj)->version = version;
+
+    return hr;
+}
+
+HRESULT ServerXMLHTTP_create_version(MSXML_VERSION version, void **obj)
+{
+    serverhttp *req;
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = ServerXMLHTTP_create(obj)))
+    {
+        req = impl_from_IServerXMLHTTPRequest(*obj);
+        req->req.version = version;
+        init_dispex(&req->dispex, (IUnknown *)&req->IServerXMLHTTPRequest_iface, &serverhttp_dispex);
+    }
+
+    return hr;
+}
+#endif

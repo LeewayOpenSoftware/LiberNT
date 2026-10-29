@@ -129,6 +129,12 @@ WsNcEntryInitializeFromRegistry(IN PNSCATALOG_ENTRY CatalogEntry,
                                 &RegType,
                                 (LPBYTE)&CatalogEntry->AddressFamily,
                                 &RegSize);
+    if (ErrorCode == ERROR_FILE_NOT_FOUND)
+    {
+        CatalogEntry->AddressFamily = -1;
+        RegSize = sizeof(DWORD);
+        ErrorCode = ERROR_SUCCESS;
+    }
     if (ErrorCode != ERROR_SUCCESS) goto out;
     /* Read the Namespace Id */
     ErrorCode = RegQueryValueEx(EntryKey,

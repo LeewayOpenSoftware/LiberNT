@@ -10,6 +10,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
+EXTERN_C BOOL PathIsExeW(LPCWSTR lpszPath);
+
 /********************** THE ICON CACHE ********************************/
 
 #define INVALID_INDEX -1
@@ -358,7 +360,10 @@ SIC_LoadSizedIcon(
 
     if (!ImageList_GetIconSize(hList, &cx, &cy))
         return NULL;
-    PrivateExtractIconsW(sSourceFile, dwSourceIndex, cx, cy, &hIcon, NULL, 1, LR_COPYFROMRESOURCE);
+    if (!wcscmp(sSourceFile, L"*"))
+        hIcon = ImageList_GetIcon(hList, dwSourceIndex, ILD_NORMAL);
+    else
+        PrivateExtractIconsW(sSourceFile, dwSourceIndex, cx, cy, &hIcon, NULL, 1, LR_COPYFROMRESOURCE);
     if (hIcon && (dwFlags & GIL_FORSHORTCUT))
     {
         hShortcut = SIC_OverlayShortcutImage(hIcon, hList);
@@ -402,7 +407,10 @@ static INT SIC_IconAppend (LPCWSTR sSourceFile, INT dwSourceIndex, HICON hSmallI
 
     lpsice = (LPSIC_ENTRY) SHAlloc (sizeof (SIC_ENTRY));
 
-    GetFullPathNameW(sSourceFile, MAX_PATH, path, NULL);
+    if (!wcscmp(sSourceFile, L"*"))
+        lstrcpynW(path, sSourceFile, MAX_PATH);
+    else
+        GetFullPathNameW(sSourceFile, MAX_PATH, path, NULL);
     lpsice->sSourceFile = (LPWSTR)HeapAlloc( GetProcessHeap(), 0, (wcslen(path)+1)*sizeof(WCHAR) );
     wcscpy( lpsice->sSourceFile, path );
 
@@ -468,10 +476,18 @@ static INT SIC_LoadIcon (LPCWSTR sSourceFile, INT dwSourceIndex, DWORD dwFlags)
     HICON hiconLarge = NULL, hiconSmall = NULL;
     UINT ret;
 
-    PrivateExtractIconsW(sSourceFile, dwSourceIndex, ShellLargeIconSize, ShellLargeIconSize,
-                         &hiconLarge, NULL, 1, LR_COPYFROMRESOURCE);
-    PrivateExtractIconsW(sSourceFile, dwSourceIndex, ShellSmallIconSize, ShellSmallIconSize,
-                         &hiconSmall, NULL, 1, LR_COPYFROMRESOURCE);
+    if (!wcscmp(sSourceFile, L"*"))
+    {
+        hiconLarge = ImageList_GetIcon(ShellBigIconList, dwSourceIndex, ILD_NORMAL);
+        hiconSmall = ImageList_GetIcon(ShellSmallIconList, dwSourceIndex, ILD_NORMAL);
+    }
+    else
+    {
+        PrivateExtractIconsW(sSourceFile, dwSourceIndex, ShellLargeIconSize, ShellLargeIconSize,
+                             &hiconLarge, NULL, 1, LR_COPYFROMRESOURCE);
+        PrivateExtractIconsW(sSourceFile, dwSourceIndex, ShellSmallIconSize, ShellSmallIconSize,
+                             &hiconSmall, NULL, 1, LR_COPYFROMRESOURCE);
+    }
 
     if (!hiconLarge || !hiconSmall)
     {
@@ -525,7 +541,16 @@ INT SIC_GetIconIndex (LPCWSTR sSourceFile, INT dwSourceIndex, DWORD dwFlags )
 
     TRACE("%s %i\n", debugstr_w(sSourceFile), dwSourceIndex);
 
-    GetFullPathNameW(sSourceFile, MAX_PATH, path, NULL);
+    if (!wcscmp(sSourceFile, L"*"))
+    {
+        if (!(dwFlags & GIL_FORSHORTCUT))
+            return dwSourceIndex;
+        lstrcpynW(path, sSourceFile, MAX_PATH);
+    }
+    else
+    {
+        GetFullPathNameW(sSourceFile, MAX_PATH, path, NULL);
+    }
     sice.sSourceFile = path;
     sice.dwSourceIndex = dwSourceIndex;
     sice.dwFlags = dwFlags;
@@ -791,6 +816,11 @@ BOOL PidlToSicIndex (
       if (SUCCEEDED(ei->GetIconLocation(uFlags &~ GIL_FORSHORTCUT, szIconFile, MAX_PATH, &iSourceIndex, &dwFlags)))
       {
         *pIndex = SIC_GetIconIndex(szIconFile, iSourceIndex, uFlags);
+        if (INVALID_INDEX == *pIndex && (dwFlags & GIL_NOTFILENAME) && (dwFlags & GIL_PERINSTANCE) &&
+            PathIsExeW(szIconFile))
+        {
+          *pIndex = SIC_GetIconIndex(swShell32Name, -IDI_SHELL_EXE, uFlags);
+        }
         ret = TRUE;
       }
     }

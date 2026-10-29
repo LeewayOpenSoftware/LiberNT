@@ -98,9 +98,10 @@ CompareIndexKey(
                 IndexedName->Name,
                 IndexedName->NameLength *
                     sizeof(WCHAR));
-        return DiskVolume->CompareFileNames(
+        return DiskVolume->CollateFileNames(
             Key->Name,
             &IndexedString,
+            Key->CaseSensitive,
             Comparison);
 
     case ATTRDEF_COLLATION_ULONG:
@@ -2444,6 +2445,7 @@ Directory::AddFileToDirectory(
     Key.Name = &Name;
     Key.Value = NULL;
     Key.ValueLength = 0;
+    Key.CaseSensitive = DirectoryFile->IsCaseSensitiveDirectory();
 
     Status = AddIndexEntry(
         DirectoryFile,
@@ -2943,6 +2945,7 @@ MakeEntrySearchKey(
     Key->Name = NULL;
     Key->Value = NULL;
     Key->ValueLength = 0;
+    Key->CaseSensitive = FALSE;
     if (CollationRule == ATTRDEF_COLLATION_FILENAME)
     {
         PFileNameEx IndexedName =
@@ -3354,6 +3357,7 @@ Directory::ReleaseEmptyIndexNode(
                            Reinsert,
                            &ReinsertName,
                            &ReinsertKey);
+        ReinsertKey.CaseSensitive = PathKey->CaseSensitive;
         Status = AddIndexEntry(
             DirectoryFile,
             IndexName,
@@ -3415,7 +3419,7 @@ Directory::RemoveFileFromDirectory(
     _In_ ULONGLONG FileReference,
     _In_ PUNICODE_STRING Name)
 {
-    IndexSearchKey Key = { ATTRDEF_COLLATION_FILENAME, Name, NULL, 0 };
+    IndexSearchKey Key = { ATTRDEF_COLLATION_FILENAME, Name, NULL, 0, FALSE };
 
     if (!DirectoryFile || !DirectoryFile->Header ||
         !Name || Name->Length == 0 ||
@@ -3423,6 +3427,7 @@ Directory::RemoveFileFromDirectory(
     {
         return STATUS_INVALID_PARAMETER;
     }
+    Key.CaseSensitive = DirectoryFile->IsCaseSensitiveDirectory();
     return RemoveIndexEntry(DirectoryFile,
                             NtfsI30Name,
                             TypeFileName,
@@ -3724,6 +3729,7 @@ Directory::RemoveIndexEntry(
                                MaxKey,
                                &MaxName,
                                &MaxSearchKey);
+            MaxSearchKey.CaseSensitive = Key.CaseSensitive;
             ReleaseKey = &MaxSearchKey;
         }
         Status = BuildPromotedEntry(

@@ -121,6 +121,10 @@ static inline HRESULT internet_error_to_hres(DWORD error)
     case ERROR_INTERNET_HTTPS_TO_HTTP_ON_REDIR:
     case ERROR_HTTP_REDIRECT_NEEDS_CONFIRMATION:
         return INET_E_REDIRECT_FAILED;
+#ifdef __REACTOS__
+    case ERROR_INTERNET_NAME_NOT_RESOLVED:
+        return HRESULT_FROM_WIN32(error);
+#endif
     default:
         return INET_E_DOWNLOAD_FAILURE;
     }

@@ -38,6 +38,7 @@ TODO:
 
 #include <atlwin.h>
 #include <ui/rosctrls.h>
+#include <perhist.h>
 #include <vssym32.h>
 #include <shdispid.h>
 #include <reactos/dwmsettings.h>
@@ -306,7 +307,9 @@ class CDefView :
     public IDropSource,
     public IViewObject,
     public IServiceProvider,
-    public IFolderFilterSite
+    public IFolderFilterSite,
+    public IPersistHistory,
+    public IPersistFolder
 {
 private:
     CComPtr<IShellFolder>     m_pSFParent;
@@ -386,6 +389,8 @@ private:
     BOOL  m_Destroyed;
     BOOL  m_FillListIsRefresh;
     ULONG m_FillListGeneration;
+    BOOL m_ChangeAddedDuringFill;
+    DWORD m_dwPositionCookie;
     struct ITEM_POSITION
     {
         PITEMID_CHILD pidl;
@@ -412,6 +417,7 @@ private:
     void ClearSavedItemPositions();
     void CaptureItemPositions();
     void ApplySavedItemPositions();
+    void MoveItemToFreeSlot(INT nItem);
     HRESULT LoadItemPositions(IStream *pStream);
     HRESULT SaveItemPositions(IStream *pStream);
     void FireFolderViewEvent(DISPID dispid);
@@ -653,6 +659,13 @@ public:
     // *** IFolderFilterSite methods ***
     STDMETHOD(SetFilter)(IUnknown *punk) override;
 
+    STDMETHOD(GetClassID)(CLSID *pClassID) override;
+    STDMETHOD(Initialize)(PCIDLIST_ABSOLUTE pidl) override;
+    STDMETHOD(LoadHistory)(IStream *pStream, IBindCtx *pbc) override;
+    STDMETHOD(SaveHistory)(IStream *pStream) override;
+    STDMETHOD(SetPositionCookie)(DWORD dwPositioncookie) override;
+    STDMETHOD(GetPositionCookie)(DWORD *pdwPositioncookie) override;
+
     // Message handlers
     LRESULT OnShowWindow(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled);
     LRESULT OnGetDlgCode(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled);
@@ -758,6 +771,9 @@ public:
     COM_INTERFACE_ENTRY_IID(IID_IDropSource, IDropSource)
     COM_INTERFACE_ENTRY_IID(IID_IViewObject, IViewObject)
     COM_INTERFACE_ENTRY_IID(IID_IServiceProvider, IServiceProvider)
+    COM_INTERFACE_ENTRY_IID(IID_IPersistHistory, IPersistHistory)
+    COM_INTERFACE_ENTRY_IID(IID_IPersist, IPersistFolder)
+    COM_INTERFACE_ENTRY_IID(IID_IPersistFolder, IPersistFolder)
     END_COM_MAP()
 };
 
@@ -803,7 +819,9 @@ CDefView::CDefView() :
     m_ExplorerBackdropWindow(NULL),
     m_Destroyed(FALSE),
     m_FillListIsRefresh(FALSE),
-    m_FillListGeneration(0)
+    m_FillListGeneration(0),
+    m_ChangeAddedDuringFill(FALSE),
+    m_dwPositionCookie(0)
 {
     ZeroMemory(&m_FolderSettings, sizeof(m_FolderSettings));
     m_FolderSettings.ViewMode = FVM_TILE;
@@ -2328,6 +2346,8 @@ void CDefView::FinishFillList()
 
     ApplySavedItemPositions();
     ArrangeComputerView();
+    if (m_ListView.GetItemCount() > 0 && m_ListView.GetNextItem(-1, LVNI_FOCUSED) < 0)
+        m_ListView.SetItemState(0, LVIS_FOCUSED, LVIS_FOCUSED);
     FireFolderViewEvent(DISPID_FILELISTENUMDONE);
 }
 
@@ -2360,14 +2380,95 @@ void CDefView::ApplySavedItemPositions()
 {
     if (m_ListView && GetAutoArrange() == S_FALSE && !IsComputerTileView())
     {
+        const INT nCount = m_ListView.GetItemCount();
+        CComHeapPtr<BOOL> pbPlaced;
+        if (nCount > 0)
+            pbPlaced.AllocateBytes(nCount * sizeof(BOOL));
+        if (pbPlaced)
+            ZeroMemory(pbPlaced, nCount * sizeof(BOOL));
+
         for (int i = 0; i < m_SavedItemPositions.GetSize(); ++i)
         {
             int nItem = LV_FindItemByPidl(m_SavedItemPositions[i].pidl);
             if (nItem >= 0)
+            {
                 m_ListView.SetItemPosition(nItem, &m_SavedItemPositions[i].point);
+                if (pbPlaced && nItem < nCount)
+                    pbPlaced[nItem] = TRUE;
+            }
+        }
+
+        if (pbPlaced && m_SavedItemPositions.GetSize() > 0)
+        {
+            for (INT i = 0; i < nCount; ++i)
+            {
+                if (!pbPlaced[i])
+                    MoveItemToFreeSlot(i);
+            }
         }
     }
     ClearSavedItemPositions();
+}
+
+void CDefView::MoveItemToFreeSlot(INT nItem)
+{
+    if (nItem < 0 || !m_ListView || GetAutoArrange() == S_OK || IsComputerTileView())
+        return;
+    if (m_FolderSettings.ViewMode != FVM_ICON && m_FolderSettings.ViewMode != FVM_SMALLICON)
+        return;
+
+    const INT nCount = m_ListView.GetItemCount();
+    RECT rcIcon, rcClient;
+    POINT ptItem, ptOrigin;
+    if (!ListView_GetItemRect(m_ListView, nItem, &rcIcon, LVIR_ICON) ||
+        !ListView_GetItemPosition(m_ListView, nItem, &ptItem) ||
+        !ListView_GetOrigin(m_ListView, &ptOrigin) ||
+        !m_ListView.GetClientRect(&rcClient))
+    {
+        return;
+    }
+
+    const INT dx = rcIcon.left - ptItem.x, dy = rcIcon.top - ptItem.y;
+    const INT cxIcon = rcIcon.right - rcIcon.left, cyIcon = rcIcon.bottom - rcIcon.top;
+    auto IsFree = [&](POINT pt) -> BOOL
+    {
+        RECT rcSlot = { pt.x + dx, pt.y + dy, pt.x + dx + cxIcon, pt.y + dy + cyIcon };
+        for (INT i = 0; i < nCount; ++i)
+        {
+            RECT rcOther, rcHit;
+            if (i != nItem && ListView_GetItemRect(m_ListView, i, &rcOther, LVIR_ICON) &&
+                IntersectRect(&rcHit, &rcSlot, &rcOther))
+            {
+                return FALSE;
+            }
+        }
+        return TRUE;
+    };
+
+    if (IsFree(ptItem))
+        return;
+
+    RECT rcBounds;
+    if (!ListView_GetItemRect(m_ListView, nItem, &rcBounds, LVIR_BOUNDS))
+        return;
+    const INT cx = rcBounds.right - rcBounds.left, cy = rcBounds.bottom - rcBounds.top;
+    if (cx <= 0 || cy <= 0)
+        return;
+
+    const BOOL bAlignLeft = (m_ListView.GetStyle() & LVS_ALIGNMASK) == LVS_ALIGNLEFT;
+    const INT nLines = max(1, bAlignLeft ? (INT)(rcClient.bottom / cy) : (INT)(rcClient.right / cx));
+    for (INT nSlot = 0; nSlot <= nCount + nLines; ++nSlot)
+    {
+        const INT nMajor = nSlot / nLines, nMinor = nSlot % nLines;
+        POINT pt;
+        pt.x = (bAlignLeft ? nMajor : nMinor) * cx + (ptItem.x - rcBounds.left) - ptOrigin.x;
+        pt.y = (bAlignLeft ? nMinor : nMajor) * cy + (ptItem.y - rcBounds.top) - ptOrigin.y;
+        if (IsFree(pt))
+        {
+            m_ListView.SetItemPosition(nItem, &pt);
+            return;
+        }
+    }
 }
 
 HRESULT CDefView::LoadItemPositions(IStream *pStream)
@@ -2477,8 +2578,11 @@ HRESULT CDefView::ContinueFillList(ULONG Generation)
             break;
         }
 
-        if (IncludeObject(pidl) == S_OK && m_ListView)
+        if (IncludeObject(pidl) == S_OK && m_ListView &&
+            !(m_ChangeAddedDuringFill && LV_FindItemByPidl(pidl) >= 0))
+        {
             LV_AddItem(pidl);
+        }
         SHFree(pidl);
         ++BatchCount;
 
@@ -2561,6 +2665,7 @@ HRESULT CDefView::FillList(BOOL IsRefreshCommand)
         return E_UNEXPECTED;
 
     m_pEnumIDList = Enumerator;
+    m_ChangeAddedDuringFill = FALSE;
     if (!PostMessage(SHV_FILL_LIST, 0, m_FillListGeneration))
         return ContinueFillList(m_FillListGeneration);
     return S_OK;
@@ -4062,9 +4167,15 @@ LRESULT CDefView::OnChangeNotify(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &
             if (!child0)
                 break;
             if (LV_FindItemByPidl(child0) < 0)
-                LV_AddItem(child0);
+            {
+                if (m_pEnumIDList)
+                    m_ChangeAddedDuringFill = TRUE;
+                MoveItemToFreeSlot(LV_AddItem(child0));
+            }
             else
+            {
                 LV_UpdateItem(child0);
+            }
             break;
         case SHCNE_RMDIR:
         case SHCNE_DELETE:
@@ -4079,7 +4190,11 @@ LRESULT CDefView::OnChangeNotify(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &
             else if (child0)
                 LV_DeleteItem(child0);
             else if (child1)
-                LV_AddItem(child1);
+            {
+                if (m_pEnumIDList)
+                    m_ChangeAddedDuringFill = TRUE;
+                MoveItemToFreeSlot(LV_AddItem(child1));
+            }
             break;
         case SHCNE_UPDATEITEM:
             if (child0)
@@ -4593,6 +4708,69 @@ HRESULT CDefView::SaveViewState(IStream *pStream)
     return hr;
 }
 
+HRESULT STDMETHODCALLTYPE CDefView::GetClassID(CLSID *pClassID)
+{
+    if (!pClassID)
+        return E_POINTER;
+    return E_NOTIMPL;
+}
+
+HRESULT STDMETHODCALLTYPE CDefView::Initialize(PCIDLIST_ABSOLUTE pidl)
+{
+    if (!pidl || !m_pidlParent || !ILIsEqual(pidl, m_pidlParent))
+        return E_FAIL;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE CDefView::LoadHistory(IStream *pStream, IBindCtx *pbc)
+{
+    PERSISTCLASSICVIEWSTATE cvs;
+    ULONG cbRead = 0;
+
+    if (!pStream)
+        return E_INVALIDARG;
+    HRESULT hr = pStream->Read(&cvs, sizeof(cvs), &cbRead);
+    if (FAILED(hr))
+        return hr;
+    if (cbRead != sizeof(cvs) || cvs.Signature != cvs.SIG)
+        return HResultFromWin32(ERROR_INVALID_DATA);
+
+    SetCurrentViewMode(cvs.FolderSettings.ViewMode);
+    SetCurrentFolderFlags(cvs.VALIDFWF, cvs.FolderSettings.fFlags);
+    if (m_ListView)
+    {
+        hr = MapFolderColumnToListColumn(cvs.SortColId);
+        if (SUCCEEDED(hr))
+        {
+            m_sortInfo.ListColumn = hr;
+            m_sortInfo.Direction = cvs.SortDir;
+            _Sort(-1);
+        }
+    }
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE CDefView::SaveHistory(IStream *pStream)
+{
+    if (!pStream)
+        return E_INVALIDARG;
+    return SaveViewState(pStream);
+}
+
+HRESULT STDMETHODCALLTYPE CDefView::SetPositionCookie(DWORD dwPositioncookie)
+{
+    m_dwPositionCookie = dwPositioncookie;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE CDefView::GetPositionCookie(DWORD *pdwPositioncookie)
+{
+    if (!pdwPositioncookie)
+        return E_POINTER;
+    *pdwPositioncookie = m_dwPositionCookie;
+    return S_OK;
+}
+
 HRESULT WINAPI CDefView::SaveViewState()
 {
     if (!(m_FolderSettings.fFlags & FWF_NOBROWSERVIEWSTATE))
@@ -4708,6 +4886,10 @@ HRESULT WINAPI CDefView::GetItemObject(UINT uItem, REFIID riid, LPVOID *ppvOut)
                 }
                 hr = m_pShellFolderViewDual->QueryInterface(riid, ppvOut);
             }
+            else if (IsEqualIID(riid, IID_IPersistHistory))
+            {
+                hr = QueryInterface(riid, ppvOut);
+            }
             break;
         case SVGIO_SELECTION:
             GetSelections();
@@ -4752,8 +4934,10 @@ HRESULT STDMETHODCALLTYPE CDefView::SetCurrentViewMode(UINT ViewMode)
     TRACE("(%p)->(%u), stub\n", this, ViewMode);
 
     /* It's not redundant to check FVM_AUTO because it's a (UINT)-1 */
-    if (((INT)ViewMode < FVM_FIRST || (INT)ViewMode > FVM_LAST) && ((INT)ViewMode != FVM_AUTO))
-        return E_INVALIDARG;
+    if ((INT)ViewMode == FVM_AUTO)
+        ViewMode = GetDefaultViewMode();
+    if ((INT)ViewMode < FVM_FIRST || (INT)ViewMode > FVM_LAST)
+        return S_OK;
 
     /* Windows before Vista uses LVM_SETVIEW and possibly
        LVM_SETEXTENDEDLISTVIEWSTYLE to set the style of the listview,

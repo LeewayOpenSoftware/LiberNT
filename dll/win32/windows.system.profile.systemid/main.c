@@ -19,6 +19,9 @@
 
 #include "initguid.h"
 #include "private.h"
+#ifdef __REACTOS__
+#include "robuffer.h"
+#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(systemid);
 
@@ -121,6 +124,9 @@ struct system_identification_info
 
     IBuffer *system_id;
     SystemIdentificationSource system_id_source;
+#ifdef __REACTOS__
+    IBufferByteAccess *system_id_bytes;
+#endif
 };
 
 static inline struct system_identification_info *impl_from_ISystemIdentificationInfo( ISystemIdentificationInfo *iface )
@@ -165,6 +171,9 @@ static ULONG WINAPI system_identification_info_Release( ISystemIdentificationInf
 
     if (!ref)
     {
+#ifdef __REACTOS__
+        if (impl->system_id_bytes) IBufferByteAccess_Release( impl->system_id_bytes );
+#endif
         IBuffer_Release( impl->system_id );
         free( impl );
     }
@@ -268,6 +277,14 @@ static HRESULT WINAPI system_id_statics_GetSystemIdForPublisher( ISystemIdentifi
         free( impl );
         return hr;
     }
+#ifdef __REACTOS__
+    if (FAILED(hr = IBuffer_QueryInterface( impl->system_id, &IID_IBufferByteAccess, (void **)&impl->system_id_bytes )))
+    {
+        IBuffer_Release( impl->system_id );
+        free( impl );
+        return hr;
+    }
+#endif
 
     *result = &impl->ISystemIdentificationInfo_iface;
     TRACE( "created ISystemIdentificationInfo %p.\n", *result );

@@ -11,7 +11,40 @@
 #define LX_EM_AARCH64     183
 #define LX_HWCAP_FP       (1ULL << 0)
 #define LX_HWCAP_ASIMD    (1ULL << 1)
+#define LX_HWCAP_AES      (1ULL << 3)
+#define LX_HWCAP_PMULL    (1ULL << 4)
+#define LX_HWCAP_SHA1     (1ULL << 5)
+#define LX_HWCAP_SHA2     (1ULL << 6)
+#define LX_HWCAP_CRC32    (1ULL << 7)
+#define LX_HWCAP_ATOMICS  (1ULL << 8)
+#define LX_HWCAP_FPHP     (1ULL << 9)
+#define LX_HWCAP_ASIMDHP  (1ULL << 10)
 #define LX_HWCAP_CPUID    (1ULL << 11)
+#define LX_HWCAP_ASIMDRDM (1ULL << 12)
+#define LX_HWCAP_JSCVT    (1ULL << 13)
+#define LX_HWCAP_FCMA     (1ULL << 14)
+#define LX_HWCAP_LRCPC    (1ULL << 15)
+#define LX_HWCAP_DCPOP    (1ULL << 16)
+#define LX_HWCAP_SHA3     (1ULL << 17)
+#define LX_HWCAP_SM3      (1ULL << 18)
+#define LX_HWCAP_SM4      (1ULL << 19)
+#define LX_HWCAP_ASIMDDP  (1ULL << 20)
+#define LX_HWCAP_SHA512   (1ULL << 21)
+#define LX_HWCAP_ASIMDFHM (1ULL << 23)
+#define LX_HWCAP_DIT      (1ULL << 24)
+#define LX_HWCAP_USCAT    (1ULL << 25)
+#define LX_HWCAP_ILRCPC   (1ULL << 26)
+#define LX_HWCAP_FLAGM    (1ULL << 27)
+#define LX_HWCAP_SSBS     (1ULL << 28)
+#define LX_HWCAP_SB       (1ULL << 29)
+#define LX_HWCAP2_DCPODP  (1ULL << 0)
+#define LX_HWCAP2_FLAGM2  (1ULL << 7)
+#define LX_HWCAP2_FRINT   (1ULL << 8)
+#define LX_HWCAP2_I8MM    (1ULL << 13)
+#define LX_HWCAP2_BF16    (1ULL << 14)
+#define LX_HWCAP2_DGH     (1ULL << 15)
+#define LX_HWCAP2_RNG     (1ULL << 16)
+#define LX_ID_FIELD(Value, Shift) ((ULONG)(((Value) >> (Shift)) & 0xF))
 
 typedef struct _LX_ARM64_ID_REGISTER
 {
@@ -122,10 +155,87 @@ LxArchElfMachine(VOID)
     return LX_EM_AARCH64;
 }
 
+static const PCSTR LxArm64HwcapNames[] =
+{
+    "fp", "asimd", "evtstrm", "aes", "pmull", "sha1", "sha2", "crc32", "atomics", "fphp", "asimdhp", "cpuid",
+    "asimdrdm", "jscvt", "fcma", "lrcpc", "dcpop", "sha3", "sm3", "sm4", "asimddp", "sha512", "sve", "asimdfhm",
+    "dit", "uscat", "ilrcpc", "flagm", "ssbs", "sb", "paca", "pacg"
+};
+
+static const PCSTR LxArm64Hwcap2Names[] =
+{
+    "dcpodp", "sve2", "sveaes", "svepmull", "svebitperm", "svesha3", "svesm4", "flagm2", "frint", "svei8mm",
+    "svef32mm", "svef64mm", "svebf16", "i8mm", "bf16", "dgh", "rng"
+};
+
+static
+VOID
+LxArm64Hwcaps(
+    _Out_ PULONG64 Hwcap,
+    _Out_ PULONG64 Hwcap2)
+{
+    ULONG64 Pfr0 = LxArm64ReadIdRegister(4, 0), Pfr1 = LxArm64ReadIdRegister(4, 1);
+    ULONG64 Isar0 = LxArm64ReadIdRegister(6, 0), Isar1 = LxArm64ReadIdRegister(6, 1);
+    ULONG64 Mmfr2 = LxArm64ReadIdRegister(7, 2);
+    ULONG Fp = LX_ID_FIELD(Pfr0, 16), Simd = LX_ID_FIELD(Pfr0, 20), Aes = LX_ID_FIELD(Isar0, 4);
+    ULONG Sha2 = LX_ID_FIELD(Isar0, 12), Ts = LX_ID_FIELD(Isar0, 52), Lrcpc = LX_ID_FIELD(Isar1, 20);
+    ULONG Dpb = LX_ID_FIELD(Isar1, 0);
+    ULONG64 Value = LX_HWCAP_CPUID, Value2 = 0;
+
+    if (Fp != 0xF)
+        Value |= LX_HWCAP_FP | ((Fp == 1) ? LX_HWCAP_FPHP : 0);
+    if (Simd != 0xF)
+        Value |= LX_HWCAP_ASIMD | ((Simd == 1) ? LX_HWCAP_ASIMDHP : 0);
+    Value |= (Aes >= 1) ? LX_HWCAP_AES : 0;
+    Value |= (Aes >= 2) ? LX_HWCAP_PMULL : 0;
+    Value |= (LX_ID_FIELD(Isar0, 8) >= 1) ? LX_HWCAP_SHA1 : 0;
+    Value |= (Sha2 >= 1) ? LX_HWCAP_SHA2 : 0;
+    Value |= (Sha2 >= 2) ? LX_HWCAP_SHA512 : 0;
+    Value |= (LX_ID_FIELD(Isar0, 16) >= 1) ? LX_HWCAP_CRC32 : 0;
+    Value |= (LX_ID_FIELD(Isar0, 20) >= 2) ? LX_HWCAP_ATOMICS : 0;
+    Value |= (LX_ID_FIELD(Isar0, 28) >= 1) ? LX_HWCAP_ASIMDRDM : 0;
+    Value |= (LX_ID_FIELD(Isar0, 32) >= 1) ? LX_HWCAP_SHA3 : 0;
+    Value |= (LX_ID_FIELD(Isar0, 36) >= 1) ? LX_HWCAP_SM3 : 0;
+    Value |= (LX_ID_FIELD(Isar0, 40) >= 1) ? LX_HWCAP_SM4 : 0;
+    Value |= (LX_ID_FIELD(Isar0, 44) >= 1) ? LX_HWCAP_ASIMDDP : 0;
+    Value |= (LX_ID_FIELD(Isar0, 48) >= 1) ? LX_HWCAP_ASIMDFHM : 0;
+    Value |= (Ts >= 1) ? LX_HWCAP_FLAGM : 0;
+    Value |= (LX_ID_FIELD(Isar1, 12) >= 1) ? LX_HWCAP_JSCVT : 0;
+    Value |= (LX_ID_FIELD(Isar1, 16) >= 1) ? LX_HWCAP_FCMA : 0;
+    Value |= (Lrcpc >= 1) ? LX_HWCAP_LRCPC : 0;
+    Value |= (Lrcpc >= 2) ? LX_HWCAP_ILRCPC : 0;
+    Value |= (Dpb >= 1) ? LX_HWCAP_DCPOP : 0;
+    Value |= (LX_ID_FIELD(Isar1, 36) >= 1) ? LX_HWCAP_SB : 0;
+    Value |= (LX_ID_FIELD(Pfr0, 48) >= 1) ? LX_HWCAP_DIT : 0;
+    Value |= (LX_ID_FIELD(Pfr1, 4) >= 2) ? LX_HWCAP_SSBS : 0;
+    Value |= (LX_ID_FIELD(Mmfr2, 32) >= 1) ? LX_HWCAP_USCAT : 0;
+    Value2 |= (Dpb >= 2) ? LX_HWCAP2_DCPODP : 0;
+    Value2 |= (Ts >= 2) ? LX_HWCAP2_FLAGM2 : 0;
+    Value2 |= (LX_ID_FIELD(Isar1, 32) >= 1) ? LX_HWCAP2_FRINT : 0;
+    Value2 |= (LX_ID_FIELD(Isar1, 52) >= 1) ? LX_HWCAP2_I8MM : 0;
+    Value2 |= (LX_ID_FIELD(Isar1, 44) >= 1) ? LX_HWCAP2_BF16 : 0;
+    Value2 |= (LX_ID_FIELD(Isar1, 48) >= 1) ? LX_HWCAP2_DGH : 0;
+    Value2 |= (LX_ID_FIELD(Isar0, 60) >= 1) ? LX_HWCAP2_RNG : 0;
+    *Hwcap = Value;
+    *Hwcap2 = Value2;
+}
+
 ULONG64
 LxArchHwcap(VOID)
 {
-    return LX_HWCAP_FP | LX_HWCAP_ASIMD | LX_HWCAP_CPUID;
+    ULONG64 Hwcap, Hwcap2;
+
+    LxArm64Hwcaps(&Hwcap, &Hwcap2);
+    return Hwcap;
+}
+
+ULONG64
+LxArchHwcap2(VOID)
+{
+    ULONG64 Hwcap, Hwcap2;
+
+    LxArm64Hwcaps(&Hwcap, &Hwcap2);
+    return Hwcap2;
 }
 
 PCSTR
@@ -137,7 +247,41 @@ LxArchPlatform(VOID)
 PCSTR
 LxArchCpuinfo(VOID)
 {
-    return "Features\t: fp asimd\nCPU architecture: 8\n";
+    static CHAR Text[1024];
+    static volatile LONG Ready;
+    ULONG64 Hwcap, Hwcap2, Midr, Frequency;
+    SIZE_T Used;
+    ULONG Bit;
+
+    if (ReadAcquire(&Ready))
+        return Text;
+    LxArm64Hwcaps(&Hwcap, &Hwcap2);
+    Midr = ARM64_READ_SYSREG(MIDR_EL1);
+    Frequency = ARM64_READ_SYSREG(CNTFRQ_EL0) / 5000;
+    RtlStringCbPrintfA(Text, sizeof(Text), "BogoMIPS\t: %llu.%02llu\nFeatures\t:", Frequency / 100, Frequency % 100);
+    for (Bit = 0; Bit < RTL_NUMBER_OF(LxArm64HwcapNames); Bit++)
+    {
+        if (Hwcap & (1ULL << Bit))
+        {
+            RtlStringCbCatA(Text, sizeof(Text), " ");
+            RtlStringCbCatA(Text, sizeof(Text), LxArm64HwcapNames[Bit]);
+        }
+    }
+    for (Bit = 0; Bit < RTL_NUMBER_OF(LxArm64Hwcap2Names); Bit++)
+    {
+        if (Hwcap2 & (1ULL << Bit))
+        {
+            RtlStringCbCatA(Text, sizeof(Text), " ");
+            RtlStringCbCatA(Text, sizeof(Text), LxArm64Hwcap2Names[Bit]);
+        }
+    }
+    Used = strlen(Text);
+    RtlStringCbPrintfA(Text + Used, sizeof(Text) - Used,
+                       "\nCPU implementer\t: 0x%02llx\nCPU architecture: 8\nCPU variant\t: 0x%llx\n"
+                       "CPU part\t: 0x%03llx\nCPU revision\t: %llu\n",
+                       (Midr >> 24) & 0xFF, (Midr >> 20) & 0xF, (Midr >> 4) & 0xFFF, Midr & 0xF);
+    WriteRelease(&Ready, 1);
+    return Text;
 }
 
 PCSTR

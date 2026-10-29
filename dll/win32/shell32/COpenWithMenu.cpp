@@ -1433,11 +1433,12 @@ HRESULT WINAPI COpenWithMenu::QueryContextMenu(
     ZeroMemory(&mii, sizeof(mii));
     mii.cbSize = sizeof(mii);
     mii.fMask = MIIM_ID | MIIM_TYPE | MIIM_STATE;
+    UINT cIds = m_idCmdLast - m_idCmdFirst + 1;
     if (m_hSubMenu)
     {
         mii.fMask |= MIIM_SUBMENU;
         mii.hSubMenu = m_hSubMenu;
-        mii.wID = -1;
+        mii.wID = m_idCmdFirst + cIds++;
     }
     else
         mii.wID = m_idCmdLast;
@@ -1454,7 +1455,7 @@ HRESULT WINAPI COpenWithMenu::QueryContextMenu(
     if (!InsertMenuItemW(hMenu, indexMenu, TRUE, &mii))
         return E_FAIL;
 
-    return MAKE_HRESULT(SEVERITY_SUCCESS, 0, m_idCmdLast - m_idCmdFirst + 1);
+    return MAKE_HRESULT(SEVERITY_SUCCESS, 0, cIds);
 }
 
 HRESULT WINAPI

@@ -32,7 +32,8 @@ IntEngMaskBlt(
     _In_ POINTL *pptlMask,
     _In_ BRUSHOBJ *pbo,
     _In_ POINTL *pptlBrushOrg,
-    _In_ BOOL bSubpixel);
+    _In_ BOOL bSubpixel,
+    _In_ BOOL bStandardSmoothing);
 
 VOID
 FASTCALL

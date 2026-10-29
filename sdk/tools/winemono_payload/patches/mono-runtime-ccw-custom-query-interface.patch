@@ -1,0 +1,47 @@
+--- a/mono/metadata/cominterop.c
++++ b/mono/metadata/cominterop.c
+@@ -177,6 +177,7 @@
+ static GENERATE_GET_CLASS_WITH_CACHE (decimal, "System", "Decimal");
+ 
+ static GENERATE_GET_CLASS_WITH_CACHE (interface_type_attribute, "System.Runtime.InteropServices", "InterfaceTypeAttribute")
++static GENERATE_GET_CLASS_WITH_CACHE (icustom_query_interface, "System.Runtime.InteropServices", "ICustomQueryInterface")
+ static GENERATE_GET_CLASS_WITH_CACHE (com_visible_attribute, "System.Runtime.InteropServices", "ComVisibleAttribute")
+ static GENERATE_GET_CLASS_WITH_CACHE (com_default_interface_attribute, "System.Runtime.InteropServices", "ComDefaultInterfaceAttribute")
+ static GENERATE_GET_CLASS_WITH_CACHE (class_interface_attribute, "System.Runtime.InteropServices", "ClassInterfaceAttribute")
+@@ -3462,6 +3463,36 @@
+ 		return MONO_S_OK;
+ 	}
+ 
++	if (mono_class_is_assignable_from_internal (mono_class_get_icustom_query_interface_class (), klass)) {
++		MonoMethod *get_interface = mono_class_get_method_from_name_checked (mono_class_get_icustom_query_interface_class (), "GetInterface", 2, 0, error);
++		mono_error_assert_ok (error);
++		get_interface = mono_object_get_virtual_method_internal (MONO_HANDLE_RAW (object), get_interface);
++		if (get_interface) {
++			guint8 iid [16];
++			gpointer custom_ppv = NULL;
++			gpointer params [2];
++			MonoObject *custom_result;
++
++			memcpy (iid, riid, sizeof (iid));
++			params [0] = iid;
++			params [1] = &custom_ppv;
++			custom_result = mono_runtime_invoke_checked (get_interface, MONO_HANDLE_RAW (object), params, error);
++			if (!is_ok (error)) {
++				mono_error_cleanup (error);
++				return MONO_E_NOINTERFACE;
++			}
++			switch (*(gint32 *)mono_object_unbox_internal (custom_result)) {
++			case 0:
++				*ppv = custom_ppv;
++				return custom_ppv ? MONO_S_OK : MONO_E_NOINTERFACE;
++			case 2:
++				return MONO_E_NOINTERFACE;
++			default:
++				break;
++			}
++		}
++	}
++
+ 	/* handle IDispatch special */
+ 	if (cominterop_class_guid_equal (riid, mono_class_get_idispatch_class ())) {
+ 		if (!cominterop_can_support_dispatch (klass))

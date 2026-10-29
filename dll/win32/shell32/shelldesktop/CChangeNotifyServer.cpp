@@ -23,6 +23,17 @@ struct CWatchItem
     CDirectoryWatcher *pDirWatch; // for filesystem notification
 };
 
+struct CRecentEvent
+{
+    LONG wEventId;
+    LPITEMIDLIST pidl1;
+    LPITEMIDLIST pidl2;
+    DWORD dwTick;
+};
+
+#define RECENT_EVENT_LIFETIME 1000
+#define RECENT_EVENT_MAX 64
+
 //////////////////////////////////////////////////////////////////////////////
 // CChangeNotifyServer
 //
@@ -74,6 +85,7 @@ public:
 private:
     UINT m_nNextRegID;
     CSimpleArray<CWatchItem*> m_items;
+    CSimpleArray<CRecentEvent> m_recent;
 
     BOOL AddItem(CWatchItem *pItem);
     BOOL RemoveItemsByRegID(UINT nRegID);
@@ -84,6 +96,8 @@ private:
     UINT GetNextRegID();
     BOOL DeliverNotification(HANDLE hTicket, DWORD dwOwnerPID);
     BOOL ShouldNotify(LPDELITICKET pTicket, LPREGENTRY pRegEntry);
+    BOOL IsCrossSourceDuplicate(LPDELITICKET pTicket);
+    void RemoveRecentEvent(INT i);
 };
 
 CChangeNotifyServer::CChangeNotifyServer()
@@ -93,6 +107,62 @@ CChangeNotifyServer::CChangeNotifyServer()
 
 CChangeNotifyServer::~CChangeNotifyServer()
 {
+    while (m_recent.GetSize() > 0)
+        RemoveRecentEvent(0);
+}
+
+void CChangeNotifyServer::RemoveRecentEvent(INT i)
+{
+    ILFree(m_recent[i].pidl1);
+    ILFree(m_recent[i].pidl2);
+    m_recent.RemoveAt(i);
+}
+
+static BOOL IsSamePidl(LPCITEMIDLIST pidlA, LPCITEMIDLIST pidlB)
+{
+    if (!pidlA || !pidlB)
+        return pidlA == pidlB;
+    return ILIsEqual(pidlA, pidlB);
+}
+
+BOOL CChangeNotifyServer::IsCrossSourceDuplicate(LPDELITICKET pTicket)
+{
+    LPITEMIDLIST pidl1 = NULL, pidl2 = NULL;
+    if (pTicket->ibOffset1)
+        pidl1 = (LPITEMIDLIST)((LPBYTE)pTicket + pTicket->ibOffset1);
+    if (pTicket->ibOffset2)
+        pidl2 = (LPITEMIDLIST)((LPBYTE)pTicket + pTicket->ibOffset2);
+
+    for (INT i = m_recent.GetSize() - 1; i >= 0; --i)
+    {
+        if (pTicket->dwTick - m_recent[i].dwTick > RECENT_EVENT_LIFETIME)
+            RemoveRecentEvent(i);
+    }
+
+    for (INT i = 0; i < m_recent.GetSize(); ++i)
+    {
+        if ((m_recent[i].wEventId ^ pTicket->wEventId) == SHCNE_INTERRUPT &&
+            IsSamePidl(m_recent[i].pidl1, pidl1) && IsSamePidl(m_recent[i].pidl2, pidl2))
+        {
+            RemoveRecentEvent(i);
+            return TRUE;
+        }
+    }
+
+    if (m_recent.GetSize() >= RECENT_EVENT_MAX)
+        RemoveRecentEvent(0);
+
+    CRecentEvent recent = { pTicket->wEventId, NULL, NULL, pTicket->dwTick };
+    if (pidl1)
+        recent.pidl1 = ILClone(pidl1);
+    if (pidl2)
+        recent.pidl2 = ILClone(pidl2);
+    if ((pidl1 && !recent.pidl1) || (pidl2 && !recent.pidl2) || !m_recent.Add(recent))
+    {
+        ILFree(recent.pidl1);
+        ILFree(recent.pidl2);
+    }
+    return FALSE;
 }
 
 BOOL CChangeNotifyServer::AddItem(CWatchItem *pItem)
@@ -365,6 +435,8 @@ BOOL CChangeNotifyServer::DeliverNotification(HANDLE hTicket, DWORD dwOwnerPID)
         return FALSE;
     }
 
+    BOOL bDuplicate = IsCrossSourceDuplicate(pTicket);
+
     // for all items
     for (INT i = 0; i < m_items.GetSize(); ++i)
     {
@@ -375,6 +447,13 @@ BOOL CChangeNotifyServer::DeliverNotification(HANDLE hTicket, DWORD dwOwnerPID)
         if (pRegEntry == NULL || pRegEntry->dwMagic != REGENTRY_MAGIC)
         {
             ERR("pRegEntry is invalid\n");
+            continue;
+        }
+
+        if (bDuplicate &&
+            (pRegEntry->fSources & (SHCNRF_ShellLevel | SHCNRF_InterruptLevel)) ==
+            (SHCNRF_ShellLevel | SHCNRF_InterruptLevel))
+        {
             continue;
         }
 

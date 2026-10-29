@@ -800,7 +800,7 @@ co_CallLowLevelKeyboardHook(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjec
     KbdHookData.flags = 0;
     if (dwFlags & KEYEVENTF_EXTENDEDKEY)
         KbdHookData.flags |= LLKHF_EXTENDED;
-    if (bAltDown)
+    if (bAltDown && !bCtrlDown)
         KbdHookData.flags |= LLKHF_ALTDOWN;
     if (dwFlags & KEYEVENTF_KEYUP)
         KbdHookData.flags |= LLKHF_UP;
@@ -809,13 +809,10 @@ co_CallLowLevelKeyboardHook(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjec
     KbdHookData.time = dwTime;
     KbdHookData.dwExtraInfo = dwExtraInfo;
 
-    /* Note: it doesnt support WM_SYSKEYUP */
-    if (dwFlags & KEYEVENTF_KEYUP)
-        uMsg = WM_KEYUP;
-    else if (bAltDown && !bCtrlDown)
-        uMsg = WM_SYSKEYDOWN;
+    if (bAltDown && !bCtrlDown)
+        uMsg = (dwFlags & KEYEVENTF_KEYUP) ? WM_SYSKEYUP : WM_SYSKEYDOWN;
     else
-        uMsg = WM_KEYDOWN;
+        uMsg = (dwFlags & KEYEVENTF_KEYUP) ? WM_KEYUP : WM_KEYDOWN;
 
     return co_HOOK_CallHooks(WH_KEYBOARD_LL, HC_ACTION, uMsg, (LPARAM)&KbdHookData);
 }
@@ -1200,7 +1197,7 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
     PTHREADINFO pti;
     BOOL bExt = (dwFlags & KEYEVENTF_EXTENDEDKEY) ? TRUE : FALSE;
     BOOL bIsDown = (dwFlags & KEYEVENTF_KEYUP) ? FALSE : TRUE;
-    BOOL bPacket = (dwFlags & KEYEVENTF_UNICODE) ? TRUE : FALSE;
+    BOOL bPacket = ((dwFlags & KEYEVENTF_UNICODE) && wVk == VK_PACKET) ? TRUE : FALSE;
     BOOL bWasSimpleDown = FALSE, bPostMsg = TRUE, bIsSimpleDown;
     MSG Msg;
     static BOOL bMenuDownRecently = FALSE;
@@ -1240,7 +1237,8 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
     }
 
     /* Call WH_KEYBOARD_LL hook */
-    if (co_CallLowLevelKeyboardHook(wVk, wScanCode, dwFlags, bInjected, dwTime, dwExtraInfo, wSimpleVk, bIsSimpleDown))
+    if (co_CallLowLevelKeyboardHook((wVk == VK_SHIFT || wVk == VK_CONTROL || wVk == VK_MENU) ? IntFixVk(wVk, wVk != VK_SHIFT && bExt) : wVk,
+                                    wScanCode, dwFlags, bInjected, dwTime, dwExtraInfo, wSimpleVk, bIsSimpleDown))
     {
         ERR("Kbd msg dropped by WH_KEYBOARD_LL hook\n");
         bPostMsg = FALSE;
@@ -1272,7 +1270,7 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
         (IS_KEY_DOWN(gafAsyncKeyState, VK_MENU) &&
         !IS_KEY_DOWN(gafAsyncKeyState, VK_CONTROL)) ||
          // See MSDN WM_SYSKEYDOWN/UP fixes last wine Win test_keyboard_input.
-        (pFocusQueue && !pFocusQueue->spwndFocus) )
+        (pFocusQueue && !pFocusQueue->spwndFocus && pFocusQueue->spwndActive) )
     {
         bMenuDownRecently = FALSE; // reset
         if (bIsDown)
@@ -1295,7 +1293,7 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
             Msg.message = WM_KEYUP;
     }
 
-    if (!bPacket)
+    if (!(dwFlags & KEYEVENTF_UNICODE))
         RawInputProcessKeyboard(wScanCode, wSimpleVk, dwFlags, Msg.message, dwExtraInfo, bInjected, dwTime);
 
     /* Update async state of not simplified vk here.
@@ -1430,6 +1428,7 @@ BOOL NTAPI
 UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
 {
     WORD wScanCode, wVk;
+    DWORD dwFlags;
     PKL pKl = NULL;
     PKBDTABLES pKbdTbl;
     PUSER_MESSAGE_QUEUE pFocusQueue;
@@ -1458,8 +1457,14 @@ UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
 
     /* Note: wScan field is always used */
     wScanCode = pKbdInput->wScan;
+    dwFlags = pKbdInput->dwFlags;
 
-    if (pKbdInput->dwFlags & KEYEVENTF_UNICODE)
+    if ((dwFlags & KEYEVENTF_UNICODE) && pKbdInput->wVk != 0)
+    {
+        wScanCode &= 0xFF;
+        wVk = pKbdInput->wVk & 0xFF;
+    }
+    else if (dwFlags & KEYEVENTF_UNICODE)
     {
         /* Generate WM_KEYDOWN msg with wParam == VK_PACKET and
            high order word of lParam == pKbdInput->wScan */
@@ -1474,10 +1479,14 @@ UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
             wVk = IntVscToVk(wScanCode | (bExt ? 0xE000 : 0), pKbdTbl);
             if (!wVk) /* use 0xFF if vsc is invalid */
                 wVk = 0xFF;
+            else if ((wVk & KBDNUMPAD) && IS_KEY_LOCKED(gafAsyncKeyState, VK_NUMLOCK))
+                wVk = IntTranslateNumpadKey(wVk & 0xFF);
         }
         else
         {
             wVk = pKbdInput->wVk;
+            if (bInjected && (wVk & 0xFF) == VK_RSHIFT)
+                dwFlags |= KEYEVENTF_EXTENDEDKEY;
         }
 
         /* Remove all virtual key flags (KBDEXT, KBDMULTIVK, KBDSPECIAL, KBDNUMPAD) */
@@ -1499,7 +1508,7 @@ UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
     }
 
     /* Finally process this key */
-    return ProcessKeyEvent(wVk, wScanCode, pKbdInput->dwFlags, bInjected, dwTime, pKbdInput->dwExtraInfo);
+    return ProcessKeyEvent(wVk, wScanCode, dwFlags, bInjected, dwTime, pKbdInput->dwExtraInfo);
 }
 
 /*

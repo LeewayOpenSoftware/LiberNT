@@ -29,6 +29,7 @@ static NTSTATUS
 FindEntryInNode(
     _In_ PVolume DiskVolume,
     _In_ PUNICODE_STRING FileName,
+    _In_ BOOLEAN CaseSensitive,
     _In_ PIndexNodeHeader Header,
     _In_ ULONG HeaderBytes,
     _Out_ PULONGLONG FileReference,
@@ -82,9 +83,10 @@ FindEntryInNode(
         IndexedNameString = NtfsMakeCountedUnicodeString(
             IndexedName->Name,
             IndexedName->NameLength * sizeof(WCHAR));
-        Status = DiskVolume->CompareFileNames(
+        Status = DiskVolume->CollateFileNames(
             FileName,
             &IndexedNameString,
+            CaseSensitive,
             &CompareResult);
         if (!NT_SUCCESS(Status))
             return Status;
@@ -140,6 +142,7 @@ Directory::FindNextFile(_In_  PFileRecord File,
 
     if (!File || !(File->Header->Flags & FR_IS_DIRECTORY))
         return STATUS_NOT_FOUND;
+    CaseSensitive = File->IsCaseSensitiveDirectory();
     DirectoryReference = MakeFileReference(File->Header);
 
     ElementLength = PathElementLength(FileName);
@@ -176,6 +179,7 @@ Directory::FindNextFile(_In_  PFileRecord File,
     Status = FindEntryInNode(
         DiskVolume,
         &FileNameString,
+        CaseSensitive,
         &IndexRoot->Header,
         IndexRootAttribute->Resident.DataLength -
             FIELD_OFFSET(IndexRootEx, Header),
@@ -324,6 +328,7 @@ Directory::FindNextFile(_In_  PFileRecord File,
         Status = FindEntryInNode(
             DiskVolume,
             &FileNameString,
+            CaseSensitive,
             &NodeBuffer->IndexHeader,
             IndexRecordSize - FIELD_OFFSET(IndexBuffer, IndexHeader),
             FileReference,

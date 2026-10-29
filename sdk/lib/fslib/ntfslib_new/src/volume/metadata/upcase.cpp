@@ -126,3 +126,26 @@ Volume::CompareFileNames(_In_  PUNICODE_STRING Left,
         : (LeftLength < RightLength ? -1 : 1);
     return STATUS_SUCCESS;
 }
+
+NTSTATUS
+Volume::CollateFileNames(_In_  PUNICODE_STRING Left,
+                         _In_  PUNICODE_STRING Right,
+                         _In_  BOOLEAN CaseSensitive,
+                         _Out_ LONG* Result)
+{
+    NTSTATUS Status;
+
+    Status = CompareFileNames(Left, Right, Result);
+    if (!NT_SUCCESS(Status) || *Result != 0 || !CaseSensitive)
+        return Status;
+
+    for (ULONG Index = 0; Index < Left->Length / sizeof(WCHAR); Index++)
+    {
+        if (Left->Buffer[Index] != Right->Buffer[Index])
+        {
+            *Result = Left->Buffer[Index] < Right->Buffer[Index] ? -1 : 1;
+            break;
+        }
+    }
+    return STATUS_SUCCESS;
+}

@@ -184,8 +184,8 @@ typedef struct _NP_EVENT_BUFFER
 typedef struct _NP_ROOT_DCB_CCB
 {
     NODE_TYPE_CODE NodeType;
-    PVOID Unknown;
-    ULONG Unknown2;
+    PUNICODE_STRING QueryTemplate;
+    ULONG IndexOfLastCcbReturned;
 } NP_ROOT_DCB_CCB, *PNP_ROOT_DCB_FCB;
 
 /* The header that both FCB and DCB share */
@@ -696,6 +696,11 @@ NTSTATUS
 NTAPI
 NpFsdSetSecurityInfo(IN PDEVICE_OBJECT DeviceObject,
                      IN PIRP Irp);
+
+NTSTATUS
+NTAPI
+NpFsdDirectoryControl(IN PDEVICE_OBJECT DeviceObject,
+                      IN PIRP Irp);
 
 NTSTATUS
 NTAPI

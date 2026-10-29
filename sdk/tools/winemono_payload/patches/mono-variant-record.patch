@@ -1,0 +1,146 @@
+diff --git a/mcs/class/corlib/System/Variant.cs b/mcs/class/corlib/System/Variant.cs
+index 0fe1b53cf8..84b55ac409 100644
+--- a/mcs/class/corlib/System/Variant.cs
++++ b/mcs/class/corlib/System/Variant.cs
+@@ -27,6 +27,8 @@
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
++using System.Collections.Generic;
++using System.Reflection;
+ using System.Runtime.CompilerServices;
+ using System.Runtime.InteropServices;
+ 
+@@ -327,6 +329,19 @@ public void SetValue(object obj) {
+ 				pdispVal = SafeArrayFromArrayInternal((Array)obj, out tmp);
+ 				vt = (short)(tmp | (int)VarEnum.VT_ARRAY);
+ 			}
++#if !DISABLE_COM
++			else if (t.IsValueType && t != typeof (IntPtr) && t != typeof (UIntPtr))
++			{
++				IntPtr info = GetRecordInfoInternal (t);
++				if (info == IntPtr.Zero)
++					throw new ArgumentException ("The specified record cannot be mapped to a managed value class.");
++				IntPtr data = Marshal.AllocCoTaskMem (Marshal.SizeOf (t));
++				Marshal.StructureToPtr (obj, data, false);
++				bRecord.pvRecord = data;
++				bRecord.pRecInfo = info;
++				vt = (short)VarEnum.VT_RECORD;
++			}
++#endif
+ 			else
+ 			{
+ #if !FEATURE_COMINTEROP
+@@ -498,8 +513,15 @@ public object GetValue() {
+ 			case VarEnum.VT_DECIMAL:
+ 				obj = new Decimal((int)decVal.Lo64, (int)(decVal.Lo64 >> 32), decVal.Hi32, decVal.sign != 0, decVal.scale);
+ 				break;
++#if !DISABLE_COM
++			case VarEnum.VT_RECORD:
++			case VarEnum.VT_RECORD | VarEnum.VT_BYREF:
++				obj = GetRecordValue (bRecord.pvRecord, bRecord.pRecInfo);
++				break;
++#else
+ 			case VarEnum.VT_RECORD:
+ 				throw new NotImplementedException("VT_RECORD not implemented");
++#endif
+ #if FEATURE_COMINTEROP
+ 			case VarEnum.VT_UNKNOWN:
+ 			case VarEnum.VT_DISPATCH:
+@@ -535,11 +557,96 @@ public void Clear ()
+ 			else if (((VarEnum)vt & VarEnum.VT_ARRAY) != 0) {
+ 				SafeArrayDestroyInternal (pdispVal);
+ 			}
++			else if ((VarEnum)vt == VarEnum.VT_RECORD) {
++				if (bRecord.pRecInfo != IntPtr.Zero) {
++					RecordInfoCall<RecordInfoData> (bRecord.pRecInfo, 4) (bRecord.pRecInfo, bRecord.pvRecord);
++					Marshal.Release (bRecord.pRecInfo);
++					Marshal.FreeCoTaskMem (bRecord.pvRecord);
++				}
++			}
+ #endif
+ 			vt = (short)VarEnum.VT_EMPTY;
+ 		}
+ 
+ #if !DISABLE_COM
++		[UnmanagedFunctionPointer (CallingConvention.StdCall)]
++		delegate int RecordInfoData (IntPtr self, IntPtr data);
++
++		[UnmanagedFunctionPointer (CallingConvention.StdCall)]
++		delegate int RecordInfoGuid (IntPtr self, out Guid guid);
++
++		[UnmanagedFunctionPointer (CallingConvention.StdCall)]
++		delegate int RecordInfoName (IntPtr self, out IntPtr name);
++
++		static readonly Dictionary<Guid, Type> record_types = new Dictionary<Guid, Type> ();
++
++		static T RecordInfoCall<T> (IntPtr info, int slot) where T : class
++		{
++			IntPtr vtbl = Marshal.ReadIntPtr (info);
++			return (T)(object)Marshal.GetDelegateForFunctionPointer (Marshal.ReadIntPtr (vtbl, slot * IntPtr.Size), typeof (T));
++		}
++
++		static Type FindRecordType (Guid guid, string name)
++		{
++			foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies ()) {
++				Type[] types;
++				try {
++					types = assembly.GetTypes ();
++				} catch (ReflectionTypeLoadException e) {
++					types = e.Types;
++				} catch {
++					continue;
++				}
++				foreach (Type type in types) {
++					if (type != null && type.IsValueType && !type.IsGenericTypeDefinition && (name == null || type.Name == name) && type.GUID == guid)
++						return type;
++				}
++			}
++			return null;
++		}
++
++		internal static Type GetRecordType (IntPtr info)
++		{
++			Guid guid;
++			IntPtr bstr;
++			string name = null;
++			Type type;
++
++			if (info == IntPtr.Zero)
++				throw new ArgumentException ("Specified OLE variant is invalid.");
++			if (RecordInfoCall<RecordInfoGuid> (info, 6) (info, out guid) < 0)
++				throw new ArgumentException ("The specified record cannot be mapped to a managed value class.");
++			lock (record_types) {
++				if (record_types.TryGetValue (guid, out type))
++					return type;
++			}
++			if (RecordInfoCall<RecordInfoName> (info, 7) (info, out bstr) >= 0 && bstr != IntPtr.Zero) {
++				name = Marshal.PtrToStringBSTR (bstr);
++				Marshal.FreeBSTR (bstr);
++			}
++			type = (name != null ? FindRecordType (guid, name) : null) ?? FindRecordType (guid, null);
++			if (type == null)
++				throw new ArgumentException ("The specified record cannot be mapped to a managed value class.");
++			lock (record_types) {
++				record_types [guid] = type;
++			}
++			return type;
++		}
++
++		static object GetRecordValue (IntPtr data, IntPtr info)
++		{
++			if (info == IntPtr.Zero)
++				throw new ArgumentException ("Specified OLE variant is invalid.");
++			if (data == IntPtr.Zero)
++				return null;
++			return Marshal.PtrToStructure (data, GetRecordType (info));
++		}
++#endif
++
++#if !DISABLE_COM
++		[MethodImplAttribute (MethodImplOptions.InternalCall)]
++		private extern static IntPtr GetRecordInfoInternal (Type type);
++
+ 		[MethodImplAttribute (MethodImplOptions.InternalCall)]
+ 		private extern static void SafeArrayDestroyInternal (IntPtr safearray);
+ 

@@ -19,3 +19,8 @@
 #define IDS_ROUTES_HEADER         116
 #define IDS_PERSISTENT_HEADER     117
 #define IDS_NONE                  120
+#define IDS_IPV6_ROUTE_TABLE      121
+#define IDS_ROUTES6_HEADER        122
+#define IDS_ROUTES6_ENTRY         123
+#define IDS_ROUTES6_LONG_ENTRY    124
+#define IDS_ONLINK                125

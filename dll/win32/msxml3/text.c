@@ -41,6 +41,9 @@ typedef struct _domtext
     IXMLDOMText IXMLDOMText_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 } domtext;
 
 static inline domtext *impl_from_IXMLDOMText( IXMLDOMText *iface )
@@ -48,11 +51,25 @@ static inline domtext *impl_from_IXMLDOMText( IXMLDOMText *iface )
     return CONTAINING_RECORD(iface, domtext, IXMLDOMText_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const domtext_typed_iids[] =
+{
+    &IID_IXMLDOMText,
+    &IID_IXMLDOMCharacterData,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI domtext_QueryInterface(IXMLDOMText *iface, REFIID riid, void **obj)
 {
     domtext *text = impl_from_IXMLDOMText(iface);
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&text->tearoff, (IUnknown *)iface, &text->dispex, text->node,
+            domtext_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if (IsEqualGUID(riid, &IID_IXMLDOMText) ||
         IsEqualGUID(riid, &IID_IXMLDOMCharacterData) ||
@@ -88,23 +105,39 @@ static ULONG WINAPI domtext_AddRef(IXMLDOMText *iface)
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&text->tearoff, text->node, refcount);
+#else
     return refcount;
+#endif
 }
 
 static ULONG WINAPI domtext_Release(IXMLDOMText *iface)
 {
     domtext *text = impl_from_IXMLDOMText(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG refcount = node_tearoff_decrement(&text->tearoff, text->node, &text->refcount, &reported);
+#else
     ULONG refcount = InterlockedDecrement(&text->refcount);
+#endif
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&text->tearoff);
+#endif
         domnode_release(text->node);
         free(text);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return refcount;
+#endif
 }
 
 static HRESULT WINAPI domtext_GetTypeInfoCount(IXMLDOMText *iface, UINT *count)

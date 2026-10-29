@@ -244,6 +244,7 @@ LX_SYSCALL(LxSysUnshare);
 LX_SYSCALL(LxSysSetns);
 LX_SYSCALL(LxSysPivotRoot);
 LX_SYSCALL(LxSysBpf);
+LX_SYSCALL(LxSysSeccomp);
 LX_SYSCALL(LxSysGetcpu);
 LX_SYSCALL(LxSysGetgroups);
 LX_SYSCALL(LxSysSetgroups);

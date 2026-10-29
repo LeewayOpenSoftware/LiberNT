@@ -825,13 +825,6 @@ HRESULT WINAPI CRecycleBin::CreateViewObject(HWND hwndOwner, REFIID riid, void *
     {
         hr = CRecyclerDropTarget_CreateInstance(riid, ppv);
     }
-    else if (IsEqualIID (riid, IID_IContextMenu) || IsEqualIID (riid, IID_IContextMenu2))
-    {
-        CRegKeyHandleArray keys;
-        AddClassKeyToArray(L"CLSID\\{645FF040-5081-101B-9F08-00AA002F954E}", keys, keys);
-        DEFCONTEXTMENU dcm = { hwndOwner, this, pidl, this, 0, NULL, NULL, keys, keys };
-        hr = SHCreateDefaultContextMenu(&dcm, riid, ppv);
-    }
     else if (IsEqualIID (riid, IID_IShellView))
     {
         CComPtr<CRecycleBinFolderViewCB> sfviewcb;

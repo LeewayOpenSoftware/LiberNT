@@ -763,7 +763,8 @@ NtfsPerformDiskIo(
         return STATUS_INVALID_PARAMETER;
 
     IoBuffer = Buffer;
-    if (Length != 0)
+    if (Length != 0 &&
+        ((ULONG_PTR)Buffer & DeviceObject->AlignmentRequirement) != 0)
     {
         IoBuffer = new(NonPagedPool, TAG_NTFS) UCHAR[Length];
         if (!IoBuffer)

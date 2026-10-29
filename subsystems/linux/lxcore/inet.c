@@ -21,6 +21,15 @@
 #define LX_INET_CONNECTING  3
 #define LX_INET_CONNECTED   4
 
+#define LX_TCP_ESTABLISHED      1
+#define LX_TCP_SYN_SENT         2
+#define LX_TCP_CLOSE            7
+#define LX_TCP_LISTEN           10
+#define LX_TCP_INFO_SIZE        104
+#define LX_TCP_INFO_SND_MSS     16
+#define LX_TCP_INFO_RCV_MSS     20
+#define LX_TCP_INFO_ADVMSS      84
+
 #define LX_INET_CHUNK       65536
 #define LX_INET_BUFFER      212992
 #define LX_INET_OPTIONS     24
@@ -1771,6 +1780,32 @@ LxInetGetsockopt(
                 return LxSockoptReturn(Call, &Timeval, sizeof(Timeval));
             }
         }
+    }
+
+    if ((Level == LX_IPPROTO_TCP) && (Socket->Type == LX_SOCK_STREAM) && (Name == LX_TCP_CONGESTION))
+    {
+        static const CHAR Congestion[16] = "cubic";
+
+        return LxSockoptReturn(Call, Congestion, sizeof(Congestion));
+    }
+    if ((Level == LX_IPPROTO_TCP) && (Socket->Type == LX_SOCK_STREAM) && (Name == LX_TCP_INFO))
+    {
+        UCHAR Info[LX_TCP_INFO_SIZE];
+        ULONG Mss = 536;
+
+        RtlZeroMemory(Info, sizeof(Info));
+        LxInetLock(Socket);
+        Option = LxInetFindOption(Socket, LX_IPPROTO_TCP, LX_TCP_MAXSEG);
+        if (Option != NULL)
+            Mss = (ULONG)Option->Value;
+        Info[0] = (Socket->State == LX_INET_CONNECTED) ? LX_TCP_ESTABLISHED :
+                  ((Socket->State == LX_INET_LISTENING) ? LX_TCP_LISTEN :
+                   ((Socket->State == LX_INET_CONNECTING) ? LX_TCP_SYN_SENT : LX_TCP_CLOSE));
+        LxInetUnlock(Socket);
+        RtlCopyMemory(&Info[LX_TCP_INFO_SND_MSS], &Mss, sizeof(Mss));
+        RtlCopyMemory(&Info[LX_TCP_INFO_RCV_MSS], &Mss, sizeof(Mss));
+        RtlCopyMemory(&Info[LX_TCP_INFO_ADVMSS], &Mss, sizeof(Mss));
+        return LxSockoptReturn(Call, Info, sizeof(Info));
     }
 
     if (!LxInetKnownOption(Socket, Level, Name, &Default))

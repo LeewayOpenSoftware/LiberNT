@@ -339,6 +339,7 @@ typedef struct _LX_SCHED_ATTR
 #define LX_AT_CLKTCK        17
 #define LX_AT_SECURE        23
 #define LX_AT_RANDOM        25
+#define LX_AT_HWCAP2        26
 #define LX_AT_EXECFN        31
 
 #define LX_CLOCK_REALTIME           0

@@ -18,6 +18,8 @@
 #include <winbase.h>
 #include <winnls.h>
 #include <winreg.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <iphlpapi.h>
 #include <ndk/rtlfuncs.h>
 #include <inaddr.h>
@@ -27,6 +29,7 @@
 #include <dhcpcapi.h>
 #include <strsafe.h>
 #include <conutils.h>
+#include <dhcpcsvc_c.h>
 
 #include "resource.h"
 
@@ -553,6 +556,216 @@ PrintAdapterTypeAndName(
     }
 }
 
+static
+PIP_ADAPTER_ADDRESSES
+GetAddressList(VOID)
+{
+    PIP_ADAPTER_ADDRESSES pList;
+    ULONG Size = 16384;
+    ULONG ret;
+
+    for (;;)
+    {
+        pList = HeapAlloc(ProcessHeap, 0, Size);
+        if (pList == NULL)
+            return NULL;
+        ret = GetAdaptersAddresses(AF_UNSPEC,
+                                   GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
+                                   NULL, pList, &Size);
+        if (ret == NO_ERROR)
+            return pList;
+        HeapFree(ProcessHeap, 0, pList);
+        if (ret != ERROR_BUFFER_OVERFLOW)
+            return NULL;
+    }
+}
+
+static
+PIP_ADAPTER_ADDRESSES
+FindAdapterAddresses(PIP_ADAPTER_ADDRESSES pList, PCSTR AdapterName)
+{
+    for (; pList; pList = pList->Next)
+    {
+        if (!_stricmp(pList->AdapterName, AdapterName))
+            return pList;
+    }
+    return NULL;
+}
+
+static
+PCSTR
+FormatSocketAddress(const SOCKADDR *pAddress, ULONG DefaultScope, PSTR Buffer, SIZE_T Size)
+{
+    Buffer[0] = ANSI_NULL;
+    if (pAddress->sa_family == AF_INET6)
+    {
+        const SOCKADDR_IN6 *pAddress6 = (const SOCKADDR_IN6 *)pAddress;
+        ULONG ScopeId = pAddress6->sin6_scope_id;
+        CHAR Text[INET6_ADDRSTRLEN];
+
+        RtlIpv6AddressToStringA(&pAddress6->sin6_addr, Text);
+        if (!ScopeId && IN6_IS_ADDR_LINKLOCAL(&pAddress6->sin6_addr))
+            ScopeId = DefaultScope;
+        if (ScopeId && (IN6_IS_ADDR_LINKLOCAL(&pAddress6->sin6_addr) || IN6_IS_ADDR_SITELOCAL(&pAddress6->sin6_addr)))
+            _snprintf(Buffer, Size, "%s%%%lu", Text, ScopeId);
+        else
+            _snprintf(Buffer, Size, "%s", Text);
+    }
+    else if (pAddress->sa_family == AF_INET)
+    {
+        RtlIpv4AddressToStringA(&((const SOCKADDR_IN *)pAddress)->sin_addr, Buffer);
+    }
+    Buffer[Size - 1] = ANSI_NULL;
+    return Buffer;
+}
+
+static
+VOID
+PrintAddressState(BOOL bAll, IP_DAD_STATE DadState)
+{
+    if (!bAll)
+        ConResPrintf(StdOut, IDS_ADDREND);
+    else if (DadState == IpDadStateTentative)
+        ConResPrintf(StdOut, IDS_ADDRTENTATIVE);
+    else if (DadState == IpDadStateDeprecated)
+        ConResPrintf(StdOut, IDS_ADDRDEPRECATED);
+    else if (DadState == IpDadStateDuplicate)
+        ConResPrintf(StdOut, IDS_ADDRDUPLICATE);
+    else
+        ConResPrintf(StdOut, IDS_ADDRPREFERRED);
+}
+
+static
+VOID
+PrintLeaseTimes(time_t Obtained, time_t Expires)
+{
+    PWSTR DateTimeString;
+
+    DateTimeString = timeToStr(Obtained);
+    ConResPrintf(StdOut, IDS_LEASEOBTAINED, DateTimeString ? DateTimeString : L"N/A");
+    if (DateTimeString)
+        HeapFree(ProcessHeap, 0, DateTimeString);
+    DateTimeString = timeToStr(Expires);
+    ConResPrintf(StdOut, IDS_LEASEEXPIRES, DateTimeString ? DateTimeString : L"N/A");
+    if (DateTimeString)
+        HeapFree(ProcessHeap, 0, DateTimeString);
+}
+
+static
+VOID
+PrintIpv6Addresses(PIP_ADAPTER_ADDRESSES pAddresses, BOOL bAll)
+{
+    PIP_ADAPTER_UNICAST_ADDRESS pUnicast;
+    CHAR Buffer[INET6_ADDRSTRLEN + 16];
+    INT Pass;
+
+    for (Pass = 0; Pass < 3; Pass++)
+    {
+        for (pUnicast = pAddresses->FirstUnicastAddress; pUnicast; pUnicast = pUnicast->Next)
+        {
+            const SOCKADDR_IN6 *pAddress6 = (const SOCKADDR_IN6 *)pUnicast->Address.lpSockaddr;
+            INT Kind;
+
+            if (pAddress6->sin6_family != AF_INET6)
+                continue;
+            if (IN6_IS_ADDR_LINKLOCAL(&pAddress6->sin6_addr))
+                Kind = 2;
+            else if (pUnicast->PrefixOrigin == IpPrefixOriginRouterAdvertisement && pUnicast->SuffixOrigin == IpSuffixOriginRandom)
+                Kind = 1;
+            else
+                Kind = 0;
+            if (Kind != Pass)
+                continue;
+
+            FormatSocketAddress(pUnicast->Address.lpSockaddr, pAddresses->Ipv6IfIndex, Buffer, sizeof(Buffer));
+            ConResPrintf(StdOut, Kind == 2 ? IDS_LINKLOCALIPV6ADDRESS : Kind == 1 ? IDS_TEMPIPV6ADDRESS : IDS_IPV6ADDRESS, Buffer);
+            PrintAddressState(bAll, pUnicast->DadState);
+
+            if (bAll && pUnicast->PrefixOrigin == IpPrefixOriginDhcp && pUnicast->ValidLifetime != 0xFFFFFFFF)
+            {
+                time_t Now = time(NULL);
+
+                PrintLeaseTimes(Now - (pUnicast->LeaseLifetime > pUnicast->ValidLifetime ?
+                                       pUnicast->LeaseLifetime - pUnicast->ValidLifetime : 0),
+                                Now + pUnicast->ValidLifetime);
+            }
+        }
+    }
+}
+
+static
+VOID
+PrintDhcpv6Identity(PCSTR AdapterName)
+{
+    CHAR KeyName[MAX_PATH];
+    BYTE Duid[130];
+    CHAR Text[sizeof(Duid) * 3 + 1];
+    DWORD Size, Type, Iaid, i;
+    HKEY hKey;
+
+    _snprintf(KeyName, ARRAYSIZE(KeyName), "SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters\\Interfaces\\%s", AdapterName);
+    KeyName[ARRAYSIZE(KeyName) - 1] = ANSI_NULL;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, KeyName, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        return;
+    Size = sizeof(Iaid);
+    if (RegQueryValueExA(hKey, "Dhcpv6Iaid", NULL, &Type, (PBYTE)&Iaid, &Size) != ERROR_SUCCESS || Type != REG_DWORD)
+    {
+        RegCloseKey(hKey);
+        return;
+    }
+    RegCloseKey(hKey);
+    ConResPrintf(StdOut, IDS_DHCPV6IAID, Iaid);
+
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters",
+                      0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        return;
+    Size = sizeof(Duid);
+    if (RegQueryValueExA(hKey, "Dhcpv6DUID", NULL, &Type, Duid, &Size) == ERROR_SUCCESS && Type == REG_BINARY && Size)
+    {
+        for (i = 0; i < Size; i++)
+            sprintf(&Text[i * 3], i + 1 < Size ? "%02X-" : "%02X", Duid[i]);
+        ConResPrintf(StdOut, IDS_DHCPV6DUID, Text);
+    }
+    RegCloseKey(hKey);
+}
+
+static
+VOID
+PrintDnsSuffixSearchList(PIP_ADAPTER_ADDRESSES pList, PCSTR pszPrimary, PCSTR pszDomain)
+{
+    CHAR Entries[16][MAX_DNS_SUFFIX_STRING_LENGTH * 3];
+    PCSTR Candidates[2] = { pszPrimary, pszDomain };
+    PIP_ADAPTER_ADDRESSES pAdapter;
+    PIP_ADAPTER_DNS_SUFFIX pSuffix;
+    ULONG Count = 0, i, j;
+
+    for (i = 0; i < ARRAYSIZE(Candidates); i++)
+    {
+        if (Candidates[i] && Candidates[i][0] && (!Count || _stricmp(Entries[0], Candidates[i])))
+            StringCchCopyA(Entries[Count++], ARRAYSIZE(Entries[0]), Candidates[i]);
+    }
+
+    for (pAdapter = pList; pAdapter; pAdapter = pAdapter->Next)
+    {
+        for (pSuffix = pAdapter->FirstDnsSuffix; pSuffix && Count < ARRAYSIZE(Entries); pSuffix = pSuffix->Next)
+        {
+            if (!WideCharToMultiByte(CP_ACP, 0, pSuffix->String, -1, Entries[Count], ARRAYSIZE(Entries[0]), NULL, NULL))
+                continue;
+            for (j = 0; j < Count && _stricmp(Entries[j], Entries[Count]); j++);
+            if (j == Count)
+                Count++;
+        }
+    }
+
+    if (!Count)
+    {
+        ConResPrintf(StdOut, IDS_DNSSUFFIXLIST, "");
+        return;
+    }
+    for (i = 0; i < Count; i++)
+        ConResPrintf(StdOut, i ? IDS_EMPTYLINE : IDS_DNSSUFFIXLIST, Entries[i]);
+}
+
 VOID
 ShowInfo(
     BOOL bShowHeader,
@@ -570,6 +783,7 @@ ShowInfo(
     PSTR pszDomainName = NULL;
     DWORD dwDomainNameSize = 0;
     ULONG ret = 0;
+    PIP_ADAPTER_ADDRESSES pAddressList = NULL;
 
     GetComputerNameExA(ComputerNameDnsDomain,
                        NULL,
@@ -630,6 +844,7 @@ ShowInfo(
     }
 
     pAdapter = pAdapterInfo;
+    pAddressList = GetAddressList();
 
     if (bShowHeader)
         ConResPrintf(StdOut, IDS_HEADER);
@@ -651,20 +866,14 @@ ShowInfo(
         else
             ConResPrintf(StdOut, IDS_WINSPROXYNO);
 
-        if (pszDomainName != NULL && pszDomainName[0] != 0)
-        {
-            ConResPrintf(StdOut, IDS_DNSSUFFIXLIST, pszDomainName);
-            ConResPrintf(StdOut, IDS_EMPTYLINE, pFixedInfo->DomainName);
-        }
-        else
-        {
-            ConResPrintf(StdOut, IDS_DNSSUFFIXLIST, pFixedInfo->DomainName);
-        }
+        PrintDnsSuffixSearchList(pAddressList, pszDomainName, pFixedInfo->DomainName);
     }
 
     while (pAdapter)
     {
         BOOLEAN bConnected = TRUE;
+        PIP_ADAPTER_ADDRESSES pAddresses = FindAdapterAddresses(pAddressList, pAdapter->AdapterName);
+        CHAR Buffer[INET6_ADDRSTRLEN + 16];
 
         mibEntry.dwIndex = pAdapter->Index;
         GetIfEntry(&mibEntry);
@@ -728,13 +937,34 @@ ShowInfo(
             continue;
         }
 
+        if (pAddresses)
+            PrintIpv6Addresses(pAddresses, bAll);
+
         for (pIPAddr = &pAdapter->IpAddressList; pIPAddr; pIPAddr = pIPAddr->Next)
         {
             ConResPrintf(StdOut, IDS_IPADDRESS, pIPAddr->IpAddress.String);
             ConResPrintf(StdOut, IDS_SUBNETMASK, pIPAddr->IpMask.String);
         }
 
-        if (strcmp(pAdapter->GatewayList.IpAddress.String, "0.0.0.0"))
+        if (pAddresses && pAddresses->FirstGatewayAddress)
+        {
+            PIP_ADAPTER_GATEWAY_ADDRESS pGateway;
+            BOOL bFirst = TRUE;
+            INT Pass;
+
+            for (Pass = 0; Pass < 2; Pass++)
+            {
+                for (pGateway = pAddresses->FirstGatewayAddress; pGateway; pGateway = pGateway->Next)
+                {
+                    if (pGateway->Address.lpSockaddr->sa_family != (Pass ? AF_INET : AF_INET6))
+                        continue;
+                    FormatSocketAddress(pGateway->Address.lpSockaddr, pAddresses->Ipv6IfIndex, Buffer, sizeof(Buffer));
+                    ConResPrintf(StdOut, bFirst ? IDS_DEFAULTGATEWAY : IDS_EMPTYLINE, Buffer);
+                    bFirst = FALSE;
+                }
+            }
+        }
+        else if (strcmp(pAdapter->GatewayList.IpAddress.String, "0.0.0.0"))
             ConResPrintf(StdOut, IDS_DEFAULTGATEWAY, pAdapter->GatewayList.IpAddress.String);
         else
             ConResPrintf(StdOut, IDS_DEFAULTGATEWAY, "");
@@ -744,12 +974,27 @@ ShowInfo(
             if (pAdapter->DhcpEnabled)
                 ConResPrintf(StdOut, IDS_DHCPSERVER, pAdapter->DhcpServer.IpAddress.String);
 
-            ConResPrintf(StdOut, IDS_DNSSERVERS, pFixedInfo->DnsServerList.IpAddress.String);
-            pIPAddr = pFixedInfo->DnsServerList.Next;
-            while (pIPAddr)
+            PrintDhcpv6Identity(pAdapter->AdapterName);
+
+            if (pAddresses)
             {
-                ConResPrintf(StdOut, IDS_EMPTYLINE, pIPAddr->IpAddress.String);
-                pIPAddr = pIPAddr->Next;
+                PIP_ADAPTER_DNS_SERVER_ADDRESS pDns;
+
+                for (pDns = pAddresses->FirstDnsServerAddress; pDns; pDns = pDns->Next)
+                {
+                    FormatSocketAddress(pDns->Address.lpSockaddr, pAddresses->Ipv6IfIndex, Buffer, sizeof(Buffer));
+                    ConResPrintf(StdOut, pDns == pAddresses->FirstDnsServerAddress ? IDS_DNSSERVERS : IDS_EMPTYLINE, Buffer);
+                }
+            }
+            else
+            {
+                ConResPrintf(StdOut, IDS_DNSSERVERS, pFixedInfo->DnsServerList.IpAddress.String);
+                pIPAddr = pFixedInfo->DnsServerList.Next;
+                while (pIPAddr)
+                {
+                    ConResPrintf(StdOut, IDS_EMPTYLINE, pIPAddr->IpAddress.String);
+                    pIPAddr = pIPAddr->Next;
+                }
             }
 
             if (pAdapter->HaveWins)
@@ -774,6 +1019,19 @@ ShowInfo(
                     HeapFree(ProcessHeap, 0, DateTimeString);
                 }
             }
+
+            if (pAddresses && pAddresses->FirstDnsSuffix)
+            {
+                PIP_ADAPTER_DNS_SUFFIX pSuffix;
+                CHAR Suffix[MAX_DNS_SUFFIX_STRING_LENGTH * 3];
+
+                ConResPrintf(StdOut, IDS_CONNDNSSUFFIXLIST);
+                for (pSuffix = pAddresses->FirstDnsSuffix; pSuffix; pSuffix = pSuffix->Next)
+                {
+                    if (WideCharToMultiByte(CP_ACP, 0, pSuffix->String, -1, Suffix, sizeof(Suffix), NULL, NULL))
+                        ConResPrintf(StdOut, IDS_EMPTYLINE, Suffix);
+                }
+            }
         }
 
         HeapFree(ProcessHeap, 0, pPerAdapterInfo);
@@ -783,6 +1041,8 @@ ShowInfo(
     }
 
 done:
+    if (pAddressList)
+        HeapFree(ProcessHeap, 0, pAddressList);
     if (pszDomainName)
         HeapFree(ProcessHeap, 0, pszDomainName);
     if (pFixedInfo)
@@ -838,9 +1098,63 @@ MatchWildcard(
     return TRUE;
 }
 
+void __RPC_FAR * __RPC_USER MIDL_user_allocate(SIZE_T len)
+{
+    return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len);
+}
+
+void __RPC_USER MIDL_user_free(void __RPC_FAR * ptr)
+{
+    HeapFree(GetProcessHeap(), 0, ptr);
+}
+
+handle_t __RPC_USER
+PDHCP_SERVER_NAME_bind(
+    _In_ PDHCP_SERVER_NAME pszServerName)
+{
+    handle_t hBinding = NULL;
+    LPWSTR pszStringBinding;
+
+    if (RpcStringBindingComposeW(NULL, L"ncacn_np", pszServerName, L"\\pipe\\dhcpcsvc", NULL, &pszStringBinding))
+        return NULL;
+    RpcBindingFromStringBindingW(pszStringBinding, &hBinding);
+    RpcStringFreeW(&pszStringBinding);
+    return hBinding;
+}
+
+void __RPC_USER
+PDHCP_SERVER_NAME_unbind(
+    _In_ PDHCP_SERVER_NAME pszServerName,
+    _In_ handle_t hBinding)
+{
+    RpcBindingFree(&hBinding);
+}
+
+static
+DWORD
+CallDhcpv6(
+    PWSTR AdapterName,
+    BOOL bRelease)
+{
+    DWORD ret;
+
+    RpcTryExcept
+    {
+        ret = bRelease ? ReleaseParametersV6(NULL, AdapterName) : AcquireParametersV6(NULL, AdapterName);
+    }
+    RpcExcept(EXCEPTION_EXECUTE_HANDLER)
+    {
+        ret = I_RpcMapWin32Status(RpcExceptionCode());
+    }
+    RpcEndExcept;
+
+    return ret;
+}
+
 VOID
 Release(
-    PWSTR pszAdapterName)
+    PWSTR pszAdapterName,
+    BOOL bIpv6)
 {
     PIP_ADAPTER_INFO pAdapterInfo = NULL;
     PIP_ADAPTER_INFO pAdapter = NULL;
@@ -894,14 +1208,14 @@ Release(
             if (mibEntry.dwOperStatus == MIB_IF_OPER_STATUS_CONNECTED ||
                 mibEntry.dwOperStatus == MIB_IF_OPER_STATUS_OPERATIONAL)
             {
-                if (pAdapter->DhcpEnabled)
+                if (bIpv6 || pAdapter->DhcpEnabled)
                 {
-                    if (strcmp(pAdapter->IpAddressList.IpAddress.String, "0.0.0.0"))
+                    if (bIpv6 || strcmp(pAdapter->IpAddressList.IpAddress.String, "0.0.0.0"))
                     {
                         mbstowcs(szUnicodeAdapterName, pAdapter->AdapterName, strlen(pAdapter->AdapterName) + 1);
 
                         /* Call DhcpReleaseParameters to release the IP address on the specified adapter. */
-                        ret = DhcpReleaseParameters(szUnicodeAdapterName);
+                        ret = bIpv6 ? CallDhcpv6(szUnicodeAdapterName, TRUE) : DhcpReleaseParameters(szUnicodeAdapterName);
                         if (ret != NO_ERROR)
                         {
                             ConResPrintf(StdOut, IDS_DHCPRELEASEERROR, szFriendlyName);
@@ -945,7 +1259,8 @@ done:
 
 VOID
 Renew(
-    PWSTR pszAdapterName)
+    PWSTR pszAdapterName,
+    BOOL bIpv6)
 {
     PIP_ADAPTER_INFO pAdapterInfo = NULL;
     PIP_ADAPTER_INFO pAdapter = NULL;
@@ -999,12 +1314,12 @@ Renew(
             if (mibEntry.dwOperStatus == MIB_IF_OPER_STATUS_CONNECTED ||
                 mibEntry.dwOperStatus == MIB_IF_OPER_STATUS_OPERATIONAL)
             {
-                if (pAdapter->DhcpEnabled)
+                if (bIpv6 || pAdapter->DhcpEnabled)
                 {
                     mbstowcs(szUnicodeAdapterName, pAdapter->AdapterName, strlen(pAdapter->AdapterName) + 1);
 
                     /* Call DhcpAcquireParameters to renew the IP address on the specified adapter. */
-                    ret = DhcpAcquireParameters(szUnicodeAdapterName);
+                    ret = bIpv6 ? CallDhcpv6(szUnicodeAdapterName, FALSE) : DhcpAcquireParameters(szUnicodeAdapterName);
                     if (ret != NO_ERROR)
                     {
                         ConResPrintf(StdOut, IDS_DHCPRENEWERROR, szFriendlyName);
@@ -1374,6 +1689,8 @@ int wmain(int argc, wchar_t *argv[])
     BOOL DoAll=FALSE;
     BOOL DoRelease=FALSE;
     BOOL DoRenew=FALSE;
+    BOOL DoRelease6=FALSE;
+    BOOL DoRenew6=FALSE;
     BOOL DoFlushdns=FALSE;
     BOOL DoRegisterdns=FALSE;
     BOOL DoDisplaydns=FALSE;
@@ -1404,6 +1721,14 @@ int wmain(int argc, wchar_t *argv[])
         else if (!_wcsnicmp(&argv[1][1], L"RENEW", wcslen(&argv[1][1])))
         {
             DoRenew = TRUE;
+        }
+        else if (!_wcsicmp(&argv[1][1], L"RELEASE6"))
+        {
+            DoRelease6 = TRUE;
+        }
+        else if (!_wcsicmp(&argv[1][1], L"RENEW6"))
+        {
+            DoRenew6 = TRUE;
         }
         else if (!_wcsnicmp(&argv[1][1], L"FLUSHDNS", wcslen(&argv[1][1])))
         {
@@ -1438,9 +1763,13 @@ int wmain(int argc, wchar_t *argv[])
             else if (DoAll)
                 ShowInfo(TRUE, TRUE);
             else if (DoRelease)
-                Release(NULL);
+                Release(NULL, FALSE);
             else if (DoRenew)
-                Renew(NULL);
+                Renew(NULL, FALSE);
+            else if (DoRelease6)
+                Release(NULL, TRUE);
+            else if (DoRenew6)
+                Renew(NULL, TRUE);
             else if (DoFlushdns)
                 FlushDns();
             else if (DoRegisterdns)
@@ -1452,9 +1781,13 @@ int wmain(int argc, wchar_t *argv[])
             break;
         case 3: /* Process all the options that can have 1 parameter */
             if (DoRelease)
-                Release(argv[2]);
+                Release(argv[2], FALSE);
             else if (DoRenew)
-                Renew(argv[2]);
+                Renew(argv[2], FALSE);
+            else if (DoRelease6)
+                Release(argv[2], TRUE);
+            else if (DoRenew6)
+                Renew(argv[2], TRUE);
             else if (DoShowclassid)
                 ShowClassId(argv[2]);
             else if (DoSetclassid)

@@ -682,6 +682,24 @@ LxBuildPath(
 }
 
 static
+VOID
+LxMakeCaseSensitive(
+    _In_ PCWSTR Directory)
+{
+    FILE_CASE_SENSITIVE_INFORMATION CaseSensitive;
+    IO_STATUS_BLOCK Iosb;
+    HANDLE Handle;
+
+    Handle = CreateFileW(Directory, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (Handle == INVALID_HANDLE_VALUE)
+        return;
+    CaseSensitive.Flags = FILE_CS_FLAG_CASE_SENSITIVE_DIR;
+    NtSetInformationFile(Handle, &Iosb, &CaseSensitive, sizeof(CaseSensitive), FileCaseSensitiveInformation);
+    CloseHandle(Handle);
+}
+
+static
 NTSTATUS
 LxOpenEntry(
     _In_ PLX_EXTRACT Extract,
@@ -1796,6 +1814,7 @@ LxInstallRoot(
         LxCleanupInstall(Archive, Part, Staging, LxIsUrl(Source));
         return 1;
     }
+    LxMakeCaseSensitive(Staging);
     if (LxUnpack(Archive, Staging) != 0)
     {
         LxCleanupInstall(Archive, Part, Staging, LxIsUrl(Source));

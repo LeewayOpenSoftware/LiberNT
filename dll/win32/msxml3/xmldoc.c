@@ -26,6 +26,9 @@
 #include "windef.h"
 #include "winbase.h"
 #include "msxml2.h"
+#ifdef __REACTOS__
+#include "shlwapi.h"
+#endif
 
 #include "wine/debug.h"
 
@@ -1643,6 +1646,10 @@ typedef struct _xmldoc
 {
     IXMLDocument2 IXMLDocument2_iface;
     IPersistStreamInit IPersistStreamInit_iface;
+#ifdef __REACTOS__
+    IPersistMoniker IPersistMoniker_iface;
+    IMoniker *moniker;
+#endif
     LONG ref;
 
     struct node *root;
@@ -1683,6 +1690,12 @@ static HRESULT WINAPI xmldoc_QueryInterface(IXMLDocument2 *iface, REFIID riid, v
     {
         *ppvObject = &This->IPersistStreamInit_iface;
     }
+#ifdef __REACTOS__
+    else if (IsEqualGUID(&IID_IPersistMoniker, riid))
+    {
+        *ppvObject = &This->IPersistMoniker_iface;
+    }
+#endif
     else
     {
         FIXME("interface %s not implemented\n", debugstr_guid(riid));
@@ -1716,6 +1729,8 @@ static ULONG WINAPI xmldoc_Release(IXMLDocument2 *iface)
         SysFreeString(doc->dtd.name);
 #ifdef __REACTOS__
         SysFreeString(doc->charset);
+        if (doc->moniker)
+            IMoniker_Release(doc->moniker);
 #endif
         free(doc);
     }
@@ -2121,16 +2136,177 @@ static HRESULT WINAPI xmldoc_IPersistStreamInit_Load(IPersistStreamInit *iface,
     return xmldoc_parse(doc, stream, NULL);
 }
 
+#ifdef __REACTOS__
+struct xmldoc_writer
+{
+    WCHAR *data;
+    size_t count;
+    size_t capacity;
+    HRESULT status;
+};
+
+static void xmldoc_writer_append(struct xmldoc_writer *writer, const WCHAR *str, size_t len)
+{
+    if (FAILED(writer->status) || !len)
+        return;
+
+    if (writer->count + len > writer->capacity)
+    {
+        size_t capacity = max(writer->capacity * 2, writer->count + len);
+        WCHAR *data;
+
+        if (!(data = realloc(writer->data, capacity * sizeof(*data))))
+        {
+            writer->status = E_OUTOFMEMORY;
+            return;
+        }
+        writer->data = data;
+        writer->capacity = capacity;
+    }
+
+    memcpy(writer->data + writer->count, str, len * sizeof(*str));
+    writer->count += len;
+}
+
+static void xmldoc_writer_append_escaped(struct xmldoc_writer *writer, const WCHAR *str, bool attribute)
+{
+    for (; str && *str; ++str)
+    {
+        if (*str == '<')
+            xmldoc_writer_append(writer, L"&lt;", 4);
+        else if (*str == '>')
+            xmldoc_writer_append(writer, L"&gt;", 4);
+        else if (*str == '&')
+            xmldoc_writer_append(writer, L"&amp;", 5);
+        else if (*str == '"' && attribute)
+            xmldoc_writer_append(writer, L"&quot;", 6);
+        else
+            xmldoc_writer_append(writer, str, 1);
+    }
+}
+
+static void xmldoc_write_node(struct xmldoc_writer *writer, const struct node *node);
+
+static void xmldoc_write_children(struct xmldoc_writer *writer, const struct node *node)
+{
+    const struct node *child, *data;
+
+    LIST_FOR_EACH_ENTRY(child, &node->children, struct node, entry)
+    {
+        if (child->type != XMLELEMTYPE_PI)
+        {
+            xmldoc_write_node(writer, child);
+            continue;
+        }
+
+        xmldoc_writer_append(writer, L"<?", 2);
+        xmldoc_writer_append(writer, child->name, SysStringLen(child->name));
+        if (list_next(&node->children, &child->entry))
+        {
+            data = LIST_ENTRY(list_next(&node->children, &child->entry), struct node, entry);
+            if (data->type == XMLELEMTYPE_TEXT && SysStringLen(data->data))
+            {
+                xmldoc_writer_append(writer, L" ", 1);
+                xmldoc_writer_append(writer, data->data, SysStringLen(data->data));
+                child = data;
+            }
+        }
+        xmldoc_writer_append(writer, L"?>", 2);
+    }
+}
+
+static void xmldoc_write_node(struct xmldoc_writer *writer, const struct node *node)
+{
+    const struct attribute *attr;
+
+    switch (node->type)
+    {
+    case XMLELEMTYPE_ELEMENT:
+        xmldoc_writer_append(writer, L"<", 1);
+        xmldoc_writer_append(writer, node->name, SysStringLen(node->name));
+        LIST_FOR_EACH_ENTRY(attr, &node->attributes, struct attribute, entry)
+        {
+            xmldoc_writer_append(writer, L" ", 1);
+            xmldoc_writer_append(writer, attr->name, SysStringLen(attr->name));
+            xmldoc_writer_append(writer, L"=\"", 2);
+            xmldoc_writer_append_escaped(writer, attr->value, true);
+            xmldoc_writer_append(writer, L"\"", 1);
+        }
+        if (list_empty(&node->children))
+        {
+            xmldoc_writer_append(writer, L"/>", 2);
+            break;
+        }
+        xmldoc_writer_append(writer, L">", 1);
+        xmldoc_write_children(writer, node);
+        xmldoc_writer_append(writer, L"</", 2);
+        xmldoc_writer_append(writer, node->name, SysStringLen(node->name));
+        xmldoc_writer_append(writer, L">", 1);
+        break;
+    case XMLELEMTYPE_TEXT:
+        xmldoc_writer_append_escaped(writer, node->data, false);
+        break;
+    case XMLELEMTYPE_COMMENT:
+        xmldoc_writer_append(writer, L"<!--", 4);
+        xmldoc_writer_append(writer, node->data, SysStringLen(node->data));
+        xmldoc_writer_append(writer, L"-->", 3);
+        break;
+    default:
+        break;
+    }
+}
+
+static HRESULT xmldoc_save_stream(const xmldoc *doc, IStream *stream)
+{
+    struct xmldoc_writer writer = { 0 };
+    char *utf8 = NULL;
+    HRESULT hr;
+    int len;
+
+    if (doc->root)
+        xmldoc_write_node(&writer, doc->root);
+
+    if (FAILED(hr = writer.status) || !writer.count)
+    {
+        free(writer.data);
+        return hr;
+    }
+
+    len = WideCharToMultiByte(CP_UTF8, 0, writer.data, writer.count, NULL, 0, NULL, NULL);
+    if (!(utf8 = malloc(len)))
+    {
+        free(writer.data);
+        return E_OUTOFMEMORY;
+    }
+    WideCharToMultiByte(CP_UTF8, 0, writer.data, writer.count, utf8, len, NULL, NULL);
+    free(writer.data);
+
+    hr = IStream_Write(stream, utf8, len, NULL);
+    free(utf8);
+
+    return hr;
+}
+
+static HRESULT WINAPI xmldoc_IPersistStreamInit_Save(
+    IPersistStreamInit *iface, LPSTREAM pStm, BOOL fClearDirty)
+{
+    xmldoc *doc = impl_from_IPersistStreamInit(iface);
+
+    TRACE("%p, %p, %d.\n", iface, pStm, fClearDirty);
+
+    if (!pStm)
+        return E_INVALIDARG;
+
+    return xmldoc_save_stream(doc, pStm);
+}
+#else
 static HRESULT WINAPI xmldoc_IPersistStreamInit_Save(
     IPersistStreamInit *iface, LPSTREAM pStm, BOOL fClearDirty)
 {
     FIXME("(%p, %p, %d): stub!\n", iface, pStm, fClearDirty);
-#ifdef __REACTOS__
-    if (!pStm)
-        return E_INVALIDARG;
-#endif
     return E_NOTIMPL;
 }
+#endif
 
 static HRESULT WINAPI xmldoc_IPersistStreamInit_GetSizeMax(
     IPersistStreamInit *iface, ULARGE_INTEGER *pcbSize)
@@ -2161,6 +2337,151 @@ static const IPersistStreamInitVtbl xmldoc_IPersistStreamInit_VTable =
   xmldoc_IPersistStreamInit_InitNew
 };
 
+#ifdef __REACTOS__
+static inline xmldoc *impl_from_IPersistMoniker(IPersistMoniker *iface)
+{
+    return CONTAINING_RECORD(iface, xmldoc, IPersistMoniker_iface);
+}
+
+static HRESULT WINAPI xmldoc_IPersistMoniker_QueryInterface(IPersistMoniker *iface, REFIID riid, void **obj)
+{
+    xmldoc *doc = impl_from_IPersistMoniker(iface);
+    return IXMLDocument2_QueryInterface(&doc->IXMLDocument2_iface, riid, obj);
+}
+
+static ULONG WINAPI xmldoc_IPersistMoniker_AddRef(IPersistMoniker *iface)
+{
+    xmldoc *doc = impl_from_IPersistMoniker(iface);
+    return IXMLDocument2_AddRef(&doc->IXMLDocument2_iface);
+}
+
+static ULONG WINAPI xmldoc_IPersistMoniker_Release(IPersistMoniker *iface)
+{
+    xmldoc *doc = impl_from_IPersistMoniker(iface);
+    return IXMLDocument2_Release(&doc->IXMLDocument2_iface);
+}
+
+static HRESULT WINAPI xmldoc_IPersistMoniker_GetClassID(IPersistMoniker *iface, CLSID *classid)
+{
+    xmldoc *doc = impl_from_IPersistMoniker(iface);
+    return IPersistStreamInit_GetClassID(&doc->IPersistStreamInit_iface, classid);
+}
+
+static HRESULT WINAPI xmldoc_IPersistMoniker_IsDirty(IPersistMoniker *iface)
+{
+    xmldoc *doc = impl_from_IPersistMoniker(iface);
+    return IPersistStreamInit_IsDirty(&doc->IPersistStreamInit_iface);
+}
+
+static void xmldoc_set_moniker(xmldoc *doc, IMoniker *moniker)
+{
+    if (moniker)
+        IMoniker_AddRef(moniker);
+    if (doc->moniker)
+        IMoniker_Release(doc->moniker);
+    doc->moniker = moniker;
+}
+
+static HRESULT WINAPI xmldoc_IPersistMoniker_Load(IPersistMoniker *iface, BOOL fully_available,
+        IMoniker *moniker, IBindCtx *bindctx, DWORD mode)
+{
+    xmldoc *doc = impl_from_IPersistMoniker(iface);
+    WCHAR *name;
+    HRESULT hr;
+
+    TRACE("%p, %d, %p, %p, %#lx.\n", iface, fully_available, moniker, bindctx, mode);
+
+    if (!moniker)
+        return E_INVALIDARG;
+
+    if (FAILED(hr = IMoniker_GetDisplayName(moniker, bindctx, NULL, &name)))
+        return hr;
+
+    hr = xmldoc_parse(doc, NULL, name);
+    CoTaskMemFree(name);
+
+    if (SUCCEEDED(hr))
+        xmldoc_set_moniker(doc, moniker);
+
+    return hr;
+}
+
+static HRESULT WINAPI xmldoc_IPersistMoniker_Save(IPersistMoniker *iface, IMoniker *moniker, IBindCtx *bindctx,
+        BOOL remember)
+{
+    xmldoc *doc = impl_from_IPersistMoniker(iface);
+    WCHAR *name, path[MAX_PATH];
+    DWORD len = ARRAY_SIZE(path);
+    const WCHAR *file;
+    IStream *stream;
+    HRESULT hr;
+
+    TRACE("%p, %p, %p, %d.\n", iface, moniker, bindctx, remember);
+
+    if (!moniker && !(moniker = doc->moniker))
+        return E_INVALIDARG;
+
+    if (FAILED(hr = IMoniker_GetDisplayName(moniker, bindctx, NULL, &name)))
+        return hr;
+
+    file = UrlIsFileUrlW(name) && SUCCEEDED(PathCreateFromUrlW(name, path, &len, 0)) ? path : name;
+    hr = SHCreateStreamOnFileEx(file, STGM_CREATE | STGM_WRITE, FILE_ATTRIBUTE_NORMAL, TRUE, NULL, &stream);
+    CoTaskMemFree(name);
+    if (FAILED(hr))
+        return hr;
+
+    hr = xmldoc_save_stream(doc, stream);
+    IStream_Release(stream);
+
+    if (SUCCEEDED(hr) && remember)
+        xmldoc_set_moniker(doc, moniker);
+
+    return hr;
+}
+
+static HRESULT WINAPI xmldoc_IPersistMoniker_SaveCompleted(IPersistMoniker *iface, IMoniker *moniker,
+        IBindCtx *bindctx)
+{
+    xmldoc *doc = impl_from_IPersistMoniker(iface);
+
+    TRACE("%p, %p, %p.\n", iface, moniker, bindctx);
+
+    if (moniker)
+        xmldoc_set_moniker(doc, moniker);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI xmldoc_IPersistMoniker_GetCurMoniker(IPersistMoniker *iface, IMoniker **moniker)
+{
+    xmldoc *doc = impl_from_IPersistMoniker(iface);
+
+    TRACE("%p, %p.\n", iface, moniker);
+
+    if (!moniker)
+        return E_POINTER;
+
+    if (!(*moniker = doc->moniker))
+        return E_UNEXPECTED;
+
+    IMoniker_AddRef(*moniker);
+    return S_OK;
+}
+
+static const IPersistMonikerVtbl xmldoc_IPersistMoniker_VTable =
+{
+    xmldoc_IPersistMoniker_QueryInterface,
+    xmldoc_IPersistMoniker_AddRef,
+    xmldoc_IPersistMoniker_Release,
+    xmldoc_IPersistMoniker_GetClassID,
+    xmldoc_IPersistMoniker_IsDirty,
+    xmldoc_IPersistMoniker_Load,
+    xmldoc_IPersistMoniker_Save,
+    xmldoc_IPersistMoniker_SaveCompleted,
+    xmldoc_IPersistMoniker_GetCurMoniker
+};
+#endif
+
 HRESULT XMLDocument_create(LPVOID *ppObj)
 {
     xmldoc *doc;
@@ -2172,6 +2493,9 @@ HRESULT XMLDocument_create(LPVOID *ppObj)
 
     doc->IXMLDocument2_iface.lpVtbl = &xmldoc_vtbl;
     doc->IPersistStreamInit_iface.lpVtbl = &xmldoc_IPersistStreamInit_VTable;
+#ifdef __REACTOS__
+    doc->IPersistMoniker_iface.lpVtbl = &xmldoc_IPersistMoniker_VTable;
+#endif
     doc->ref = 1;
 
     *ppObj = &doc->IXMLDocument2_iface;

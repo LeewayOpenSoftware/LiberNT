@@ -39,6 +39,9 @@ struct domnotation
     IXMLDOMNotation IXMLDOMNotation_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 };
 
 static const struct nodemap_funcs domnotation_attr_map;
@@ -55,11 +58,24 @@ static inline struct domnotation *impl_from_IXMLDOMNotation(IXMLDOMNotation *ifa
     return CONTAINING_RECORD(iface, struct domnotation, IXMLDOMNotation_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const domnotation_typed_iids[] =
+{
+    &IID_IXMLDOMNotation,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI domnotation_QueryInterface(IXMLDOMNotation *iface, REFIID riid, void **obj)
 {
     struct domnotation *notation = impl_from_IXMLDOMNotation(iface);
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&notation->tearoff, (IUnknown *)iface, &notation->dispex, notation->node,
+            domnotation_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if (IsEqualGUID(riid, &IID_IXMLDOMNotation) ||
         IsEqualGUID(riid, &IID_IXMLDOMNode) ||
@@ -98,23 +114,39 @@ static ULONG WINAPI domnotation_AddRef(IXMLDOMNotation *iface)
 
     TRACE("%p, refcount %ld.\n", iface, refcount);
 
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&notation->tearoff, notation->node, refcount);
+#else
     return refcount;
+#endif
 }
 
 static ULONG WINAPI domnotation_Release(IXMLDOMNotation *iface)
 {
     struct domnotation *notation = impl_from_IXMLDOMNotation(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG refcount = node_tearoff_decrement(&notation->tearoff, notation->node, &notation->refcount, &reported);
+#else
     ULONG refcount = InterlockedDecrement(&notation->refcount);
+#endif
 
     TRACE("%p, refcount %ld.\n", iface, refcount);
 
     if (!refcount)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&notation->tearoff);
+#endif
         domnode_release(notation->node);
         free(notation);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return refcount;
+#endif
 }
 
 static HRESULT WINAPI domnotation_GetTypeInfoCount(IXMLDOMNotation *iface, UINT *count)

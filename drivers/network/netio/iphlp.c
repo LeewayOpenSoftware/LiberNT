@@ -242,6 +242,64 @@ NetioPrefixLength(
     return Length;
 }
 
+static
+NTSTATUS
+NetioGetBestRoute6(
+    _In_ NET_IFINDEX InterfaceIndex,
+    _In_opt_ CONST SOCKADDR_INET *SourceAddress,
+    _In_ CONST SOCKADDR_INET *DestinationAddress,
+    _Out_ PMIB_IPFORWARD_ROW2 BestRoute,
+    _Out_ SOCKADDR_INET *BestSourceAddress)
+{
+    UNICODE_STRING Name = RTL_CONSTANT_STRING(L"\\Device\\Ip6");
+    OBJECT_ATTRIBUTES Attributes;
+    IO_STATUS_BLOCK Io;
+    IP6_BEST_ROUTE Query;
+    NTSTATUS Status;
+    HANDLE Ip6;
+
+    RtlZeroMemory(&Query, sizeof(Query));
+    RtlCopyMemory(Query.Destination, &DestinationAddress->Ipv6.sin6_addr, sizeof(Query.Destination));
+    Query.ScopeId = DestinationAddress->Ipv6.sin6_scope_id;
+    Query.InterfaceIndex = InterfaceIndex;
+    if (SourceAddress != NULL && SourceAddress->si_family == AF_INET6)
+        RtlCopyMemory(Query.Source, &SourceAddress->Ipv6.sin6_addr, sizeof(Query.Source));
+
+    InitializeObjectAttributes(&Attributes, &Name, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL);
+    Status = ZwCreateFile(&Ip6, GENERIC_READ | SYNCHRONIZE, &Attributes, &Io, NULL, FILE_ATTRIBUTE_NORMAL,
+                          FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0);
+    if (!NT_SUCCESS(Status))
+        return Status;
+    Status = ZwDeviceIoControlFile(Ip6, NULL, NULL, NULL, &Io, IOCTL_IP6_GET_BEST_ROUTE,
+                                   &Query, sizeof(Query), &Query, sizeof(Query));
+    ZwClose(Ip6);
+    if (!NT_SUCCESS(Status))
+        return Status;
+
+    InitializeIpForwardEntry(BestRoute);
+    BestRoute->InterfaceIndex = Query.InterfaceIndex;
+    BestRoute->InterfaceLuid.Info.NetLuidIndex = Query.InterfaceIndex;
+    BestRoute->DestinationPrefix.Prefix.si_family = AF_INET6;
+    RtlCopyMemory(&BestRoute->DestinationPrefix.Prefix.Ipv6.sin6_addr, Query.Prefix, sizeof(Query.Prefix));
+    BestRoute->DestinationPrefix.PrefixLength = (UINT8)Query.PrefixLength;
+    BestRoute->NextHop.si_family = AF_INET6;
+    RtlCopyMemory(&BestRoute->NextHop.Ipv6.sin6_addr, Query.NextHop, sizeof(Query.NextHop));
+    BestRoute->Metric = Query.Metric;
+    BestRoute->Protocol = (NL_ROUTE_PROTOCOL)Query.Protocol;
+    BestRoute->Origin = (NL_ROUTE_ORIGIN)Query.Origin;
+    BestRoute->Loopback = FALSE;
+    BestRoute->AutoconfigureAddress = FALSE;
+    BestRoute->Publish = FALSE;
+    BestRoute->Immortal = FALSE;
+
+    RtlZeroMemory(BestSourceAddress, sizeof(*BestSourceAddress));
+    BestSourceAddress->Ipv6.sin6_family = AF_INET6;
+    RtlCopyMemory(&BestSourceAddress->Ipv6.sin6_addr, Query.Source, sizeof(Query.Source));
+    if (IN6_IS_ADDR_LINKLOCAL(&BestSourceAddress->Ipv6.sin6_addr))
+        BestSourceAddress->Ipv6.sin6_scope_id = Query.InterfaceIndex;
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS
 NTAPI
 GetBestRoute2(
@@ -272,13 +330,16 @@ GetBestRoute2(
 
     if (DestinationAddress == NULL || BestRoute == NULL || BestSourceAddress == NULL)
         return STATUS_INVALID_PARAMETER;
-    if (DestinationAddress->si_family != AF_INET ||
-        (SourceAddress != NULL && SourceAddress->si_family != AF_UNSPEC && SourceAddress->si_family != AF_INET))
+    if ((DestinationAddress->si_family != AF_INET && DestinationAddress->si_family != AF_INET6) ||
+        (SourceAddress != NULL && SourceAddress->si_family != AF_UNSPEC &&
+         SourceAddress->si_family != DestinationAddress->si_family))
     {
         return STATUS_NOT_SUPPORTED;
     }
     if (InterfaceLuid != NULL && InterfaceIndex == 0)
         InterfaceIndex = (NET_IFINDEX)InterfaceLuid->Info.NetLuidIndex;
+    if (DestinationAddress->si_family == AF_INET6)
+        return NetioGetBestRoute6(InterfaceIndex, SourceAddress, DestinationAddress, BestRoute, BestSourceAddress);
 
     Destination = DestinationAddress->Ipv4.sin_addr.s_addr;
 
@@ -287,6 +348,18 @@ GetBestRoute2(
                           FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0);
     if (!NT_SUCCESS(Status))
         return Status;
+
+    if (InterfaceIndex == 0 &&
+        (SourceAddress == NULL || SourceAddress->si_family != AF_INET || SourceAddress->Ipv4.sin_addr.s_addr == 0))
+    {
+        RtlZeroMemory(&Query, sizeof(Query));
+        Query.Destination = Destination;
+        if (NT_SUCCESS(ZwDeviceIoControlFile(Tcp, NULL, NULL, NULL, &Io, IOCTL_IP_GET_BEST_SOURCE,
+                                             &Query, sizeof(Query), &Query, sizeof(Query))))
+        {
+            InterfaceIndex = Query.InterfaceIndex;
+        }
+    }
 
     Entities = ExAllocatePoolWithTag(PagedPool, NETIO_MAX_ENTITIES * sizeof(TDIEntityID), NETIO_IPHLP_TAG);
     Routes = ExAllocatePoolWithTag(PagedPool, NETIO_MAX_ROUTES * sizeof(NETIO_TDI_ROUTE), NETIO_IPHLP_TAG);

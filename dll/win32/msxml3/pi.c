@@ -41,6 +41,9 @@ typedef struct _dom_pi
     IXMLDOMProcessingInstruction IXMLDOMProcessingInstruction_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 } dom_pi;
 
 static const struct nodemap_funcs dom_pi_attr_map;
@@ -57,11 +60,24 @@ static inline dom_pi *impl_from_IXMLDOMProcessingInstruction( IXMLDOMProcessingI
     return CONTAINING_RECORD(iface, dom_pi, IXMLDOMProcessingInstruction_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const dom_pi_typed_iids[] =
+{
+    &IID_IXMLDOMProcessingInstruction,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI dom_pi_QueryInterface(IXMLDOMProcessingInstruction *iface, REFIID riid, void **obj)
 {
     dom_pi *pi = impl_from_IXMLDOMProcessingInstruction(iface);
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&pi->tearoff, (IUnknown *)iface, &pi->dispex, pi->node,
+            dom_pi_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if (IsEqualGUID(riid, &IID_IXMLDOMProcessingInstruction) ||
         IsEqualGUID(riid, &IID_IXMLDOMNode) ||
@@ -100,23 +116,39 @@ static ULONG WINAPI dom_pi_AddRef(IXMLDOMProcessingInstruction *iface)
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&pi->tearoff, pi->node, refcount);
+#else
     return refcount;
+#endif
 }
 
 static ULONG WINAPI dom_pi_Release(IXMLDOMProcessingInstruction *iface)
 {
     dom_pi *pi = impl_from_IXMLDOMProcessingInstruction(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG refcount = node_tearoff_decrement(&pi->tearoff, pi->node, &pi->refcount, &reported);
+#else
     ULONG refcount = InterlockedDecrement(&pi->refcount);
+#endif
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&pi->tearoff);
+#endif
         domnode_release(pi->node);
         free(pi);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return refcount;
+#endif
 }
 
 static HRESULT WINAPI dom_pi_GetTypeInfoCount(IXMLDOMProcessingInstruction *iface, UINT *count)

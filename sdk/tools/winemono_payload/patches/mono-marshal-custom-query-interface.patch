@@ -1,0 +1,45 @@
+diff --git a/mcs/class/corlib/System.Runtime.InteropServices/Marshal.cs b/mcs/class/corlib/System.Runtime.InteropServices/Marshal.cs
+index 3993a0df73..4c8ef121bf 100644
+--- a/mcs/class/corlib/System.Runtime.InteropServices/Marshal.cs
++++ b/mcs/class/corlib/System.Runtime.InteropServices/Marshal.cs
+@@ -446,21 +446,34 @@ private static IntPtr GetComInterfaceForObjectInternal (object o, Type T)
+ 
+ 		public static IntPtr GetComInterfaceForObject (object o, Type T)
+ 		{
++			return GetComInterfaceForObject (o, T, CustomQueryInterfaceMode.Allow);
++		}
++
++
++		public static IntPtr GetComInterfaceForObject (object o, Type T, CustomQueryInterfaceMode mode)
++		{
+ #if MOBILE
+ 			throw new PlatformNotSupportedException ();
+ #else
++			ICustomQueryInterface custom = mode == CustomQueryInterfaceMode.Allow ? o as ICustomQueryInterface : null;
++			if (custom != null && T != null) {
++				Guid iid = T.GUID;
++				IntPtr ppv;
++				switch (custom.GetInterface (ref iid, out ppv)) {
++				case CustomQueryInterfaceResult.Handled:
++					if (ppv != IntPtr.Zero)
++						return ppv;
++					throw new InvalidCastException ();
++				case CustomQueryInterfaceResult.Failed:
++					throw new InvalidCastException ();
++				}
++			}
+ 			IntPtr pItf = GetComInterfaceForObjectInternal (o, T);
+ 			AddRef (pItf);
+ 			return pItf;
+ #endif
+ 		}
+ 
+-
+-		public static IntPtr GetComInterfaceForObject (object o, Type T, CustomQueryInterfaceMode mode)
+-		{
+-			throw new NotImplementedException ();
+-		}
+-
+ 		public static IntPtr GetComInterfaceForObject<T, TInterface> (T o) {
+ 			return GetComInterfaceForObject ((object)o, typeof (T));
+ 		}

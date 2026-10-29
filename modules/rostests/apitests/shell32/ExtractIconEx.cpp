@@ -114,6 +114,28 @@ EXTRACTICONTEST IconTests[] =
     {L"ROS.ico", (UINT)(GetNTVersion() >= _WIN32_WINNT_VISTA ? 1 : 0)}
 };
 
+static BOOL CALLBACK CountIconGroupProc(HMODULE hModule, LPCWSTR lpszType, LPWSTR lpszName, LONG_PTR lParam)
+{
+    ++*(UINT *)lParam;
+    return TRUE;
+}
+
+static UINT CountIconGroups(LPCWSTR pszFilePath)
+{
+    WCHAR szPath[MAX_PATH];
+    HMODULE hModule;
+    UINT nCount = 0;
+
+    if (!ExpandEnvironmentStringsW(pszFilePath, szPath, _countof(szPath)))
+        return 0;
+    hModule = LoadLibraryExW(szPath, NULL, LOAD_LIBRARY_AS_DATAFILE);
+    if (!hModule)
+        return 0;
+    EnumResourceNamesW(hModule, RT_GROUP_ICON, CountIconGroupProc, (LONG_PTR)&nCount);
+    FreeLibrary(hModule);
+    return nCount;
+}
+
 VOID RunExtractIconTest(EXTRACTICONTEST *Test)
 {
     UINT nReturnedIcons, nExtractedIcons;
@@ -143,30 +165,12 @@ START_TEST(ExtractIconEx)
         RunExtractIconTest(&IconTests[i]);
 
     /* Run special case checks */
-    switch (GetNTVersion())
-    {
-        case _WIN32_WINNT_WS03:
-            explorer_exe.nIcons = 18;
-            break;
-        case _WIN32_WINNT_VISTA:
-            explorer_exe.nIcons = 23;
-            break;
-        case _WIN32_WINNT_WIN7:
-            explorer_exe.nIcons = 25;
-            break;
-        case _WIN32_WINNT_WIN8:
-        case _WIN32_WINNT_WINBLUE:
-            explorer_exe.nIcons = 24;
-            break;
-        case _WIN32_WINNT_WIN10:
-            explorer_exe.nIcons = 28;
-            break;
-    }
+    explorer_exe.nIcons = CountIconGroups(explorer_exe.pszFilePath);
 
     if (explorer_exe.nIcons)
         RunExtractIconTest(&explorer_exe);
     else
-        skip("Unknown NT Version: 0x%lX\n", GetNTVersion());
+        skip("No icon groups found in %S\n", explorer_exe.pszFilePath);
 
     DeleteFileA(FileName[0]);
     DeleteFileA(FileName[1]);

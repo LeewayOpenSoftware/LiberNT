@@ -21,6 +21,7 @@
 #include "shlwapi.h"
 #include "shlguid.h"
 #include "intshcut.h"
+#include <shlguid_undoc.h>
 
 #include "wine/debug.h"
 
@@ -112,6 +113,7 @@ typedef struct _CInternetFolder
     IObjectWithBackReferences IObjectWithBackReferences_iface;
     LONG refCount;
     LPITEMIDLIST pidlRoot;
+    CLSID ClassId;
 } CInternetFolder;
 
 typedef struct _CInternetFolderEnum
@@ -279,10 +281,24 @@ static HRESULT WINAPI ShellFolder_EnumObjects(IShellFolder2 *This, HWND hwndOwne
     return CreateEmptyEnum(ppenumIDList);
 }
 
+static CInternetFolder* CreateInstance(void);
+
 static HRESULT WINAPI BindToObject(IShellFolder2 *This, PCUIDLIST_RELATIVE pidl, IBindCtx *pbc, REFIID riid, void **ppvOut)
 {
+    CInternetFolder *pThis = CONTAINING_RECORD(This, CInternetFolder, IShellFolder2_iface);
+    CInternetFolder *pChild;
+    HRESULT hr;
+
     *ppvOut = NULL;
-    return E_NOTIMPL;
+    if (!IsUrlItem(pidl) || !ILIsEmpty(ILGetNext(pidl)))
+        return E_NOTIMPL;
+    if (!(pChild = CreateInstance()))
+        return E_OUTOFMEMORY;
+    pChild->ClassId = CLSID_ShellDocObjView;
+    pChild->pidlRoot = pThis->pidlRoot ? ILCombine(pThis->pidlRoot, pidl) : ILClone(pidl);
+    hr = pChild->pidlRoot ? Unknown_QueryInterface(pChild, riid, ppvOut) : E_OUTOFMEMORY;
+    Unknown_Release(pChild);
+    return hr;
 }
 
 static HRESULT WINAPI BindToStorage(IShellFolder2 *This, PCUIDLIST_RELATIVE pidl, IBindCtx *pbc, REFIID riid, void **ppvOut)
@@ -428,7 +444,7 @@ static ULONG WINAPI PersistFolder_Release(IPersistFolder2 *This)
 
 static HRESULT WINAPI PersistFolder_GetClassID(IPersistFolder2 *This, CLSID *pClassID)
 {
-    *pClassID = CLSID_Internet;
+    *pClassID = CONTAINING_RECORD(This, CInternetFolder, IPersistFolder2_iface)->ClassId;
     return S_OK;
 }
 
@@ -559,6 +575,7 @@ static CInternetFolder* CreateInstance(void)
         obj->IObjectWithBackReferences_iface.lpVtbl = &BackReferencesVtbl;
         obj->refCount = 1;
         obj->pidlRoot = NULL;
+        obj->ClassId = CLSID_Internet;
         WSTORAGE_LockModule();
     }
     return obj;

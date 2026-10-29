@@ -41,6 +41,9 @@ typedef struct _domelem
     IXMLDOMElement IXMLDOMElement_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 } domelem;
 
 static const struct nodemap_funcs domelem_attr_map;
@@ -57,11 +60,24 @@ static inline domelem *impl_from_IXMLDOMElement(IXMLDOMElement *iface)
     return CONTAINING_RECORD(iface, domelem, IXMLDOMElement_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const domelem_typed_iids[] =
+{
+    &IID_IXMLDOMElement,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI domelem_QueryInterface(IXMLDOMElement *iface, REFIID riid, void **obj)
 {
     domelem *element = impl_from_IXMLDOMElement(iface);
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&element->tearoff, (IUnknown *)iface, &element->dispex, element->node,
+            domelem_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if (IsEqualGUID(riid, &IID_IXMLDOMElement) ||
         IsEqualGUID(riid, &IID_IXMLDOMNode) ||
@@ -100,23 +116,39 @@ static ULONG WINAPI domelem_AddRef(IXMLDOMElement *iface)
 
     TRACE("%p, refcount %ld.\n", iface, refcount);
 
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&element->tearoff, element->node, refcount);
+#else
     return refcount;
+#endif
 }
 
 static ULONG WINAPI domelem_Release(IXMLDOMElement *iface)
 {
     domelem *element = impl_from_IXMLDOMElement(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG refcount = node_tearoff_decrement(&element->tearoff, element->node, &element->refcount, &reported);
+#else
     ULONG refcount = InterlockedDecrement(&element->refcount);
+#endif
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&element->tearoff);
+#endif
         domnode_release(element->node);
         free(element);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return refcount;
+#endif
 }
 
 static HRESULT WINAPI domelem_GetTypeInfoCount(IXMLDOMElement *iface, UINT *count)

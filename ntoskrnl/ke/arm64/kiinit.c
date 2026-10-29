@@ -30,6 +30,7 @@ KiArm64TtbrToPa(
 #define SCTLR_EL1_A     (1ULL << 1)
 #define SCTLR_EL1_SA    (1ULL << 3)
 #define SCTLR_EL1_SA0   (1ULL << 4)
+#define SCTLR_EL1_nAA   (1ULL << 6)
 #define SCTLR_EL1_I     (1ULL << 12)
 #define SCTLR_EL1_DZE   (1ULL << 14)
 #define SCTLR_EL1_nTWE  (1ULL << 18)
@@ -170,6 +171,8 @@ KiArm64ApplySctlrPolicy(VOID)
     NewSctlr = (Sctlr & ~(SCTLR_EL1_A | SCTLR_EL1_BT0 | SCTLR_EL1_BT1)) |
                SCTLR_EL1_SA | SCTLR_EL1_SA0 | SCTLR_EL1_I | SCTLR_EL1_DZE |
                SCTLR_EL1_nTWE | SCTLR_EL1_UCI;
+    if (((ARM64_READ_SYSREG(ID_AA64MMFR2_EL1) >> 32) & 0xFULL) != 0)
+        NewSctlr |= SCTLR_EL1_nAA;
     if (NewSctlr != Sctlr)
     {
         ARM64_WRITE_SYSREG(SCTLR_EL1, NewSctlr);

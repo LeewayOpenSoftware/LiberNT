@@ -13,6 +13,7 @@
 
 #include <ntifs.h>
 #include <ipifcons.h>
+#include <tcpip_undoc.h>
 
 ULONG NextDefaultAdapter = 0;
 
@@ -813,4 +814,114 @@ VOID IPDeleteInterfaceAddresses(PIP_INTERFACE Interface)
     }
 
     ExReleaseFastMutex(&NetTableMutex);
+}
+
+static
+PIP_INTERFACE
+IPLocateInterfaceByIndex(ULONG Index)
+{
+    PIP_INTERFACE Interface = NULL;
+    KIRQL OldIrql;
+    IF_LIST_ITER(IF);
+
+    TcpipAcquireSpinLock(&InterfaceListLock, &OldIrql);
+    ForEachInterface(IF) {
+        if (IF->Index == Index) {
+            if (IPReferenceInterface(IF))
+                Interface = IF;
+            break;
+        }
+    } EndFor(IF);
+    TcpipReleaseSpinLock(&InterfaceListLock, OldIrql);
+    return Interface;
+}
+
+NTSTATUS
+IPQueryInterfaceV4(PIP4_INTERFACE_INFO Info)
+{
+    PIP_INTERFACE Interface = IPLocateInterfaceByIndex(Info->Index);
+
+    if (!Interface)
+        return STATUS_NOT_FOUND;
+    Info->Metric = IPInterfaceMetric(Interface);
+    Info->UseAutomaticMetric = !Interface->ManualMetric;
+    Info->Mtu = Interface->MTU;
+    Info->RetransmitTime = Interface->RetransmitTime;
+    Info->BaseReachableTime = Interface->BaseReachableTime;
+    Info->ReachableTime = Interface->ReachableTime;
+    Info->DadTransmits = Interface->DadTransmits;
+    Info->RouterDiscoveryBehavior = Interface->RouterDiscoveryBehavior;
+    Info->PathMtuDiscoveryTimeout = Interface->PathMtuDiscoveryTimeout;
+    Info->LinkLocalAddressTimeout = Interface->LinkLocalAddressTimeout;
+    Info->SitePrefixLength = Interface->SitePrefixLength;
+    RtlCopyMemory(Info->ZoneIndices, Interface->ZoneIndices, sizeof(Info->ZoneIndices));
+    Info->Forwarding = Interface->Forwarding;
+    Info->WeakHostSend = Interface->WeakHostSend;
+    Info->WeakHostReceive = Interface->WeakHostReceive;
+    Info->DisableDefaultRoutes = Interface->DisableDefaultRoutes;
+    Info->AdvertiseDefaultRoute = Interface->AdvertiseDefaultRoute;
+    IPDereferenceInterface(Interface);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+IPSetInterfaceV4(PIP4_INTERFACE_INFO Info)
+{
+    PIP_INTERFACE Interface;
+
+    if ((Info->Mtu && Info->Mtu < 576) || !Info->BaseReachableTime || !Info->RetransmitTime ||
+        Info->RouterDiscoveryBehavior > 2)
+        return STATUS_INVALID_PARAMETER;
+    Interface = IPLocateInterfaceByIndex(Info->Index);
+    if (!Interface)
+        return STATUS_NOT_FOUND;
+
+    Interface->ManualMetric = !Info->UseAutomaticMetric;
+    Interface->InterfaceMetric = Info->UseAutomaticMetric ? 0 : Info->Metric;
+    if (Info->Mtu)
+        Interface->MTU = min(Info->Mtu, Interface->LinkMTU);
+    Interface->RetransmitTime = max(Info->RetransmitTime, 500);
+    if (Info->BaseReachableTime != Interface->BaseReachableTime)
+    {
+        Interface->BaseReachableTime = Info->BaseReachableTime;
+        Interface->ReachableTime = Info->BaseReachableTime / 2 + (ULONG)(Random() % Info->BaseReachableTime);
+    }
+    Interface->DadTransmits = Info->DadTransmits;
+    Interface->RouterDiscoveryBehavior = Info->RouterDiscoveryBehavior;
+    Interface->PathMtuDiscoveryTimeout = Info->PathMtuDiscoveryTimeout;
+    Interface->LinkLocalAddressTimeout = Info->LinkLocalAddressTimeout;
+    Interface->SitePrefixLength = Info->SitePrefixLength;
+    RtlCopyMemory(Interface->ZoneIndices, Info->ZoneIndices, sizeof(Interface->ZoneIndices));
+    Interface->Forwarding = Info->Forwarding;
+    Interface->WeakHostSend = Info->WeakHostSend;
+    Interface->WeakHostReceive = Info->WeakHostReceive;
+    Interface->DisableDefaultRoutes = Info->DisableDefaultRoutes;
+    Interface->AdvertiseDefaultRoute = Info->AdvertiseDefaultRoute;
+    IPDereferenceInterface(Interface);
+    return STATUS_SUCCESS;
+}
+
+BOOLEAN
+IPv4AcceptDestination(PIP_INTERFACE Interface, PIP_ADDRESS Destination, PBOOLEAN Forward)
+{
+    PIP_INTERFACE Owner;
+    ULONG Address = DN2H(Destination->Address.IPv4Address);
+    BOOLEAN Accept;
+
+    *Forward = FALSE;
+    if (Interface == Loopback || Address == 0xFFFFFFFF || (Address & 0xF0000000) == 0xE0000000)
+        return TRUE;
+    if (AddrIsUnspecified(&Interface->Unicast) || IsInterfaceAddress(Interface, Destination) ||
+        IsInterfaceBroadcast(Interface, Destination))
+        return TRUE;
+
+    Owner = AddrLocateInterface(Destination);
+    if (Owner)
+    {
+        Accept = Owner == Interface || Interface->WeakHostReceive;
+        IPDereferenceInterface(Owner);
+        return Accept;
+    }
+    *Forward = Interface->Forwarding;
+    return FALSE;
 }

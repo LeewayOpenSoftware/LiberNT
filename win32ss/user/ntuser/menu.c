@@ -3607,6 +3607,12 @@ static void FASTCALL MENU_SelectItem(PWND pwndOwner, PMENU menu, UINT wIndex,
                                       (menu->fFlags & MNF_SYSMENU ? MF_SYSMENU : 0 ) );
 
            co_IntSendMessage(UserHMGetHandle(pwndOwner), WM_MENUSELECT, wParam, (LPARAM) UserHMGetHandle(menu));
+           if (menu->fFlags & MNF_POPUP)
+           {
+              PWND pwndFocus = ValidateHwndNoErr(menu->hWnd);
+              if (pwndFocus)
+                 IntNotifyWinEvent(EVENT_OBJECT_FOCUS, pwndFocus, OBJID_CLIENT, wIndex + 1, 0);
+           }
         }
     }
     else if (sendMenuSelect) 
@@ -3713,6 +3719,7 @@ static void FASTCALL MENU_HideSubPopups(PWND pWndOwner, PMENU Menu,
           pWnd = ValidateHwndNoErr(Item->spSubMenu->hWnd);
           if (pWnd != NULL)
           {
+              IntNotifyWinEvent(EVENT_SYSTEM_MENUPOPUPEND, pWnd, OBJID_CLIENT, CHILDID_SELF, 0);
               co_UserDestroyWindow(pWnd);
           }
 

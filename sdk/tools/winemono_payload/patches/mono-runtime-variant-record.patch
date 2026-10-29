@@ -1,0 +1,117 @@
+--- a/mono/metadata/icall-def.h
++++ b/mono/metadata/icall-def.h
+@@ -1134,7 +1134,8 @@
+ HANDLES(VALUET_1, "InternalEquals", ves_icall_System_ValueType_Equals, MonoBoolean, 3, (MonoObject, MonoObject, MonoArrayOut))
+ HANDLES(VALUET_2, "InternalGetHashCode", ves_icall_System_ValueType_InternalGetHashCode, gint32, 2, (MonoObject, MonoArrayOut))
+ 
+-ICALL_TYPE(VARIANT, "System.Variant", VARIANT_1)
++ICALL_TYPE(VARIANT, "System.Variant", VARIANT_0)
++HANDLES(VARIANT_0, "GetRecordInfoInternal", ves_icall_System_Variant_GetRecordInfoInternal, gpointer, 1, (MonoReflectionType))
+ HANDLES(VARIANT_1, "SafeArrayDestroyInternal", ves_icall_System_Variant_SafeArrayDestroyInternal, void, 1, (gpointer))
+ HANDLES(VARIANT_2, "SafeArrayFromArrayInternal", ves_icall_System_Variant_SafeArrayFromArrayInternal, gpointer, 2, (MonoArray, gint32_ref))
+ HANDLES(VARIANT_3, "SafeArrayToArrayInternal", ves_icall_System_Variant_SafeArrayToArrayInternal, MonoArray, 2, (gpointer, gint32))
+--- a/mono/metadata/cominterop.c
++++ b/mono/metadata/cominterop.c
+@@ -2542,6 +2542,8 @@
+ 		else if (!strcmp (name, "DispatchWrapper"))
+ 			return MONO_VARIANT_DISPATCH;
+ 	}
++	else if (m_class_is_valuetype (klass) && !m_class_is_enumtype (klass))
++		return MONO_VARIANT_RECORD;
+ 	else if (!mono_class_is_transparent_proxy (klass) && cominterop_can_support_dispatch (klass))
+ 		return MONO_VARIANT_DISPATCH;
+ 
+@@ -4960,6 +4962,31 @@
+ 	SafeArrayUnaccessData (safearray);
+ 	return safearray;
+ }
++
++static MonoClass *
++cominterop_record_class_from_safearray (gpointer safearray, MonoError *error)
++{
++	IRecordInfo *record_info = NULL;
++	MonoReflectionType *type;
++	MonoMethod *get_record_type;
++	gpointer args [1];
++
++	if (FAILED (SafeArrayGetRecordInfo ((SAFEARRAY *)safearray, &record_info)) || !record_info) {
++		mono_error_set_argument (error, "safearray", "Specified OLE variant is invalid.");
++		return NULL;
++	}
++	get_record_type = mono_class_get_method_from_name_checked (mono_class_get_variant_class (), "GetRecordType", 1, METHOD_ATTRIBUTE_STATIC, error);
++	if (!is_ok (error)) {
++		record_info->lpVtbl->Release (record_info);
++		return NULL;
++	}
++	args [0] = &record_info;
++	type = (MonoReflectionType *)mono_runtime_invoke_checked (get_record_type, NULL, args, error);
++	record_info->lpVtbl->Release (record_info);
++	if (!is_ok (error) || !type)
++		return NULL;
++	return mono_class_from_mono_type_internal (type->type);
++}
+ #endif
+ 
+ 
+@@ -5117,6 +5144,13 @@
+ 		case VT_DISPATCH:
+ 		case VT_UNKNOWN:
+ 		case VT_VARIANT: klass = mono_defaults.object_class; break;
++#ifdef HOST_WIN32
++		case VT_RECORD:
++			klass = cominterop_record_class_from_safearray (safearray, error);
++			if (!klass)
++				return NULL_HANDLE_ARRAY;
++			break;
++#endif
+ 		default:
+ 			mono_error_set_argument (error, "vt", "Unsupported SafeArray element type");
+ 			return NULL_HANDLE_ARRAY;
+@@ -5211,6 +5245,15 @@
+ 	if (!sizes [0])
+ 		goto leave;
+ 
++	MonoClass *record_class = NULL;
++	if (vt == VT_RECORD) {
++		record_class = m_class_get_element_class (aclass);
++		if (!m_class_is_valuetype (record_class) || !m_class_is_blittable (record_class)) {
++			mono_error_set_argument (error, "vt", "Unsupported SafeArray element type");
++			goto leave;
++		}
++	}
++
+ 	MonoMethod* set_value = mono_get_Array_SetValueImpl ();
+ 
+ 	MONO_STATIC_POINTER_INIT (MonoMethod, get_value_at)
+@@ -5224,8 +5267,12 @@
+ 	for (i = 0, d = 0; d < dim; i++) {
+ 		MonoObject* obj = NULL;
+ 		if (mono_marshal_safearray_get_value_internal (safearray, idx, &val) >= 0) {
+-			gpointer args [2] = { &vt, &val };
+-			obj = mono_runtime_invoke_checked (get_value_at, NULL, args, error);
++			if (record_class) {
++				obj = mono_value_box_checked (mono_domain_get (), record_class, val, error);
++			} else {
++				gpointer args [2] = { &vt, &val };
++				obj = mono_runtime_invoke_checked (get_value_at, NULL, args, error);
++			}
+ 			if (mono_error_set_pending_exception (error))
+ 				goto leave;
+ 		}
+@@ -5257,6 +5304,16 @@
+ 	return mono_marshal_safearray_to_array_impl (safearray, mono_defaults.array_class, vt, NULL_HANDLE_ARRAY, error);
+ }
+ 
++gpointer
++ves_icall_System_Variant_GetRecordInfoInternal (MonoReflectionTypeHandle type, MonoError *error)
++{
++#ifdef HOST_WIN32
++	return cominterop_record_info_for_class (mono_class_from_mono_type_internal (MONO_HANDLE_GETVAL (type, type)));
++#else
++	return NULL;
++#endif
++}
++
+ #else /* DISABLE_COM */
+ 
+ void

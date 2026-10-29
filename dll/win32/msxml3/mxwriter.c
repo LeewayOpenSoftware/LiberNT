@@ -2357,6 +2357,10 @@ static HRESULT WINAPI VBSAXContentHandler_characters(IVBSAXContentHandler *iface
     if (!chars)
         return E_POINTER;
 
+#ifdef __REACTOS__
+    if (This->class_version >= MSXML4)
+        return ISAXContentHandler_characters(&This->ISAXContentHandler_iface, *chars, *chars ? lstrlenW(*chars) : 0);
+#endif
     return ISAXContentHandler_characters(&This->ISAXContentHandler_iface, *chars, SysStringLen(*chars));
 }
 

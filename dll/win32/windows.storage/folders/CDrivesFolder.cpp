@@ -985,6 +985,12 @@ HRESULT WINAPI CDrivesFolder::ParseDisplayName(HWND hwndOwner, LPBC pbc, LPOLEST
                                              pdwAttributes);
     }
 
+    if (lpszDisplayName[0] == L'\\' && lpszDisplayName[1] == L'\\' &&
+        lpszDisplayName[2] == L'?' && lpszDisplayName[3] == L'\\')
+    {
+        return E_INVALIDARG;
+    }
+
     if (lpszDisplayName[0] == L'\\' && lpszDisplayName[1] == L'\\')
     {
         LoadDelegates();

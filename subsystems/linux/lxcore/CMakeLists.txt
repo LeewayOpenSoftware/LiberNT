@@ -22,10 +22,12 @@ list(APPEND SOURCE
     poll.c
     process.c
     procfs.c
+    seccomp.c
     signal.c
     socket.c
     sys.c
     sysdev.c
+    tmpfs.c
     tty.c
     unistd.c
     vfs.c)

@@ -954,6 +954,9 @@ IntCompositionFreeSurface(_Inout_ PWND_REDIRECT r, _In_ BOOL PreserveDx)
     r->FrontOffset.x = r->FrontOffset.y = 0;
 }
 
+#define DWM_DX_LAYER_COORDINATE_LIMIT 0x1000000
+#define DWM_DX_LAYER_DIMENSION_LIMIT 16384
+
 static BOOL
 IntCompositionGetBufferSize(
     _In_ LONG cx,
@@ -963,7 +966,7 @@ IntCompositionGetBufferSize(
 {
     ULONG Stride;
 
-    if (cx <= 0 || cy <= 0 || (ULONG)cx > MAXULONG / sizeof(ULONG))
+    if (cx <= 0 || cy <= 0 || cx > DWM_DX_LAYER_DIMENSION_LIMIT || cy > DWM_DX_LAYER_DIMENSION_LIMIT)
         return FALSE;
 
     Stride = (ULONG)cx * sizeof(ULONG);
@@ -3837,9 +3840,6 @@ IntCompositionDwmOpenSurface(_In_ PVOID pUser)
         ObCloseHandle(hSection, UserMode);
     return Status;
 }
-
-#define DWM_DX_LAYER_COORDINATE_LIMIT 0x1000000
-#define DWM_DX_LAYER_DIMENSION_LIMIT 16384
 
 static BOOLEAN
 IntCompositionValidDxLayer(_In_ const DWM_DX_SURFACE_EXCHANGE *Request)

@@ -50,11 +50,13 @@ list(APPEND SHELL_SOURCE
     CQueryAssociations.cpp
     CShellItem.cpp
     CShellLink.cpp
+    CStructuredQuery.cpp
     folders/CDesktopFolder.cpp
     folders/CDrivesFolder.cpp
     folders/CFSFolder.cpp
     folders/CFSPropertyStore.cpp
     folders/CRegFolder.cpp
+    folders/CSearchFolder.cpp
     shellmodule.cpp)
 
 list(APPEND SHELL_WINE_SOURCE

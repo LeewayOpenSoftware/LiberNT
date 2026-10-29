@@ -143,7 +143,7 @@ R_ResolverQuery(
             if (Status == ERROR_SUCCESS)
             {
                 DPRINT("DNS query successful!\n");
-                DnsIntCacheAddEntry(*ppResultRecords, FALSE);
+                DnsIntCacheAddEntry(pszName, wType, *ppResultRecords, FALSE);
             }
         }
     }

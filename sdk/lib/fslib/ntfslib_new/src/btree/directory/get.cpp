@@ -175,6 +175,7 @@ Directory::LoadDirectoryForEnumeration(_In_ PFileRecord File)
         return STATUS_NOT_FOUND;
 
     EnumerationFile = File;
+    CaseSensitive = File->IsCaseSensitiveDirectory();
     EnumerationRoot = File->GetAttribute(
         TypeIndexRoot,
         const_cast<PWSTR>(L"$I30"));
@@ -558,9 +559,10 @@ Directory::SeekDirectEnumeration(
             EntryString = NtfsMakeCountedUnicodeString(
                 EntryName->Name,
                 EntryName->NameLength * sizeof(WCHAR));
-            Status = DiskVolume->CompareFileNames(
+            Status = DiskVolume->CollateFileNames(
                 &EntryString,
                 Name,
+                CaseSensitive,
                 &CompareResult);
             if (!NT_SUCCESS(Status))
                 return Status;
@@ -645,9 +647,10 @@ Directory::FindDirectExactEntry(
         EntryString = NtfsMakeCountedUnicodeString(
             FileNameData->Name,
             FileNameData->NameLength * sizeof(WCHAR));
-        Status = DiskVolume->CompareFileNames(
+        Status = DiskVolume->CollateFileNames(
             &EntryString,
             &Target,
+            CaseSensitive,
             &CompareResult);
         if (!NT_SUCCESS(Status))
             return Status;
@@ -1066,7 +1069,7 @@ Directory::GetFileBothDirInfo(_In_    BOOLEAN ReturnSingleEntry,
             ResumeString.Length = (USHORT)(ResumeNameLength * sizeof(WCHAR));
             ResumeString.MaximumLength = ResumeString.Length;
 
-            Status = DiskVolume->CompareFileNames(&EntryString, &ResumeString, &CompareResult);
+            Status = DiskVolume->CollateFileNames(&EntryString, &ResumeString, CaseSensitive, &CompareResult);
             if (!NT_SUCCESS(Status))
                 goto done;
             if (CompareResult <= 0)

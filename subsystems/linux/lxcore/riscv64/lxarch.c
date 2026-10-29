@@ -52,6 +52,12 @@ LxArchHwcap(VOID)
            (1ULL << ('D' - 'A')) | (1ULL << ('C' - 'A'));
 }
 
+ULONG64
+LxArchHwcap2(VOID)
+{
+    return 0;
+}
+
 PCSTR
 LxArchPlatform(VOID)
 {

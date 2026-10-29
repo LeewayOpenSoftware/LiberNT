@@ -103,7 +103,21 @@ static const struct clsid_version_t clsid_versions_table[] =
     { &CLSID_SAXAttributes40, MSXML4 },
     { &CLSID_SAXAttributes60, MSXML6 },
 
-    { &CLSID_XMLView, MSXML_DEFAULT }
+    { &CLSID_XMLView, MSXML_DEFAULT },
+
+#ifdef __REACTOS__
+    { &CLSID_XMLHTTPRequest, MSXML_DEFAULT },
+    { &CLSID_XMLHTTP,   MSXML_DEFAULT },
+    { &CLSID_XMLHTTP26, MSXML26 },
+    { &CLSID_XMLHTTP30, MSXML3 },
+    { &CLSID_XMLHTTP40, MSXML4 },
+    { &CLSID_XMLHTTP60, MSXML6 },
+
+    { &CLSID_ServerXMLHTTP,   MSXML_DEFAULT },
+    { &CLSID_ServerXMLHTTP30, MSXML3 },
+    { &CLSID_ServerXMLHTTP40, MSXML4 },
+    { &CLSID_ServerXMLHTTP60, MSXML6 },
+#endif
 };
 
 static MSXML_VERSION get_msxml_version(const GUID *clsid)
@@ -245,6 +259,11 @@ static HRESULT WINAPI DOMClassFactory_CreateInstance(
     if (pOuter)
         return CLASS_E_NOAGGREGATION;
 
+#ifdef __REACTOS__
+    if (This->pCreateInstance == SAXXMLReader_create)
+        r = SAXXMLReader_create_iid( This->version, riid, (void**) &punk );
+    else
+#endif
     r = This->pCreateInstance( This->version, (void**) &punk );
     if (FAILED(r))
         return r;
@@ -295,8 +314,10 @@ static HRESULT DOMClassFactory_Create(const GUID *clsid, REFIID riid, void **ppv
 }
 
 static ClassFactory xmldoccf = { { &ClassFactoryVtbl }, XMLDocument_create };
+#ifndef __REACTOS__
 static ClassFactory httpreqcf = { { &ClassFactoryVtbl }, XMLHTTPRequest_create };
 static ClassFactory serverhttp = { { &ClassFactoryVtbl }, ServerXMLHTTP_create };
+#endif
 static ClassFactory xsltemplatecf = { { &ClassFactoryVtbl }, XSLTemplate_create };
 static ClassFactory mxnsmanagercf = { {&ClassFactoryVtbl }, MXNamespaceManager_create };
 static ClassFactory xmlparsercf = { { &ClassFactoryVtbl }, XMLParser_create };
@@ -359,14 +380,22 @@ HRESULT WINAPI DllGetClassObject( REFCLSID rclsid, REFIID riid, void **ppv )
              IsEqualCLSID( rclsid, &CLSID_XMLHTTP40 ) ||
              IsEqualCLSID( rclsid, &CLSID_XMLHTTP60 ))
     {
+#ifdef __REACTOS__
+        return DOMClassFactory_Create(rclsid, riid, ppv, XMLHTTPRequest_create_version);
+#else
         cf = &httpreqcf.IClassFactory_iface;
+#endif
     }
     else if( IsEqualCLSID( rclsid, &CLSID_ServerXMLHTTP ) ||
              IsEqualCLSID( rclsid, &CLSID_ServerXMLHTTP30 ) ||
              IsEqualCLSID( rclsid, &CLSID_ServerXMLHTTP40 ) ||
              IsEqualCLSID( rclsid, &CLSID_ServerXMLHTTP60 ))
     {
+#ifdef __REACTOS__
+        return DOMClassFactory_Create(rclsid, riid, ppv, ServerXMLHTTP_create_version);
+#else
         cf = &serverhttp.IClassFactory_iface;
+#endif
     }
     else if( IsEqualCLSID( rclsid, &CLSID_XSLTemplate )   ||
              IsEqualCLSID( rclsid, &CLSID_XSLTemplate26 ) ||

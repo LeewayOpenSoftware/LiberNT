@@ -93,6 +93,18 @@ static const CLSID* IsRegItem(LPCITEMIDLIST pidl)
     return NULL;
 }
 
+static BOOL IsNameSpaceItem(IShellFolder2 *pRegFolder, PCUITEMID_CHILD pidl)
+{
+    const CLSID *pclsid = IsRegItem(pidl);
+    WCHAR szName[2 + CHARS_IN_GUID] = L"::";
+    CComHeapPtr<ITEMIDLIST> pidlItem;
+
+    if (!pclsid || !_ILIsPidlSimple(pidl))
+        return FALSE;
+    StringFromGUID2(*pclsid, szName + 2, CHARS_IN_GUID);
+    return SUCCEEDED(pRegFolder->ParseDisplayName(NULL, NULL, szName, NULL, &pidlItem, NULL));
+}
+
 static LPITEMIDLIST _ILCreateCPanelApplet(LPCWSTR pszName, LPCWSTR pszDisplayName, LPCWSTR pszComment, int iIconIdx)
 {
     PIDLCPanelStruct *pCP;
@@ -451,6 +463,7 @@ HRESULT WINAPI CControlPanelFolder::CreateViewObject(HWND hwndOwner, REFIID riid
 HRESULT WINAPI CControlPanelFolder::GetAttributesOf(UINT cidl, PCUITEMID_CHILD_ARRAY apidl, DWORD * rgfInOut)
 {
     HRESULT hr = S_OK;
+    BOOL bInvalid = FALSE;
     static const DWORD dwControlPanelAttributes =
         SFGAO_HASSUBFOLDER | SFGAO_FOLDER | SFGAO_CANLINK;
 
@@ -473,6 +486,11 @@ HRESULT WINAPI CControlPanelFolder::GetAttributesOf(UINT cidl, PCUITEMID_CHILD_A
             pdump(*apidl);
             if (_ILIsCPanelStruct(*apidl))
                 *rgfInOut &= SFGAO_CANLINK;
+            else if ((*rgfInOut & SFGAO_VALIDATE) && !IsNameSpaceItem(m_regFolder, *apidl))
+            {
+                *rgfInOut &= SFGAO_VALIDATE;
+                bInvalid = TRUE;
+            }
             else if (_ILIsSpecialFolder(*apidl))
                 m_regFolder->GetAttributesOf(1, apidl, rgfInOut);
             else
@@ -482,7 +500,8 @@ HRESULT WINAPI CControlPanelFolder::GetAttributesOf(UINT cidl, PCUITEMID_CHILD_A
         }
     }
     /* make sure SFGAO_VALIDATE is cleared, some apps depend on that */
-    *rgfInOut &= ~SFGAO_VALIDATE;
+    if (!bInvalid)
+        *rgfInOut &= ~SFGAO_VALIDATE;
 
     TRACE("-- result=0x%08x\n", *rgfInOut);
     return hr;

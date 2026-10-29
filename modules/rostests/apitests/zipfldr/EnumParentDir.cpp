@@ -10,6 +10,7 @@
 struct FileInfo
 {
     LPCWSTR Name;
+    LPCWSTR DisplayName;
     SFGAOF Attributes;
     bool Found;
 };
@@ -19,9 +20,10 @@ int zipfldr_loaded()
     return GetModuleHandleA("zipfldr.dll") ? TRUE : FALSE;
 }
 
-void FindExpectedFile(FileInfo* Array, size_t len, IShellFolder* pFolder, PCUITEMID_CHILD pidl, LPCWSTR& ExpectedName, SFGAOF& ExpectedAttributes)
+void FindExpectedFile(FileInfo* Array, size_t len, IShellFolder* pFolder, PCUITEMID_CHILD pidl, LPCWSTR& ExpectedName, LPCWSTR& ExpectedDisplayName, SFGAOF& ExpectedAttributes)
 {
     ExpectedName = L"<WRONG FILE>";
+    ExpectedDisplayName = ExpectedName;
     ExpectedAttributes = (SFGAOF)~0;
 
     STRRET NameRet;
@@ -40,10 +42,11 @@ void FindExpectedFile(FileInfo* Array, size_t len, IShellFolder* pFolder, PCUITE
 
     for (size_t n = 0; n < len; ++n)
     {
-        if (!_wcsicmp(Array[n].Name, DisplayName) && !Array[n].Found)
+        if ((!_wcsicmp(Array[n].Name, DisplayName) || !_wcsicmp(Array[n].DisplayName, DisplayName)) && !Array[n].Found)
         {
             Array[n].Found = true;
             ExpectedName = Array[n].Name;
+            ExpectedDisplayName = _wcsicmp(Array[n].Name, DisplayName) ? Array[n].DisplayName : Array[n].Name;
             ExpectedAttributes = Array[n].Attributes;
             return;
         }
@@ -53,9 +56,9 @@ void FindExpectedFile(FileInfo* Array, size_t len, IShellFolder* pFolder, PCUITE
 const SFGAOF BaseFileAttributes = SFGAO_FILESYSTEM;
 const SFGAOF BaseFolderAttributes = SFGAO_FILESYSTEM | SFGAO_FOLDER;
 FileInfo ExpectedFiles[] = {
-    { L"test.txt", BaseFileAttributes, false },
-    { L"TMP0.zip", BaseFileAttributes, false},  // 2k3 Shows this as a file, newer shows this as a folder
-    { L"ASUBFLD", BaseFolderAttributes | SFGAO_FILESYSANCESTOR | SFGAO_STORAGEANCESTOR, false },
+    { L"test.txt", L"test", BaseFileAttributes, false },
+    { L"TMP0.zip", L"TMP0", BaseFileAttributes, false},  // 2k3 Shows this as a file, newer shows this as a folder
+    { L"ASUBFLD", L"ASUBFLD", BaseFolderAttributes | SFGAO_FILESYSANCESTOR | SFGAO_STORAGEANCESTOR, false },
 };
 BOOL FoundZipfldr = FALSE;
 
@@ -88,11 +91,12 @@ test_EnumDirFiles(const WCHAR *TestFolder, BOOL EnumFolders)
             break;
 
         LPCWSTR ExpectedName;
+        LPCWSTR ExpectedDisplayName;
         SFGAOF ExpectedAttributes;
-        FindExpectedFile(ExpectedFiles, RTL_NUMBER_OF(ExpectedFiles), spFolder, child, ExpectedName, ExpectedAttributes);
+        FindExpectedFile(ExpectedFiles, RTL_NUMBER_OF(ExpectedFiles), spFolder, child, ExpectedName, ExpectedDisplayName, ExpectedAttributes);
 
         ok_int(zipfldr_loaded(), FoundZipfldr);
-        ok_displayname(spFolder, child, SHGDN_NORMAL, ExpectedName);
+        ok_displayname(spFolder, child, SHGDN_NORMAL, ExpectedDisplayName);
         ok_int(zipfldr_loaded(), FoundZipfldr);
 
         SFGAOF Attributes = SFGAO_FILESYSANCESTOR | SFGAO_FOLDER | SFGAO_FILESYSTEM | SFGAO_HASSUBFOLDER;

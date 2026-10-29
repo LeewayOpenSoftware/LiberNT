@@ -271,17 +271,21 @@ DxgkRender(
     PAGED_CODE();
 
     if (pRender == NULL)
+        return STATUS_INVALID_PARAMETER;
 
     if (pRender->hContext == 0)
+        return STATUS_INVALID_PARAMETER;
 
     if (pRender->Flags.RenderKm || pRender->Flags.RenderKmReadback)
         return STATUS_NOT_SUPPORTED;
 
     Context = DxgkLookupContextByHandle(pRender->hContext, &Adapter, &Device);
     if (Context == NULL)
+        return STATUS_INVALID_PARAMETER;
     if (Adapter == NULL || Device == NULL)
     {
         DxgkDereferenceContext(Context);
+        return STATUS_INVALID_PARAMETER;
     }
     if (Adapter->MiniportContext == NULL || Adapter->MiniportContext->UseDodLayout || Adapter->MiniportContext->IsDisplayOnlyDriver)
     {
@@ -299,6 +303,7 @@ DxgkRender(
     {
         /* Virtual contexts submit through SubmitCommandVirtual, not here. */
         DxgkDereferenceContext(Context);
+        return STATUS_INVALID_PARAMETER;
     }
     if (pRender->BroadcastContextCount != 0)
     {

@@ -1150,6 +1150,7 @@ LxGenPidStatus(
     PLX_PROCESS Process = LxProcessLookup(Self->Instance, Synth->Pid);
     PLX_NS ProcNs;
     ULONG64 Ignored = 0, Caught = 0, Blocked = 0, Affinity = LxSchedActiveMask();
+    ULONG SeccompMode = 0, SeccompFilters = 0;
     PLIST_ENTRY Entry;
     CHAR Comm[16], List[256];
     LONG Signal;
@@ -1175,6 +1176,8 @@ LxGenPidStatus(
         {
             Blocked = Thread->SigMask;
             Affinity &= Thread->Affinity;
+            SeccompMode = Thread->SeccompMode;
+            SeccompFilters = LxSeccompFilterCount(Thread);
             break;
         }
     }
@@ -1263,12 +1266,13 @@ LxGenPidStatus(
     LxTextPrintf(Text,
                  "SigPnd:\t%016llx\nShdPnd:\t%016llx\nSigBlk:\t%016llx\nSigIgn:\t%016llx\nSigCgt:\t%016llx\n"
                  "CapInh:\t%016llx\nCapPrm:\t%016llx\nCapEff:\t%016llx\nCapBnd:\t%016llx\nCapAmb:\t%016llx\n"
-                 "NoNewPrivs:\t%u\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\n"
+                 "NoNewPrivs:\t%u\nSeccomp:\t%lu\nSeccomp_filters:\t%lu\nSpeculation_Store_Bypass:\tthread vulnerable\n"
                  "SpeculationIndirectBranch:\tunknown\nCpus_allowed:\t%llx\nCpus_allowed_list:\t%s\n"
                  "Mems_allowed:\t1\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t0\nnonvoluntary_ctxt_switches:\t0\n",
                  0ULL, (ULONG64)Process->Pending, Blocked, Ignored, Caught, Process->CapInheritable,
                  Process->CapPermitted, Process->CapEffective,
-                 Process->CapBounding, Process->CapAmbient, Process->NoNewPrivs ? 1U : 0U, Affinity, List);
+                 Process->CapBounding, Process->CapAmbient, Process->NoNewPrivs ? 1U : 0U, SeccompMode, SeccompFilters,
+                 Affinity, List);
     LxProcessDereference(Process);
 }
 
@@ -3297,12 +3301,13 @@ LxGenMeminfo(
                  "Buffers:               0 kB\nCached:         %8llu kB\nSwapCached:            0 kB\n"
                  "Active:                0 kB\nInactive:              0 kB\nSwapTotal:      %8llu kB\n"
                  "SwapFree:       %8llu kB\nDirty:                 0 kB\nWriteback:             0 kB\n"
-                 "AnonPages:             0 kB\nMapped:                0 kB\nShmem:                 0 kB\n"
+                 "AnonPages:             0 kB\nMapped:                0 kB\nShmem:          %8llu kB\n"
                  "Slab:                  0 kB\nSReclaimable:          0 kB\nSUnreclaim:            0 kB\n"
                  "KernelStack:           0 kB\nPageTables:            0 kB\nCommitLimit:    %8llu kB\n"
                  "Committed_AS:   %8llu kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:           0 kB\n",
                  State.Total / 1024, State.Free / 1024, State.Available / 1024, State.Cached / 1024,
-                 State.SwapTotal / 1024, State.SwapFree / 1024, State.CommitLimit / 1024, State.Committed / 1024);
+                 State.SwapTotal / 1024, State.SwapFree / 1024, LxTmpfsShmemBytes() / 1024,
+                 State.CommitLimit / 1024, State.Committed / 1024);
     HugeTotal = LxHugeQueryPool(&HugeFree, &HugeSurplus, &HugeReserved);
     LxTextPrintf(Text,
                  "HugePages_Total:   %5llu\nHugePages_Free:    %5llu\nHugePages_Rsvd:    %5llu\n"
@@ -4331,7 +4336,7 @@ LxSynthFdPath(
     PLX_FILE File;
     PSTR Path = NULL;
 
-    if ((Node->Mount == NULL) || (Node->Mount->Kind == LxFsNt) || (Node->Type != LX_S_IFLNK) || (Node->Relative == NULL))
+    if ((Node->Mount == NULL) || !LxMountIsSynthetic(Node->Mount) || (Node->Type != LX_S_IFLNK) || (Node->Relative == NULL))
         return NULL;
     if (LxSynthResolve(Process, Node->Mount, Node->Relative, &Synth) != 0)
         return NULL;
@@ -5629,6 +5634,22 @@ LxSynthOpen(
             (strncmp(LxPidEntries[Synth.Index].Name, "mount", 5) == 0))
         {
             Events = &LxProcessNs(Process, LxNsMnt)->Mnt.Events;
+            if (LxPidEntries[Synth.Index].Generator != NULL)
+            {
+                PLX_PROCESS Target = LxProcessLookup(Process->Instance, Synth.Pid);
+
+                if (Target != NULL)
+                {
+                    File->MountsRoot = LxProcessRoot(Target);
+                    if (File->MountsRoot != NULL)
+                    {
+                        File->MountsNs = LxProcessNs(Target, LxNsMnt);
+                        LxNsReference(File->MountsNs);
+                        File->MountsFull = (LxPidEntries[Synth.Index].Generator == LxGenPidMountinfo);
+                    }
+                    LxProcessDereference(Target);
+                }
+            }
         }
         if (Events != NULL)
         {
@@ -5722,6 +5743,8 @@ LxSynthStat(
         {
             Stat->Uid = Target->Uid[1];
             Stat->Gid = Target->Gid[1];
+            if (Synth.Id == LxProcTaskDir)
+                Stat->Nlink = 2 + (Target->Exited ? 1 : (ULONG)max(Target->ThreadCount, 1));
             LxProcessDereference(Target);
         }
     }

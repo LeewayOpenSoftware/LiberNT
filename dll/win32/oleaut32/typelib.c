@@ -16022,6 +16022,47 @@ static HRESULT WINAPI ICreateTypeInfo2_fnLayOut(ICreateTypeInfo2 *iface)
         }
     }
 
+#ifdef __REACTOS__
+    if (This->typeattr.typekind == TKIND_RECORD || This->typeattr.typekind == TKIND_UNION)
+    {
+        ULONG offset = 0, size;
+        WORD align, max_align = 1, packing = This->typeattr.cbAlignment;
+
+        for (i = 0; i < This->typeattr.cVars; ++i)
+        {
+            TLBVarDesc *var_desc = &This->vardescs[i];
+
+            if (var_desc->vardesc.varkind != VAR_PERINSTANCE)
+                continue;
+            hres = TLB_size_instance(This, This->pTypeLib->syskind, &var_desc->vardesc.elemdescVar.tdesc, &size, &align);
+            if (FAILED(hres))
+                return hres;
+            if (!align)
+                align = 1;
+            if (packing && align > packing)
+                align = packing;
+            if (align > max_align)
+                max_align = align;
+            if (This->typeattr.typekind == TKIND_RECORD)
+            {
+                offset = (offset + align - 1) & ~(ULONG)(align - 1);
+                var_desc->vardesc.oInst = offset;
+                offset += size;
+            }
+            else
+            {
+                var_desc->vardesc.oInst = 0;
+                if (size > offset)
+                    offset = size;
+            }
+            if (var_desc->vardesc_create)
+                var_desc->vardesc_create->oInst = var_desc->vardesc.oInst;
+        }
+        This->typeattr.cbSizeInstance = (offset + max_align - 1) & ~(ULONG)(max_align - 1);
+        This->typeattr.cbAlignment = max_align;
+    }
+#endif
+
     return hres;
 }
 
