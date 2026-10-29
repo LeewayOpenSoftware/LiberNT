@@ -1149,7 +1149,7 @@ LxMountAdd(
 
     Existing = LxMountFind(Ns, Target, &Relative);
     if ((Existing != NULL) && (Relative[0] == '\0') && (strcmp(Existing->FsType, FsType) == 0) &&
-        (Existing->Kind != LxFsProc) && (Existing->Kind != LxFsCgroup))
+        (Existing->Kind != LxFsProc) && (Existing->Kind != LxFsCgroup) && (Ns == Ns->Instance->RootNs[LxNsMnt]))
     {
         return 0;
     }
