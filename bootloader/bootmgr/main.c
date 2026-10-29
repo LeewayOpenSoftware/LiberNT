@@ -17,6 +17,7 @@
 #define BM_WINDOWS_MANAGER L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi"
 #define BM_WINDOWS_STORE   L"\\EFI\\Microsoft\\Boot\\BCD"
 #define BM_WINDOWS_TITLE   L"Windows Boot Manager"
+#define BM_LIBERNT_ENTRY   L"{354fa6e5-5e45-49af-91bf-1fd2754e470a}"
 
 static const PCWSTR BmStorePaths[] =
 {
@@ -30,8 +31,6 @@ static PCSTR BmMenuNames[BM_MAX_ENTRIES + BM_EXTRA_ITEMS];
 static UI_MENU_ICON BmMenuIcons[BM_MAX_ENTRIES + BM_EXTRA_ITEMS];
 static UI_IMAGE BmLogos[BM_MAX_ENTRIES];
 static const UI_IMAGE* BmMenuImages[BM_MAX_ENTRIES + BM_EXTRA_ITEMS];
-static PCSTR BmStartupNames[BM_MAX_ENTRIES];
-static ULONG BmStartupEntries[BM_MAX_ENTRIES];
 static PCWSTR BmTextNames[BM_MAX_ENTRIES];
 static WCHAR BmStorePath[BM_PATH_CHARS];
 static WCHAR BmTitle[BM_DESCRIPTION_CHARS];
@@ -40,6 +39,7 @@ static ULONG BmStoreSize;
 static FW_VOLUME_SCAN BmScan;
 static ULONG BmCount;
 static ULONG BmSelected;
+static ULONG BmLiberNTEntry = MAXULONG;
 
 static
 PVOID
@@ -246,6 +246,14 @@ BmStartEntry(
 
 static
 VOID
+BmStartupOptions(VOID)
+{
+    if (BmLiberNTEntry < BmCount)
+        BmStartEntry(BmLiberNTEntry, TRUE);
+}
+
+static
+VOID
 BmRestartMenu(VOID)
 {
     PCSTR Items[] = {"Restart", "Back"};
@@ -310,52 +318,9 @@ BmMenuKeyFilter(
         case KEY_F2:
             BmSettingsMenu();
             return TRUE;
-
-        case KEY_F8:
-            if (!BmEntries[BmSelected].FirmwareDevice)
-                BmStartEntry(BmSelected, TRUE);
-            return TRUE;
     }
 
     return FALSE;
-}
-
-static
-VOID
-BmStartupOptions(VOID)
-{
-    ULONG Count = 0, Selected = 0, i;
-
-    for (i = 0; i < BmCount; i++)
-    {
-        if (BmEntries[i].FirmwareDevice)
-            continue;
-
-        if (i == BmSelected)
-            Selected = Count;
-
-        BmStartupEntries[Count] = i;
-        BmStartupNames[Count++] = BmMenuNames[i];
-    }
-
-    if (Count == 0)
-        return;
-
-    if (Count == 1 ||
-        UiDisplayMenu("Startup options / Choose a system",
-                      NULL,
-                      BmStartupNames,
-                      Count,
-                      Selected,
-                      -1,
-                      &Selected,
-                      TRUE,
-                      NULL,
-                      NULL))
-    {
-        BmSelected = BmStartupEntries[Selected];
-        BmStartEntry(BmSelected, TRUE);
-    }
 }
 
 static
@@ -417,7 +382,7 @@ BmRunTextMenu(
     _In_ LONG Timeout)
 {
     BM_STARTUP Startup;
-    ULONG i;
+    ULONG i, Index;
 
     for (i = 0; i < BmCount; i++)
         BmTextNames[i] = BmEntries[i].Description;
@@ -444,22 +409,24 @@ BmRunTextMenu(
                 return;
 
             case BmUiActionAdvanced:
-                if (!BmChooseStartupSettings(FALSE, &Startup))
+                if (BmLiberNTEntry >= BmCount || !BmChooseStartupSettings(FALSE, &Startup))
                 {
                     Timeout = -1;
                     BmUiShutdown();
                     continue;
                 }
+                Index = BmLiberNTEntry;
                 break;
 
             default:
+                Index = BmSelected;
                 break;
         }
 
         Timeout = -1;
         BmUiShutdown();
         GuiShowFirmwareLogo();
-        BmStartSelectedApplication(&BmEntries[BmSelected], &Startup);
+        BmStartSelectedApplication(&BmEntries[Index], &Startup);
     }
 }
 
@@ -508,7 +475,7 @@ BlMain(VOID)
 {
     BM_STARTUP Startup;
     PVOID Store;
-    ULONG Size, Default = 0;
+    ULONG Size, Default = 0, i;
     LONG Timeout;
 
     Store = BmReadStore(BmStorePath, RTL_NUMBER_OF(BmStorePath), &Size);
@@ -527,6 +494,12 @@ BlMain(VOID)
         BmCount = BmEnumerateEntries(BmEntries, RTL_NUMBER_OF(BmEntries), &Default);
         if (BmCount == 0)
             FwPrint(L"The Boot Configuration Data store has no operating system entry.\r\n");
+
+        for (i = 0; i < BmCount; i++)
+        {
+            if (_wcsicmp(BmEntries[i].Id, BM_LIBERNT_ENTRY) == 0)
+                BmLiberNTEntry = i;
+        }
     }
 
     if (BmCount == 0)
