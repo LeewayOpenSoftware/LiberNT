@@ -592,6 +592,7 @@ LxThreadFree(
         ExDeleteTimer(Thread->SignalRetry, TRUE, TRUE, NULL);
     LxNsThreadRelease(Thread);
     LxSeccompRelease(Thread);
+    LxKeyThreadRelease(Thread);
     LxCgroupTaskRemove(Process);
     LxProcessDereference(Process);
     LxFree(Thread);

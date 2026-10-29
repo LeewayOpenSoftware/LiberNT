@@ -3454,6 +3454,20 @@ LxWriteNetSysctl(
     _In_reads_bytes_(Length) PCSTR Data,
     _In_ ULONG Length);
 
+static
+VOID
+LxGenKeySysctl(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text);
+
+static
+LONG
+LxWriteKeySysctl(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length);
+
 static const LX_TABLE_ENTRY LxProcSysTable[] =
 {
     { "fs/file-max", 0644, "9223372036854775807\n", NULL, LxWriteAccept },
@@ -3478,6 +3492,12 @@ static const LX_TABLE_ENTRY LxProcSysTable[] =
     { "kernel/dmesg_restrict", 0644, NULL, LxGenDmesgRestrict, LxWriteDmesgRestrict },
     { "kernel/domainname", 0644, NULL, LxGenDomainname, LxWriteDomainname },
     { "kernel/hostname", 0644, NULL, LxGenHostname, LxWriteHostname },
+    { "kernel/keys/gc_delay", 0644, NULL, LxGenKeySysctl, LxWriteKeySysctl },
+    { "kernel/keys/maxbytes", 0644, NULL, LxGenKeySysctl, LxWriteKeySysctl },
+    { "kernel/keys/maxkeys", 0644, NULL, LxGenKeySysctl, LxWriteKeySysctl },
+    { "kernel/keys/persistent_keyring_expiry", 0644, NULL, LxGenKeySysctl, LxWriteKeySysctl },
+    { "kernel/keys/root_maxbytes", 0644, NULL, LxGenKeySysctl, LxWriteKeySysctl },
+    { "kernel/keys/root_maxkeys", 0644, NULL, LxGenKeySysctl, LxWriteKeySysctl },
     { "kernel/kptr_restrict", 0644, "1\n", NULL, LxWriteAccept },
     { "kernel/ngroups_max", 0444, "65536\n", NULL, NULL },
     { "kernel/ns_last_pid", 0666, NULL, LxGenNsLastPid, LxWriteNsLastPid },
@@ -3563,6 +3583,41 @@ LxWriteNetSysctl(
         return -LX_EINVAL;
     LxProcessNs(Current->Process, LxNsNet)->Net.Sysctl[Index] = (LONG)Value;
     return 0;
+}
+
+static
+VOID
+LxGenKeySysctl(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    LONG Value;
+
+    UNREFERENCED_PARAMETER(Self);
+    if (LxKeySysctlGet(LxProcSysTable[Synth->Index].Path, &Value))
+        LxTextPrintf(Text, "%ld\n", Value);
+}
+
+static
+LONG
+LxWriteKeySysctl(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    ULONG Table = (ULONG)(ULONG_PTR)File->HandlerContext;
+    ULONG Value;
+    LONG Error;
+
+    if (Table >= RTL_NUMBER_OF(LxProcSysTable))
+        return -LX_EINVAL;
+    if (Length == 0)
+        return 0;
+    Error = LxParseWrittenNumber(Data, Length, &Value);
+    if (Error == 0)
+        Error = LxKeySysctlSet(LxProcSysTable[Table].Path, Value);
+    return Error;
 }
 
 static
@@ -4029,6 +4084,51 @@ LxGenUptime(
 
 static
 VOID
+LxGenKeys(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    PLX_THREAD Reader = LxCurrentThread();
+    ULONG Length;
+    PSTR Lines;
+
+    UNREFERENCED_PARAMETER(Synth);
+    if ((Reader == NULL) || (Reader->Process != Self))
+        return;
+    Lines = LxKeyFormatProcKeys(Reader, &Length);
+    if (Lines == NULL)
+    {
+        Text->Failed = TRUE;
+        return;
+    }
+    LxTextAppend(Text, Lines, Length);
+    LxFree(Lines);
+}
+
+static
+VOID
+LxGenKeyUsers(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    ULONG Length;
+    PSTR Lines;
+
+    UNREFERENCED_PARAMETER(Synth);
+    Lines = LxKeyFormatProcKeyUsers(Self, &Length);
+    if (Lines == NULL)
+    {
+        Text->Failed = TRUE;
+        return;
+    }
+    LxTextAppend(Text, Lines, Length);
+    LxFree(Lines);
+}
+
+static
+VOID
 LxGenLoadavg(
     _In_ PLX_PROCESS Self,
     _In_ PLX_SYNTH Synth,
@@ -4053,6 +4153,8 @@ static const LX_TABLE_ENTRY LxProcStaticTable[] =
     { "cpuinfo", 0444, NULL, LxGenCpuinfo, NULL },
     { "devices", 0444, "Character devices:\n  1 mem\n  4 /dev/vc/0\n  4 tty\n  5 /dev/tty\n  5 /dev/console\n  5 /dev/ptmx\n136 pts\n\nBlock devices:\n", NULL, NULL },
     { "filesystems", 0444, "nodev\tsysfs\nnodev\ttmpfs\nnodev\tbdev\nnodev\tproc\nnodev\tcgroup2\nnodev\tdevtmpfs\nnodev\tdevpts\nnodev\tmqueue\nnodev\tpipefs\nnodev\tsockfs\n\tlxfs\n", NULL, NULL },
+    { "key-users", 0444, NULL, LxGenKeyUsers, NULL },
+    { "keys", 0444, NULL, LxGenKeys, NULL },
     { "loadavg", 0444, NULL, LxGenLoadavg, NULL },
     { "meminfo", 0444, NULL, LxGenMeminfo, NULL },
     { "partitions", 0444, "major minor  #blocks  name\n\n", NULL, NULL },

@@ -99,6 +99,7 @@ typedef struct _LX_INSTANCE LX_INSTANCE, *PLX_INSTANCE;
 typedef struct _LX_MOUNT LX_MOUNT, *PLX_MOUNT;
 typedef struct _LX_CGROUP LX_CGROUP, *PLX_CGROUP;
 typedef struct _LX_NS LX_NS, *PLX_NS;
+typedef struct _LX_KEY LX_KEY, *PLX_KEY;
 typedef struct _LX_TMPFS LX_TMPFS, *PLX_TMPFS;
 typedef struct _LX_TMPFS_INODE LX_TMPFS_INODE, *PLX_TMPFS_INODE;
 
@@ -405,6 +406,8 @@ struct _LX_NS
             BOOLEAN SetgroupsDenied;
             BOOLEAN ParentCouldSetfcap;
             BOOLEAN Charged;
+            PLX_KEY KeyRegister;
+            PLX_KEY PersistentRegister;
         } User;
         struct
         {
@@ -756,6 +759,11 @@ struct _LX_THREAD
     volatile LONG PtraceWork;
     LONG ExitCode;
     ULONG PtraceVforkPid;
+    PLX_KEY ThreadKeyring;
+    PLX_KEY ProcessKeyring;
+    PLX_KEY SessionKeyring;
+    PLX_KEY RequestKeyAuth;
+    LONG JitKeyring;
 };
 
 #define LX_PTRACE_REGSET_MAX 528
@@ -945,6 +953,25 @@ typedef struct _LX_MEMORY_STATE
 } LX_MEMORY_STATE, *PLX_MEMORY_STATE;
 
 VOID LxQueryMemoryState(_Out_ PLX_MEMORY_STATE State);
+
+#define LX_KEY_INHERIT_THREAD   0
+#define LX_KEY_INHERIT_PROCESS  1
+#define LX_KEY_INHERIT_TASK     2
+
+VOID LxKeyInitialize(VOID);
+LONG LxKeyThreadInherit(_Inout_ PLX_THREAD Thread, _In_ PLX_THREAD Parent, _In_ ULONG Mode);
+VOID LxKeyThreadRelease(_Inout_ PLX_THREAD Thread);
+VOID LxKeyExec(_Inout_ PLX_THREAD Thread);
+VOID LxKeyUserNsRelease(_Inout_ PLX_NS UserNs);
+PSTR LxKeyFormatProcKeys(_In_ PLX_THREAD Reader, _Out_ PULONG Length);
+PSTR LxKeyFormatProcKeyUsers(_In_ PLX_PROCESS Reader, _Out_ PULONG Length);
+BOOLEAN LxKeySysctlGet(_In_ PCSTR Name, _Out_ PLONG Value);
+LONG LxKeySysctlSet(_In_ PCSTR Name, _In_ LONG64 Value);
+
+typedef VOID (*PLX_UMH_INIT)(_Inout_ PLX_THREAD Thread, _In_opt_ PVOID Context);
+LONG LxUserModeHelper(_In_ PLX_INSTANCE Instance, _In_ PCSTR Path, _In_reads_(ArgCount) PCSTR *Argv, _In_ ULONG ArgCount,
+                      _In_reads_(EnvCount) PCSTR *Envp, _In_ ULONG EnvCount, _In_opt_ PLX_UMH_INIT Init,
+                      _In_opt_ PVOID Context, _Out_ PLONG WaitStatus);
 PLX_THREAD LxCurrentThread(VOID);
 PLX_THREAD LxThreadOf(_In_ PETHREAD Thread);
 BOOLEAN LxVforkFinish(_Inout_ PKTRAP_FRAME TrapFrame, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame);

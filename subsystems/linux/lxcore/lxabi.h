@@ -87,6 +87,10 @@
 #define LX_ENOMEDIUM        123
 #define LX_ECANCELED        125
 #define LX_ENOKEY           126
+#define LX_EDQUOT           122
+#define LX_EKEYEXPIRED      127
+#define LX_EKEYREVOKED      128
+#define LX_EKEYREJECTED     129
 #define LX_EHWPOISON        133
 
 #define LX_O_ACCMODE        03
@@ -762,6 +766,69 @@ typedef struct _LX_MSGINFO
 #define LX_MEMBARRIER_CMD_FLAG_CPU                  0x001
 
 #define LX_PKEY_ACCESS_MASK     0x0F
+
+#define LX_KEY_SPEC_THREAD_KEYRING          (-1)
+#define LX_KEY_SPEC_PROCESS_KEYRING         (-2)
+#define LX_KEY_SPEC_SESSION_KEYRING         (-3)
+#define LX_KEY_SPEC_USER_KEYRING            (-4)
+#define LX_KEY_SPEC_USER_SESSION_KEYRING    (-5)
+#define LX_KEY_SPEC_GROUP_KEYRING           (-6)
+#define LX_KEY_SPEC_REQKEY_AUTH_KEY         (-7)
+#define LX_KEY_SPEC_REQUESTOR_KEYRING       (-8)
+
+#define LX_KEY_REQKEY_DEFL_NO_CHANGE            (-1)
+#define LX_KEY_REQKEY_DEFL_DEFAULT              0
+#define LX_KEY_REQKEY_DEFL_THREAD_KEYRING       1
+#define LX_KEY_REQKEY_DEFL_PROCESS_KEYRING      2
+#define LX_KEY_REQKEY_DEFL_SESSION_KEYRING      3
+#define LX_KEY_REQKEY_DEFL_USER_KEYRING         4
+#define LX_KEY_REQKEY_DEFL_USER_SESSION_KEYRING 5
+#define LX_KEY_REQKEY_DEFL_GROUP_KEYRING        6
+#define LX_KEY_REQKEY_DEFL_REQUESTOR_KEYRING    7
+
+#define LX_KEYCTL_GET_KEYRING_ID        0
+#define LX_KEYCTL_JOIN_SESSION_KEYRING  1
+#define LX_KEYCTL_UPDATE                2
+#define LX_KEYCTL_REVOKE                3
+#define LX_KEYCTL_CHOWN                 4
+#define LX_KEYCTL_SETPERM               5
+#define LX_KEYCTL_DESCRIBE              6
+#define LX_KEYCTL_CLEAR                 7
+#define LX_KEYCTL_LINK                  8
+#define LX_KEYCTL_UNLINK                9
+#define LX_KEYCTL_SEARCH                10
+#define LX_KEYCTL_READ                  11
+#define LX_KEYCTL_INSTANTIATE           12
+#define LX_KEYCTL_NEGATE                13
+#define LX_KEYCTL_SET_REQKEY_KEYRING    14
+#define LX_KEYCTL_SET_TIMEOUT           15
+#define LX_KEYCTL_ASSUME_AUTHORITY      16
+#define LX_KEYCTL_GET_SECURITY          17
+#define LX_KEYCTL_SESSION_TO_PARENT     18
+#define LX_KEYCTL_REJECT                19
+#define LX_KEYCTL_INSTANTIATE_IOV       20
+#define LX_KEYCTL_INVALIDATE            21
+#define LX_KEYCTL_GET_PERSISTENT        22
+#define LX_KEYCTL_DH_COMPUTE            23
+#define LX_KEYCTL_PKEY_QUERY            24
+#define LX_KEYCTL_PKEY_ENCRYPT          25
+#define LX_KEYCTL_PKEY_DECRYPT          26
+#define LX_KEYCTL_PKEY_SIGN             27
+#define LX_KEYCTL_PKEY_VERIFY           28
+#define LX_KEYCTL_RESTRICT_KEYRING      29
+#define LX_KEYCTL_MOVE                  30
+#define LX_KEYCTL_CAPABILITIES          31
+#define LX_KEYCTL_WATCH_KEY             32
+
+#define LX_KEYCTL_MOVE_EXCL                 0x00000001
+#define LX_KEYCTL_CAPS0_CAPABILITIES        0x01
+#define LX_KEYCTL_CAPS0_PERSISTENT_KEYRINGS 0x02
+#define LX_KEYCTL_CAPS0_BIG_KEY             0x10
+#define LX_KEYCTL_CAPS0_INVALIDATE          0x20
+#define LX_KEYCTL_CAPS0_RESTRICT_KEYRING    0x40
+#define LX_KEYCTL_CAPS0_MOVE                0x80
+#define LX_KEYCTL_CAPS1_NS_KEYRING_NAME     0x01
+#define LX_KEYCTL_CAPS1_NS_KEY_TAG          0x02
 #define LX_UIO_MAXIOV           1024
 
 #define LX_CAP_CHOWN            0

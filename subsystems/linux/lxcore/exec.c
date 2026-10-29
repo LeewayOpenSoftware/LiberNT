@@ -843,6 +843,7 @@ LxExecImage(
     }
 
     LxExecKillOtherThreads(Thread);
+    LxKeyExec(Thread);
     LxFutexExitRobustList(Thread);
     LxMmReset(Process);
     if (Process->ExeDeny != NULL)
