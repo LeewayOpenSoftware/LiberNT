@@ -1933,7 +1933,11 @@ static void domnode_append_ignored_pre(struct domnode *node, struct node_get_tex
 
     if (sibling)
     {
+#ifdef __REACTOS__
+        if (sibling->type == NODE_ELEMENT || sibling->type == NODE_CDATA_SECTION)
+#else
         if (sibling->type == NODE_ELEMENT)
+#endif
             return domnode_append_ignored(sibling, DOMNODE_IGNORED_WS, context);
     }
     else if (node->parent && node->parent->type == NODE_ELEMENT)
