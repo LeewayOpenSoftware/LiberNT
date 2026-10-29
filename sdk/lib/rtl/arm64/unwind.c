@@ -21,6 +21,7 @@
 #endif
 
 #define ARM64_UNWIND_FLAG_MASK 0x3UL
+#define ARM64_UNWIND_FLAG_REFERENCE 0x3UL
 #define ARM64_PACKED_FUNCTION_LENGTH_SHIFT 2
 #define ARM64_PACKED_FUNCTION_LENGTH_MASK 0x7FFUL
 #define ARM64_XDATA_FUNCTION_LENGTH_MASK 0x3FFFFUL
@@ -222,22 +223,25 @@ RtlLookupFunctionEntry(
     while (IndexHigh > IndexLow)
     {
         IndexMid = (IndexLow + IndexHigh) / 2;
-        FunctionEntry = &FunctionTable[IndexMid];
-
-        if (ControlRva < FunctionEntry->BeginAddress)
-        {
+        if (ControlRva < FunctionTable[IndexMid].BeginAddress)
             IndexHigh = IndexMid;
-            continue;
-        }
-
-        if (ControlRva >= FunctionEntry->BeginAddress +
-                          RtlpArm64FunctionLength((ULONG_PTR)*ImageBase, FunctionEntry))
-        {
+        else
             IndexLow = IndexMid + 1;
-            continue;
-        }
+    }
 
-        return FunctionEntry;
+    if (IndexLow != 0)
+    {
+        FunctionEntry = &FunctionTable[IndexLow - 1];
+        if ((FunctionEntry->UnwindData & ARM64_UNWIND_FLAG_MASK) == ARM64_UNWIND_FLAG_REFERENCE)
+        {
+            if (IndexLow == TableLength || ControlRva < FunctionTable[IndexLow].BeginAddress)
+                return FunctionEntry;
+        }
+        else if (ControlRva < FunctionEntry->BeginAddress +
+                              RtlpArm64FunctionLength((ULONG_PTR)*ImageBase, FunctionEntry))
+        {
+            return FunctionEntry;
+        }
     }
 
 LookupDynamic:
@@ -767,6 +771,9 @@ RtlVirtualUnwind(
         *HandlerData = NULL;
 
     Context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
+
+    if (Func != NULL && Func->Flag == ARM64_UNWIND_FLAG_REFERENCE)
+        Func = (PARM64_RT_FUNCTION)(ULONG_PTR)(ImageBase + (Func->UnwindData & ~ARM64_UNWIND_FLAG_MASK));
 
     if (Func == NULL)
     {
