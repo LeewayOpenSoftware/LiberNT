@@ -13036,12 +13036,6 @@ static void test_recursive_hook(void)
     MSG msg;
     BOOL b;
 
-#ifdef __REACTOS__
-    if (is_reactos()) {
-        ok(FALSE, "FIXME: Recursive msg tests crash on ReactOS!\n");
-        return;
-    }
-#endif
     hook_hwnd = CreateWindowExA(WS_EX_TOPMOST, "Static", NULL, WS_POPUP | WS_VISIBLE, 0, 0, 200, 60,
                                 NULL, NULL, NULL, NULL);
     ok(hook_hwnd != NULL, "CreateWindow failed\n");
@@ -13151,12 +13145,6 @@ static void test_recursive_messages(void)
     WNDCLASSA cls = {0};
     HWND hwnd;
 
-#ifdef __REACTOS__
-    if (is_reactos()) {
-        ok(FALSE, "FIXME: Recursive msg tests crash on ReactOS!\n");
-        return;
-    }
-#endif
     cls.lpfnWndProc = recursive_messages_proc;
     cls.hInstance = GetModuleHandleA(0);
     cls.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
