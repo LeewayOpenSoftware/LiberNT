@@ -1,4 +1,5 @@
 #include "precomp.h"
+#include <ws2tcpip.h>
 
 #include <stdlib.h>
 #include <ws2spi.h>
@@ -34,9 +35,15 @@
 
 //#define NSP_REDIRECT
 
+#define NSP_FAMILY_INET  0x0001
+#define NSP_FAMILY_INET6 0x0002
+#define NSP_MAX_ADDRESSES 64
+
 typedef struct {
   WCHAR* hostnameW;
   DWORD addr4;
+  SOCKADDR_STORAGE* addresses;
+  DWORD addressCount;
   WCHAR* servnameW;
   WCHAR* servprotoW;
   CHAR** servaliasesA; /* array */
@@ -49,6 +56,7 @@ typedef struct {
   DWORD CallID; /* List for LookupServiceNext-Calls */
   DWORD CallIDCounter; /* call-count of the current CallID. */
   WCHAR* hostnameW; /* hostbyname */
+  DWORD families;
 #ifdef NSP_REDIRECT
   HANDLE rdrLookup;
   NSP_ROUTINE rdrproc;
@@ -249,6 +257,17 @@ mwsNSPLookupServiceBegin(_In_ LPGUID lpProviderId,
     else if (IsEqualGUID(lpqsRestrictions->lpServiceClassId,
                          &guid_INET_HOSTADDRBYNAME))
     {
+       DWORD i;
+
+       for (i = 0; lpqsRestrictions->lpafpProtocols && i < lpqsRestrictions->dwNumberOfProtocols; i++)
+       {
+           if (lpqsRestrictions->lpafpProtocols[i].iAddressFamily == AF_INET)
+               pLook->families |= NSP_FAMILY_INET;
+           else if (lpqsRestrictions->lpafpProtocols[i].iAddressFamily == AF_INET6)
+               pLook->families |= NSP_FAMILY_INET6;
+       }
+       if (!pLook->families)
+           pLook->families = NSP_FAMILY_INET;
        wsaErr = NSP_LookupServiceBeginW(pLook,
                                         NULL,
                                         lpqsRestrictions->lpszServiceInstanceName,
@@ -559,85 +578,327 @@ NSP_GetHostNameHeapAllocW(_Out_ WCHAR** hostname)
     return ERROR_SUCCESS;
 }
 
+static
+BOOL
+NSP_AddAddress(_Inout_ PWSHOSTINFOINTERN hostinfo,
+               _In_ const SOCKADDR *addr,
+               _In_ INT addrLength)
+{
+    DWORD i;
+
+    if (!hostinfo->addresses)
+    {
+        hostinfo->addresses = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, NSP_MAX_ADDRESSES * sizeof(SOCKADDR_STORAGE));
+        if (!hostinfo->addresses)
+            return FALSE;
+    }
+    if (hostinfo->addressCount == NSP_MAX_ADDRESSES || addrLength > (INT)sizeof(SOCKADDR_STORAGE))
+        return TRUE;
+    for (i = 0; i < hostinfo->addressCount; i++)
+    {
+        if (!memcmp(&hostinfo->addresses[i], addr, addrLength))
+            return TRUE;
+    }
+    RtlCopyMemory(&hostinfo->addresses[hostinfo->addressCount++], addr, addrLength);
+    if (addr->sa_family == AF_INET && !hostinfo->addr4)
+        hostinfo->addr4 = ((const SOCKADDR_IN *)addr)->sin_addr.s_addr;
+    return TRUE;
+}
+
+static
+BOOL
+NSP_IsLocalHostName(_In_ PCWSTR name)
+{
+    WCHAR host[MAX_COMPUTERNAME_LENGTH + 64];
+    DWORD length = ARRAYSIZE(host);
+
+    if (!name[0])
+        return TRUE;
+    if (GetComputerNameExW(ComputerNameDnsHostname, host, &length) && !_wcsicmp(name, host))
+        return TRUE;
+    length = ARRAYSIZE(host);
+    return GetComputerNameExW(ComputerNameDnsFullyQualified, host, &length) && !_wcsicmp(name, host);
+}
+
+static
+INT
+NSP_GetLocalHostAddresses(_In_ PWSHANDLEINTERN data,
+                          _Out_ PWSHOSTINFOINTERN hostinfo)
+{
+    ULONG size = 16384;
+    PIP_ADAPTER_ADDRESSES list, adapter;
+    DWORD err;
+    SOCKADDR_IN loopback4 = {AF_INET};
+    SOCKADDR_IN6 loopback6 = {AF_INET6};
+    BOOL wantInet = (data->families & NSP_FAMILY_INET) != 0;
+    BOOL wantInet6 = (data->families & NSP_FAMILY_INET6) != 0;
+
+    for (;;)
+    {
+        list = HeapAlloc(GetProcessHeap(), 0, size);
+        if (!list)
+            return WSA_NOT_ENOUGH_MEMORY;
+        err = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                                   GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_SKIP_FRIENDLY_NAME,
+                                   NULL, list, &size);
+        if (err != ERROR_BUFFER_OVERFLOW)
+            break;
+        HeapFree(GetProcessHeap(), 0, list);
+    }
+
+    if (err == ERROR_SUCCESS)
+    {
+        for (adapter = list; adapter; adapter = adapter->Next)
+        {
+            PIP_ADAPTER_UNICAST_ADDRESS unicast;
+
+            if (adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK || adapter->OperStatus != IfOperStatusUp)
+                continue;
+            for (unicast = adapter->FirstUnicastAddress; unicast; unicast = unicast->Next)
+            {
+                const SOCKADDR *addr = unicast->Address.lpSockaddr;
+
+                if (unicast->DadState != IpDadStatePreferred && unicast->DadState != IpDadStateDeprecated)
+                    continue;
+                if ((addr->sa_family == AF_INET && wantInet) || (addr->sa_family == AF_INET6 && wantInet6))
+                    NSP_AddAddress(hostinfo, addr, unicast->Address.iSockaddrLength);
+            }
+        }
+    }
+    HeapFree(GetProcessHeap(), 0, list);
+
+    if (!hostinfo->addressCount)
+    {
+        if (wantInet6)
+        {
+            loopback6.sin6_addr.s6_addr[15] = 1;
+            NSP_AddAddress(hostinfo, (SOCKADDR *)&loopback6, sizeof(loopback6));
+        }
+        if (wantInet)
+        {
+            loopback4.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            NSP_AddAddress(hostinfo, (SOCKADDR *)&loopback4, sizeof(loopback4));
+        }
+    }
+
+    hostinfo->hostnameW = StrCpyHeapAllocW(GetProcessHeap(), data->hostnameW);
+    return hostinfo->hostnameW ? ERROR_SUCCESS : WSA_NOT_ENOUGH_MEMORY;
+}
+
+static
+BOOL
+NSP_HasGlobalIpv6(VOID)
+{
+    ULONG size = 16384;
+    PIP_ADAPTER_ADDRESSES list, adapter;
+    BOOL found = FALSE;
+    DWORD err;
+
+    for (;;)
+    {
+        list = HeapAlloc(GetProcessHeap(), 0, size);
+        if (!list)
+            return FALSE;
+        err = GetAdaptersAddresses(AF_INET6, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                                   GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_SKIP_FRIENDLY_NAME,
+                                   NULL, list, &size);
+        if (err != ERROR_BUFFER_OVERFLOW)
+            break;
+        HeapFree(GetProcessHeap(), 0, list);
+    }
+
+    for (adapter = (err == ERROR_SUCCESS) ? list : NULL; adapter && !found; adapter = adapter->Next)
+    {
+        PIP_ADAPTER_UNICAST_ADDRESS unicast;
+
+        if (adapter->OperStatus != IfOperStatusUp)
+            continue;
+        for (unicast = adapter->FirstUnicastAddress; unicast && !found; unicast = unicast->Next)
+        {
+            const SOCKADDR_IN6 *addr = (const SOCKADDR_IN6 *)unicast->Address.lpSockaddr;
+
+            found = (unicast->DadState == IpDadStatePreferred || unicast->DadState == IpDadStateDeprecated) &&
+                    !IN6_IS_ADDR_LINKLOCAL(&addr->sin6_addr) && !IN6_IS_ADDR_LOOPBACK(&addr->sin6_addr);
+        }
+    }
+    HeapFree(GetProcessHeap(), 0, list);
+    return found;
+}
+
+static
+DNS_STATUS
+NSP_QueryAddresses(_In_ PWSHANDLEINTERN data,
+                   _In_ DWORD dwQueryFlags,
+                   _In_ WORD type,
+                   _Inout_ PWSHOSTINFOINTERN hostinfo,
+                   _Inout_ PWCHAR *Aliases,
+                   _Inout_ int *AliasIndex)
+{
+    PDNS_RECORDW dp = NULL, curr;
+    DNS_STATUS status;
+
+    status = DnsQuery_W(data->hostnameW, type, dwQueryFlags, NULL, (PDNS_RECORD *)&dp, NULL);
+    if (status != ERROR_SUCCESS)
+        return status;
+
+    for (curr = dp; curr; curr = curr->pNext)
+    {
+        if (curr->wType == DNS_TYPE_CNAME && *AliasIndex < WS2_INTERNAL_MAX_ALIAS - 1)
+        {
+            BOOL known = FALSE;
+            int i;
+
+            for (i = 0; i < *AliasIndex; i++)
+                known = known || !_wcsicmp(Aliases[i], curr->pName);
+            if (!known)
+                Aliases[(*AliasIndex)++] = StrCpyHeapAllocW(GetProcessHeap(), curr->pName);
+        }
+        else if (curr->wType == DNS_TYPE_A)
+        {
+            SOCKADDR_IN sa = {AF_INET};
+
+            sa.sin_addr.s_addr = curr->Data.A.IpAddress;
+            NSP_AddAddress(hostinfo, (SOCKADDR *)&sa, sizeof(sa));
+        }
+        else if (curr->wType == DNS_TYPE_AAAA)
+        {
+            SOCKADDR_IN6 sa = {AF_INET6};
+
+            RtlCopyMemory(&sa.sin6_addr, &curr->Data.AAAA.Ip6Address, sizeof(sa.sin6_addr));
+            NSP_AddAddress(hostinfo, (SOCKADDR *)&sa, sizeof(sa));
+        }
+        else
+        {
+            continue;
+        }
+
+        if ((curr->wType == DNS_TYPE_A || curr->wType == DNS_TYPE_AAAA) && !hostinfo->hostnameW)
+            hostinfo->hostnameW = StrCpyHeapAllocW(GetProcessHeap(), curr->pName);
+    }
+
+    DnsRecordListFree((PDNS_RECORD)dp, DnsFreeRecordList);
+    return ERROR_SUCCESS;
+}
+
+typedef struct _NSP_AAAA_QUERY
+{
+    PWSHANDLEINTERN data;
+    DWORD dwQueryFlags;
+    WSHOSTINFOINTERN hostinfo;
+    PWCHAR Aliases[WS2_INTERNAL_MAX_ALIAS];
+    int AliasIndex;
+    DNS_STATUS status;
+} NSP_AAAA_QUERY, *PNSP_AAAA_QUERY;
+
+static
+DWORD
+WINAPI
+NSP_AaaaQueryThread(LPVOID Parameter)
+{
+    PNSP_AAAA_QUERY Query = Parameter;
+
+    Query->status = NSP_QueryAddresses(Query->data, Query->dwQueryFlags, DNS_TYPE_AAAA,
+                                       &Query->hostinfo, Query->Aliases, &Query->AliasIndex);
+    return 0;
+}
+
 INT
 NSP_GetHostByNameHeapAllocW(_In_ PWSHANDLEINTERN data,
                             _In_ DWORD dwControlFlags,
                             _Out_ PWSHOSTINFOINTERN hostinfo)
 {
     HANDLE hHeap = GetProcessHeap();
-    DNS_STATUS dns_status = { 0 };
-    /* include/WinDNS.h -- look up DNS_RECORD on MSDN */
-    PDNS_RECORDW dp;
-    PDNS_RECORDW curr;
-    INT result = ERROR_SUCCESS;
+    DNS_STATUS status4 = DNS_INFO_NO_RECORDS, status6 = DNS_INFO_NO_RECORDS;
     DWORD dwQueryFlags = DNS_QUERY_STANDARD;
     PWCHAR Aliases[WS2_INTERNAL_MAX_ALIAS] = { 0 };
-    int AliasIndex = 0;
-
-    /* needed to be cleaned up if != NULL */
-    dp = NULL;
+    int AliasIndex = 0, i;
+    INT result;
 
     if (data->hostnameW == NULL)
+        return ERROR_INVALID_PARAMETER;
+
+    if (NSP_IsLocalHostName(data->hostnameW))
+        return NSP_GetLocalHostAddresses(data, hostinfo);
+
+    if ((data->families & NSP_FAMILY_INET6) &&
+        (data->families == NSP_FAMILY_INET6 || NSP_HasGlobalIpv6()))
     {
-        result = ERROR_INVALID_PARAMETER;
-        goto cleanup;
+        PNSP_AAAA_QUERY Query = HeapAlloc(hHeap, HEAP_ZERO_MEMORY, sizeof(*Query));
+        HANDLE Thread = NULL;
+        DWORD k;
+
+        if (!Query)
+            return WSA_NOT_ENOUGH_MEMORY;
+        Query->data = data;
+        Query->dwQueryFlags = dwQueryFlags;
+        Query->status = DNS_INFO_NO_RECORDS;
+        if (data->families & NSP_FAMILY_INET)
+            Thread = CreateThread(NULL, 0, NSP_AaaaQueryThread, Query, 0, NULL);
+        if (!Thread)
+            NSP_AaaaQueryThread(Query);
+        else if (data->families & NSP_FAMILY_INET)
+            status4 = NSP_QueryAddresses(data, dwQueryFlags, DNS_TYPE_A, hostinfo, Aliases, &AliasIndex);
+        if (Thread)
+        {
+            WaitForSingleObject(Thread, INFINITE);
+            CloseHandle(Thread);
+        }
+        status6 = Query->status;
+
+        for (k = Query->hostinfo.addressCount; k > 0; k--)
+        {
+            SOCKADDR_STORAGE *Address = &Query->hostinfo.addresses[k - 1];
+
+            if (hostinfo->addressCount < NSP_MAX_ADDRESSES && NSP_AddAddress(hostinfo, (SOCKADDR *)Address, sizeof(SOCKADDR_IN6)))
+            {
+                RtlMoveMemory(&hostinfo->addresses[1], &hostinfo->addresses[0],
+                              (hostinfo->addressCount - 1) * sizeof(SOCKADDR_STORAGE));
+                RtlCopyMemory(&hostinfo->addresses[0], Address, sizeof(SOCKADDR_STORAGE));
+            }
+        }
+        if (Query->hostinfo.hostnameW)
+        {
+            if (!hostinfo->hostnameW)
+                hostinfo->hostnameW = Query->hostinfo.hostnameW;
+            else
+                HeapFree(hHeap, 0, Query->hostinfo.hostnameW);
+        }
+        for (k = 0; k < (DWORD)Query->AliasIndex; k++)
+        {
+            if (AliasIndex < WS2_INTERNAL_MAX_ALIAS - 1)
+                Aliases[AliasIndex++] = Query->Aliases[k];
+            else
+                HeapFree(hHeap, 0, Query->Aliases[k]);
+        }
+        if (Query->hostinfo.addresses)
+            HeapFree(hHeap, 0, Query->hostinfo.addresses);
+        HeapFree(hHeap, 0, Query);
+    }
+    else if (data->families & NSP_FAMILY_INET)
+    {
+        status4 = NSP_QueryAddresses(data, dwQueryFlags, DNS_TYPE_A, hostinfo, Aliases, &AliasIndex);
     }
 
-    if ((data->dwControlFlags & LUP_DEEP) == 0)
-    {
-        dwQueryFlags |= DNS_QUERY_NO_RECURSION;
-    }
-
-    /* DNS_TYPE_A: include/WinDNS.h */
-    /* DnsQuery -- lib/dnsapi/dnsapi/query.c */
-    dns_status = DnsQuery_W(data->hostnameW,
-                            DNS_TYPE_A,
-                            dwQueryFlags,
-                            NULL /* extra dns servers */,
-                            &dp,
-                            NULL);
-    if (dns_status == ERROR_INVALID_NAME)
+    if (status4 == ERROR_INVALID_NAME || status6 == ERROR_INVALID_NAME)
     {
         WSASetLastError(WSAEFAULT);
         result = ERROR_INVALID_PARAMETER;
-        goto cleanup;
     }
-
-    if ((dns_status != 0) || (dp == NULL))
+    else if (!hostinfo->addressCount)
     {
-        result = WSAHOST_NOT_FOUND;
-        goto cleanup;
+        result = (status4 == ERROR_TIMEOUT || status6 == ERROR_TIMEOUT) ? WSATRY_AGAIN : WSAHOST_NOT_FOUND;
     }
-
-    //ASSERT(dp->wType == DNS_TYPE_A);
-    //ASSERT(dp->wDataLength == sizeof(DNS_A_DATA));
-    curr = dp;
-    while ((curr->pNext != NULL) || (curr->wType != DNS_TYPE_A))
+    else
     {
-        if (curr->wType == DNS_TYPE_CNAME)
-        {
-            Aliases[AliasIndex++] = curr->Data.Cname.pNameHost;
-        }
-        curr = curr->pNext;
+        if (!hostinfo->hostnameW)
+            hostinfo->hostnameW = StrCpyHeapAllocW(hHeap, data->hostnameW);
+        if (AliasIndex)
+            hostinfo->servaliasesA = StrAryCpyHeapAllocWToA(hHeap, (WCHAR**)&Aliases);
+        result = hostinfo->hostnameW ? ERROR_SUCCESS : WSA_NOT_ENOUGH_MEMORY;
     }
 
-    if (curr->wType != DNS_TYPE_A)
-    {
-        result = WSASERVICE_NOT_FOUND;
-        goto cleanup;
-    }
-    hostinfo->hostnameW = StrCpyHeapAllocW(hHeap, curr->pName);
-    hostinfo->addr4 = curr->Data.A.IpAddress;
-    if (AliasIndex)
-    {
-        hostinfo->servaliasesA = StrAryCpyHeapAllocWToA(hHeap, (WCHAR**)&Aliases);
-    }
-    result = ERROR_SUCCESS;
-
-cleanup:
-    if (dp != NULL)
-        DnsRecordListFree(dp, DnsFreeRecordList);
-
+    for (i = 0; i < AliasIndex; i++)
+        HeapFree(hHeap, 0, Aliases[i]);
     return result;
 }
 
@@ -1050,7 +1311,9 @@ NSP_LookupServiceNextW(_In_ PWSHANDLEINTERN data,
 
     if ((LUP_RETURN_ADDR & data->dwControlFlags) != 0)
     {
-        if (!mswBufferAppendAddr_AddrInfoW(&buf, lpRes, hostinfo.addr4))
+        if (hostinfo.addressCount
+            ? !mswBufferAppendAddr_CsAddrs(&buf, lpRes, hostinfo.addresses, hostinfo.addressCount)
+            : !mswBufferAppendAddr_AddrInfoW(&buf, lpRes, hostinfo.addr4))
         {
             *lpResLen = buf.bytesUsed;
             result = WSAEFAULT;
@@ -1063,11 +1326,12 @@ NSP_LookupServiceNextW(_In_ PWSHANDLEINTERN data,
         if (data->CallID == NSP_CALLID_HOSTBYNAME)
         {
             /* Write data for PBLOB (hostent) */
-            if (!mswBufferAppendBlob_Hostent(&buf,
-                                             lpRes,
-                                             (LUP_RETURN_ALIASES & data->dwControlFlags) != 0 ? hostinfo.servaliasesA : NULL,
-                                             ServiceInstanceNameA,
-                                             hostinfo.addr4))
+            if (!mswBufferAppendBlob_HostentList(&buf,
+                                                 lpRes,
+                                                 (LUP_RETURN_ALIASES & data->dwControlFlags) != 0 ? hostinfo.servaliasesA : NULL,
+                                                 ServiceInstanceNameA,
+                                                 hostinfo.addresses,
+                                                 hostinfo.addressCount))
             {
                 *lpResLen = buf.bytesUsed;
                 result = WSAEFAULT;
@@ -1114,6 +1378,9 @@ NSP_LookupServiceNextW(_In_ PWSHANDLEINTERN data,
 
     result = ERROR_SUCCESS;
 End:
+    if (result == WSAEFAULT && data->CallIDCounter)
+        data->CallIDCounter--;
+
     /* cleanup */
     if (ServiceInstanceNameA != NULL)
         HeapFree(hHeap, 0, ServiceInstanceNameA);
@@ -1129,6 +1396,9 @@ End:
 
     if (hostinfo.servprotoW != NULL)
         HeapFree(hHeap, 0, hostinfo.servprotoW);
+
+    if (hostinfo.addresses != NULL)
+        HeapFree(hHeap, 0, hostinfo.addresses);
 
     return result;
 }

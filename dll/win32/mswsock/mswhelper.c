@@ -1,5 +1,6 @@
 
 #include "precomp.h"
+#include <ws2tcpip.h>
 
 #include <winuser.h>
 #include <winnls.h>
@@ -139,7 +140,7 @@ mswBufferAppendLst(_Inout_ PMSW_BUFFER mswBuf,
         if (!mswBufferAppendPtr(mswBuf, (void*)lstDataPos))
             return FALSE;
 
-        lstDataPos += sizeof(UINT_PTR);
+        lstDataPos += itemByteLength;
     }
 
     /* end of list */
@@ -392,6 +393,111 @@ mswBufferAppendAddr_AddrInfoW(_Inout_ PMSW_BUFFER mswBuf,
     RtlZeroMemory(psa->sin_zero, sizeof(psa->sin_zero));
 
     return TRUE;
+}
+
+BOOL
+mswBufferAppendBlob_HostentList(_Inout_ PMSW_BUFFER mswBuf,
+                                _Inout_ LPWSAQUERYSETW lpRes,
+                                _In_ char** hostAliasesA,
+                                _In_ char* hostnameA,
+                                _In_ const SOCKADDR_STORAGE* addresses,
+                                _In_ DWORD addressCount)
+{
+    void* lst[65];
+    PHOSTENT phe;
+    BYTE* bytesOfs;
+    DWORD i, count = 0;
+    SHORT family = AF_INET6;
+
+    for (i = 0; i < addressCount; i++)
+    {
+        if (addresses[i].ss_family == AF_INET)
+            family = AF_INET;
+    }
+
+    lpRes->lpBlob = (LPBLOB)mswBufferEndPtr(mswBuf);
+    if (!mswBufferIncUsed(mswBuf, sizeof(*lpRes->lpBlob)))
+        return FALSE;
+    lpRes->lpBlob->cbSize = 0;
+    lpRes->lpBlob->pBlobData = mswBufferEndPtr(mswBuf);
+
+    phe = (PHOSTENT)lpRes->lpBlob->pBlobData;
+    bytesOfs = mswBufferEndPtr(mswBuf);
+    if (!mswBufferIncUsed(mswBuf, sizeof(*phe)))
+        return FALSE;
+
+    phe->h_addrtype = family;
+    phe->h_length = family == AF_INET ? sizeof(IN_ADDR) : sizeof(IN6_ADDR);
+
+    phe->h_aliases = (char**)(mswBufferEndPtr(mswBuf) - bytesOfs);
+    if (hostAliasesA)
+    {
+        if (!mswBufferAppendStrLstA(mswBuf, (void**)hostAliasesA, -(LONG_PTR)bytesOfs))
+            return FALSE;
+    }
+    else if (!mswBufferAppendPtr(mswBuf, NULL))
+    {
+        return FALSE;
+    }
+
+    for (i = 0; i < addressCount && count < ARRAYSIZE(lst) - 1; i++)
+    {
+        if (addresses[i].ss_family != family)
+            continue;
+        lst[count++] = family == AF_INET ? (void*)&((const SOCKADDR_IN*)&addresses[i])->sin_addr
+                                         : (void*)&((const SOCKADDR_IN6*)&addresses[i])->sin6_addr;
+    }
+    lst[count] = NULL;
+
+    phe->h_addr_list = (char**)(mswBufferEndPtr(mswBuf) - bytesOfs);
+    if (!mswBufferAppendLst(mswBuf, lst, phe->h_length, -(LONG_PTR)bytesOfs))
+        return FALSE;
+
+    phe->h_name = (char*)(mswBufferEndPtr(mswBuf) - bytesOfs);
+    if (!mswBufferAppendStrA(mswBuf, hostnameA))
+        return FALSE;
+
+    lpRes->lpBlob->cbSize = (DWORD)(mswBufferEndPtr(mswBuf) - bytesOfs);
+    return mswBuf->bufok;
+}
+
+BOOL
+mswBufferAppendAddr_CsAddrs(_Inout_ PMSW_BUFFER mswBuf,
+                            _Inout_ LPWSAQUERYSETW lpRes,
+                            _In_ const SOCKADDR_STORAGE* addresses,
+                            _In_ DWORD addressCount)
+{
+    LPCSADDR_INFO info;
+    DWORD i;
+
+    lpRes->dwNumberOfCsAddrs = addressCount;
+    lpRes->lpcsaBuffer = (LPCSADDR_INFO)mswBufferEndPtr(mswBuf);
+    info = lpRes->lpcsaBuffer;
+    if (!mswBufferIncUsed(mswBuf, addressCount * sizeof(*info)))
+        return FALSE;
+
+    for (i = 0; i < addressCount; i++)
+    {
+        INT length = addresses[i].ss_family == AF_INET6 ? sizeof(SOCKADDR_IN6) : sizeof(SOCKADDR_IN);
+
+        info[i].iSocketType = SOCK_DGRAM;
+        info[i].iProtocol = IPPROTO_UDP;
+
+        info[i].LocalAddr.lpSockaddr = (LPSOCKADDR)mswBufferEndPtr(mswBuf);
+        info[i].LocalAddr.iSockaddrLength = length;
+        if (!mswBufferIncUsed(mswBuf, length))
+            return FALSE;
+        RtlZeroMemory(info[i].LocalAddr.lpSockaddr, length);
+        info[i].LocalAddr.lpSockaddr->sa_family = addresses[i].ss_family;
+
+        info[i].RemoteAddr.lpSockaddr = (LPSOCKADDR)mswBufferEndPtr(mswBuf);
+        info[i].RemoteAddr.iSockaddrLength = length;
+        if (!mswBufferIncUsed(mswBuf, length))
+            return FALSE;
+        RtlCopyMemory(info[i].RemoteAddr.lpSockaddr, &addresses[i], length);
+    }
+
+    return mswBuf->bufok;
 }
 
 /* ansicode <-> unicode */

@@ -11,6 +11,7 @@
 #include <ws2_32.h>
 
 #include <ws2tcpip.h>
+#include <strsafe.h>
 
 #define NDEBUG
 #include <debug.h>
@@ -251,66 +252,6 @@ CloneAddrInfo(IN WORD Port,
 static
 INT
 WINAPI
-QueryDNS(IN LPCSTR NodeName,
-         IN INT SocketType,
-         IN INT Protocol,
-         IN WORD Port,
-         OUT CHAR Alias[NI_MAXHOST],
-         OUT PADDRINFOW *pptResult)
-{
-    PADDRINFOW *Next = pptResult;
-    PHOSTENT Hostent = NULL;
-    PCHAR *Addresses;
-
-    /* Assume nothing found */
-    *Next = NULL;
-    Alias[0] = '\0';
-
-    /* Get the hostent */
-    Hostent = gethostbyname(NodeName);
-    if (Hostent)
-    {
-        /* Check for valid addresses */
-        if ((Hostent->h_addrtype == AF_INET) &&
-            (Hostent->h_length == sizeof(IN_ADDR)))
-        {
-            /* Loop every address in it */
-            for (Addresses = Hostent->h_addr_list; *Addresses; Addresses++)
-            {
-                /* Create an addrinfo structure for it*/
-                *Next = NewAddrInfo(SocketType,
-                                    Protocol,
-                                    Port,
-                                    ((PIN_ADDR)*Addresses)->s_addr);
-                if (!*Next) return EAI_MEMORY;
-
-                /* Move to the next entry */
-                Next = &((*Next)->ai_next);
-            }
-        }
-
-        /* Copy the canonical name */
-        strcpy(Alias, Hostent->h_name);
-
-        /* Return success */
-        return 0;
-    }
-
-    /* Find out what the error was */
-    switch (GetLastError())
-    {
-        /* Convert the Winsock Error to an EAI error */
-        case WSAHOST_NOT_FOUND: return EAI_NONAME;
-        case WSATRY_AGAIN: return EAI_AGAIN;
-        case WSANO_RECOVERY: return EAI_FAIL;
-        case WSANO_DATA: return EAI_NODATA;
-        default: return EAI_NONAME;
-    }
-}
-
-static
-INT
-WINAPI
 LookupNodeByAddr(IN LPWSTR pNodeBuffer,
                  IN DWORD NodeBufferSize,
                  IN BOOLEAN OnlyNodeName,
@@ -458,79 +399,201 @@ GetServiceNameForPort(IN LPWSTR pServiceBuffer,
 }
 
 static
+VOID
+WINAPI
+SortAddrInfoList(IN OUT PADDRINFOW *pptResult)
+{
+    PADDRINFOW Entry, *Nodes = NULL;
+    PSOCKET_ADDRESS_LIST List = NULL;
+    PSOCKADDR_IN6 Mapped = NULL;
+    INT Count = 0, i, j;
+    DWORD Size, Returned;
+    SOCKET Socket;
+
+    for (Entry = *pptResult; Entry; Entry = Entry->ai_next)
+        Count++;
+    if (Count < 2)
+        return;
+
+    Socket = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+    if (Socket == INVALID_SOCKET)
+        return;
+
+    Size = FIELD_OFFSET(SOCKET_ADDRESS_LIST, Address[Count]);
+    List = HeapAlloc(WsSockHeap, HEAP_ZERO_MEMORY, Size);
+    Mapped = HeapAlloc(WsSockHeap, HEAP_ZERO_MEMORY, Count * sizeof(SOCKADDR_IN6));
+    Nodes = HeapAlloc(WsSockHeap, 0, Count * sizeof(PADDRINFOW));
+    if (List && Mapped && Nodes)
+    {
+        for (i = 0, Entry = *pptResult; Entry; Entry = Entry->ai_next, i++)
+        {
+            Nodes[i] = Entry;
+            if (Entry->ai_family == AF_INET6)
+            {
+                Mapped[i] = *(PSOCKADDR_IN6)Entry->ai_addr;
+            }
+            else
+            {
+                Mapped[i].sin6_family = AF_INET6;
+                Mapped[i].sin6_addr.u.Word[5] = 0xFFFF;
+                RtlCopyMemory(&Mapped[i].sin6_addr.u.Byte[12], &((PSOCKADDR_IN)Entry->ai_addr)->sin_addr, 4);
+            }
+            List->Address[i].lpSockaddr = (LPSOCKADDR)&Mapped[i];
+            List->Address[i].iSockaddrLength = sizeof(SOCKADDR_IN6);
+        }
+        List->iAddressCount = Count;
+
+        if (WSAIoctl(Socket, SIO_ADDRESS_LIST_SORT, List, Size, List, Size, &Returned, NULL, NULL) == 0 &&
+            List->iAddressCount == Count)
+        {
+            PADDRINFOW *Tail = pptResult;
+
+            for (i = 0; i < Count; i++)
+            {
+                j = (INT)((PSOCKADDR_IN6)List->Address[i].lpSockaddr - Mapped);
+                if (j < 0 || j >= Count || !Nodes[j])
+                    break;
+                *Tail = Nodes[j];
+                Tail = &Nodes[j]->ai_next;
+                Nodes[j] = NULL;
+            }
+            for (j = 0; j < Count; j++)
+            {
+                if (Nodes[j])
+                {
+                    *Tail = Nodes[j];
+                    Tail = &Nodes[j]->ai_next;
+                }
+            }
+            *Tail = NULL;
+        }
+    }
+
+    closesocket(Socket);
+    if (Nodes) HeapFree(WsSockHeap, 0, Nodes);
+    if (Mapped) HeapFree(WsSockHeap, 0, Mapped);
+    if (List) HeapFree(WsSockHeap, 0, List);
+}
+
+static
 INT
 WINAPI
-LookupAddressForName(IN LPCSTR NodeName,
+LookupAddressForName(IN PCWSTR NodeName,
+                     IN INT Family,
                      IN INT SocketType,
                      IN INT Protocol,
                      IN WORD Port,
                      IN BOOL bAI_CANONNAME,
                      OUT PADDRINFOW *pptResult)
 {
-    INT iError = 0;
-    INT AliasCount = 0;
-    CHAR szFQDN1[NI_MAXHOST] = "";
-    CHAR szFQDN2[NI_MAXHOST] = "";
-    PCHAR Name = szFQDN1;
-    PCHAR Alias = szFQDN2;
-    PCHAR Scratch = NULL;
+    GUID LookupGuid = SVCID_INET_HOSTADDRBYNAME;
+    AFPROTOCOLS Protocols[2];
+    WSAQUERYSETW Restrictions;
+    PWSAQUERYSETW Results;
+    PADDRINFOW *Next = pptResult;
+    HANDLE LookupHandle;
+    WCHAR Canonical[NI_MAXHOST] = L"";
+    DWORD Length = 64 * 1024, i;
+    INT iError = 0, ErrorCode;
 
-    /* Make a copy of the name */
-    strcpy(Name, NodeName);
+    *pptResult = NULL;
 
-    /* Loop */
-    while (TRUE)
+    RtlZeroMemory(&Restrictions, sizeof(Restrictions));
+    RtlZeroMemory(Protocols, sizeof(Protocols));
+    Restrictions.dwSize = sizeof(Restrictions);
+    Restrictions.lpszServiceInstanceName = (LPWSTR)NodeName;
+    Restrictions.lpServiceClassId = &LookupGuid;
+    Restrictions.dwNameSpace = NS_DNS;
+    Restrictions.lpafpProtocols = Protocols;
+    if (Family != PF_INET)
     {
-        /* Do a DNS Query for the name */
-        iError = QueryDNS(NodeName,
-                          SocketType,
-                          Protocol,
-                          Port,
-                          Alias,
-                          pptResult);
-        if (iError) break;
+        Protocols[Restrictions.dwNumberOfProtocols].iAddressFamily = AF_INET6;
+        Protocols[Restrictions.dwNumberOfProtocols++].iProtocol = Protocol;
+    }
+    if (Family != PF_INET6)
+    {
+        Protocols[Restrictions.dwNumberOfProtocols].iAddressFamily = AF_INET;
+        Protocols[Restrictions.dwNumberOfProtocols++].iProtocol = Protocol;
+    }
 
-        /* Exit if we have a result */
-        if (*pptResult) break;
+    if (WSALookupServiceBeginW(&Restrictions, LUP_RETURN_ADDR | LUP_RETURN_NAME, &LookupHandle) == SOCKET_ERROR)
+        return EAI_FAIL;
 
-        /* Don't loop continuously if this is a DNS misconfiguration */
-        if ((!strlen(Alias)) || (!strcmp(Name, Alias)) || (++AliasCount == 16))
+    Results = HeapAlloc(WsSockHeap, 0, Length);
+    if (!Results)
+    {
+        WSALookupServiceEnd(LookupHandle);
+        return EAI_MEMORY;
+    }
+
+    for (;;)
+    {
+        DWORD Size = Length;
+
+        if (WSALookupServiceNextW(LookupHandle, 0, &Size, Results) == SOCKET_ERROR)
         {
-            /* Exit the loop with a failure */
-            iError = EAI_FAIL;
+            ErrorCode = GetLastError();
+            if (ErrorCode != WSAENOMORE && ErrorCode != WSA_E_NO_MORE && !*pptResult)
+            {
+                switch (ErrorCode)
+                {
+                    case WSATRY_AGAIN: iError = EAI_AGAIN; break;
+                    case WSANO_RECOVERY: iError = EAI_FAIL; break;
+                    case WSANO_DATA: iError = EAI_NODATA; break;
+                    case WSA_NOT_ENOUGH_MEMORY: iError = EAI_MEMORY; break;
+                    default: iError = EAI_NONAME; break;
+                }
+            }
             break;
         }
 
-        /* Restart loopup if we got a CNAME */
-        Swap(Name, Alias, Scratch);
+        if (Results->lpszServiceInstanceName && !Canonical[0])
+            StringCchCopyW(Canonical, ARRAYSIZE(Canonical), Results->lpszServiceInstanceName);
+
+        for (i = 0; i < Results->dwNumberOfCsAddrs && !iError; i++)
+        {
+            LPSOCKADDR Address = Results->lpcsaBuffer[i].RemoteAddr.lpSockaddr;
+
+            if (!Address)
+                continue;
+            if (Address->sa_family == AF_INET && Family != PF_INET6)
+                *Next = NewAddrInfo(SocketType, Protocol, Port, ((PSOCKADDR_IN)Address)->sin_addr.s_addr);
+            else if (Address->sa_family == AF_INET6 && Family != PF_INET)
+                *Next = NewAddrInfo6(SocketType, Protocol, Port, &((PSOCKADDR_IN6)Address)->sin6_addr,
+                                     ((PSOCKADDR_IN6)Address)->sin6_scope_id);
+            else
+                continue;
+
+            if (!*Next)
+                iError = EAI_MEMORY;
+            else
+                Next = &((*Next)->ai_next);
+        }
+        if (iError)
+            break;
     }
 
-    /* Check if we succeeded and the canonical name is requested */
-    if (!iError && bAI_CANONNAME)
+    HeapFree(WsSockHeap, 0, Results);
+    WSALookupServiceEnd(LookupHandle);
+
+    if (!iError && !*pptResult)
+        iError = EAI_NONAME;
+    if (iError)
+        return iError;
+
+    SortAddrInfoList(pptResult);
+
+    if (bAI_CANONNAME)
     {
-        /* Allocate memory for a copy */
-        (*pptResult)->ai_canonname = HeapAlloc(WsSockHeap, 0, 512);
+        SIZE_T Size = (wcslen(Canonical[0] ? Canonical : NodeName) + 1) * sizeof(WCHAR);
 
-        /* Check if we had enough memory */
+        (*pptResult)->ai_canonname = HeapAlloc(WsSockHeap, 0, Size);
         if (!(*pptResult)->ai_canonname)
-        {
-            /* Set failure code */
-            iError = EAI_MEMORY;
-        }
-        else
-        {
-            /* Convert the alias to UNICODE */
-            MultiByteToWideChar(CP_ACP,
-                                0,
-                                Alias,
-                                -1,
-                                (*pptResult)->ai_canonname,
-                                256);
-        }
+            return EAI_MEMORY;
+        RtlCopyMemory((*pptResult)->ai_canonname, Canonical[0] ? Canonical : NodeName, Size);
     }
 
-    /* Return to caller */
-    return iError;
+    return 0;
 }
 
 /*
@@ -559,7 +622,6 @@ GetAddrInfoW(IN PCWSTR pszNodeName,
     WORD wUdpPort = 0;
     WCHAR CanonicalName[0x42];
     CHAR AnsiServiceName[256];
-    CHAR AnsiNodeName[256];
     DPRINT("GetAddrInfoW: %S, %S, %p, %p\n", pszNodeName, pszServiceName, ptHints, pptResult);
 
     if ((iError = WsQuickProlog()) != ERROR_SUCCESS)
@@ -730,6 +792,25 @@ GetAddrInfoW(IN PCWSTR pszNodeName,
         /* If we didn't get one back, assume out of memory */
         if (!(*pptResult)) iError = EAI_MEMORY;
 
+        if (!iError && !pszNodeName && iFamily == PF_UNSPEC)
+        {
+            PADDRINFOW Ip4Result = *pptResult;
+
+            RtlZeroMemory(&Ip6Address, sizeof(Ip6Address));
+            if (!(iFlags & AI_PASSIVE))
+                Ip6Address.u.Byte[15] = 1;
+            *pptResult = NewAddrInfo6(iSocketType, iProtocol, wPort, &Ip6Address, 0);
+            if (!(*pptResult))
+            {
+                *pptResult = Ip4Result;
+                iError = EAI_MEMORY;
+            }
+            else
+            {
+                (*pptResult)->ai_next = Ip4Result;
+            }
+        }
+
         /* Check if we have success and a nodename */
         if (!iError && pszNodeName)
         {
@@ -768,25 +849,16 @@ GetAddrInfoW(IN PCWSTR pszNodeName,
             }
         }
     }
-    else if ((iFlags & AI_NUMERICHOST) || iFamily == PF_INET6)
+    else if (iFlags & AI_NUMERICHOST)
     {
         /* No name for this request (we have a non-numeric name) */
         iError = EAI_NONAME;
     }
     else
     {
-        /* We need to convert it to ANSI */
-        WideCharToMultiByte(CP_ACP,
-                            0,
-                            pszNodeName,
-                            -1,
-                            AnsiNodeName,
-                            sizeof(AnsiNodeName),
-                            NULL,
-                            0);
-
         /* Non-numeric name, do DNS lookup */
-        iError = LookupAddressForName(AnsiNodeName,
+        iError = LookupAddressForName(pszNodeName,
+                                      iFamily,
                                       iSocketType,
                                       iProtocol,
                                       wPort,
