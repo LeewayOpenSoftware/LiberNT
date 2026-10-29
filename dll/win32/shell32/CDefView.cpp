@@ -38,6 +38,7 @@ TODO:
 
 #include <atlwin.h>
 #include <ui/rosctrls.h>
+#include <perhist.h>
 #include <vssym32.h>
 #include <shdispid.h>
 #include <reactos/dwmsettings.h>
@@ -306,7 +307,8 @@ class CDefView :
     public IDropSource,
     public IViewObject,
     public IServiceProvider,
-    public IFolderFilterSite
+    public IFolderFilterSite,
+    public IPersistHistory
 {
 private:
     CComPtr<IShellFolder>     m_pSFParent;
@@ -386,6 +388,7 @@ private:
     BOOL  m_Destroyed;
     BOOL  m_FillListIsRefresh;
     ULONG m_FillListGeneration;
+    DWORD m_dwPositionCookie;
     struct ITEM_POSITION
     {
         PITEMID_CHILD pidl;
@@ -655,6 +658,12 @@ public:
 
     // Message handlers
     LRESULT OnShowWindow(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled);
+    STDMETHOD(GetClassID)(CLSID *pClassID) override;
+    STDMETHOD(LoadHistory)(IStream *pStream, IBindCtx *pbc) override;
+    STDMETHOD(SaveHistory)(IStream *pStream) override;
+    STDMETHOD(SetPositionCookie)(DWORD dwPositioncookie) override;
+    STDMETHOD(GetPositionCookie)(DWORD *pdwPositioncookie) override;
+
     LRESULT OnGetDlgCode(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled);
     LRESULT OnDestroy(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled);
     LRESULT OnEraseBackground(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled);
@@ -760,6 +769,7 @@ public:
     COM_INTERFACE_ENTRY_IID(IID_IServiceProvider, IServiceProvider)
     END_COM_MAP()
 };
+    COM_INTERFACE_ENTRY_IID(IID_IPersistHistory, IPersistHistory)
 
 #define ID_LISTVIEW     1
 
@@ -803,7 +813,8 @@ CDefView::CDefView() :
     m_ExplorerBackdropWindow(NULL),
     m_Destroyed(FALSE),
     m_FillListIsRefresh(FALSE),
-    m_FillListGeneration(0)
+    m_FillListGeneration(0),
+    m_dwPositionCookie(0)
 {
     ZeroMemory(&m_FolderSettings, sizeof(m_FolderSettings));
     m_FolderSettings.ViewMode = FVM_TILE;
@@ -4691,6 +4702,62 @@ HRESULT WINAPI CDefView::GetItemObject(UINT uItem, REFIID riid, LPVOID *ppvOut)
                 hr = CDefViewBckgrndMenu_CreateInstance(m_pSF2Parent, riid, ppvOut);
                 if (FAILED_UNEXPECTEDLY(hr))
                     return hr;
+HRESULT STDMETHODCALLTYPE CDefView::GetClassID(CLSID *pClassID)
+{
+    if (!pClassID)
+        return E_POINTER;
+    return E_FAIL;
+}
+
+HRESULT STDMETHODCALLTYPE CDefView::LoadHistory(IStream *pStream, IBindCtx *pbc)
+{
+    PERSISTCLASSICVIEWSTATE cvs;
+    ULONG cbRead = 0;
+
+    if (!pStream)
+        return E_INVALIDARG;
+    HRESULT hr = pStream->Read(&cvs, sizeof(cvs), &cbRead);
+    if (FAILED(hr))
+        return hr;
+    if (cbRead != sizeof(cvs) || cvs.Signature != cvs.SIG)
+        return HResultFromWin32(ERROR_INVALID_DATA);
+
+    SetCurrentViewMode(cvs.FolderSettings.ViewMode);
+    SetCurrentFolderFlags(cvs.VALIDFWF, cvs.FolderSettings.fFlags);
+    if (m_ListView)
+    {
+        hr = MapFolderColumnToListColumn(cvs.SortColId);
+        if (SUCCEEDED(hr))
+        {
+            m_sortInfo.ListColumn = hr;
+            m_sortInfo.Direction = cvs.SortDir;
+            _Sort(-1);
+        }
+    }
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE CDefView::SaveHistory(IStream *pStream)
+{
+    if (!pStream)
+        return E_INVALIDARG;
+    return SaveViewState(pStream);
+}
+
+HRESULT STDMETHODCALLTYPE CDefView::SetPositionCookie(DWORD dwPositioncookie)
+{
+    m_dwPositionCookie = dwPositioncookie;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE CDefView::GetPositionCookie(DWORD *pdwPositioncookie)
+{
+    if (!pdwPositioncookie)
+        return E_POINTER;
+    *pdwPositioncookie = m_dwPositionCookie;
+    return S_OK;
+}
+
 
                 IUnknown_SetSite(*((IUnknown**)ppvOut), (IShellView *)this);
             }
@@ -4752,8 +4819,10 @@ HRESULT STDMETHODCALLTYPE CDefView::SetCurrentViewMode(UINT ViewMode)
     TRACE("(%p)->(%u), stub\n", this, ViewMode);
 
     /* It's not redundant to check FVM_AUTO because it's a (UINT)-1 */
-    if (((INT)ViewMode < FVM_FIRST || (INT)ViewMode > FVM_LAST) && ((INT)ViewMode != FVM_AUTO))
-        return E_INVALIDARG;
+    if ((INT)ViewMode == FVM_AUTO)
+        ViewMode = GetDefaultViewMode();
+    if ((INT)ViewMode < FVM_FIRST || (INT)ViewMode > FVM_LAST)
+        return S_OK;
 
     /* Windows before Vista uses LVM_SETVIEW and possibly
        LVM_SETEXTENDEDLISTVIEWSTYLE to set the style of the listview,
@@ -4806,6 +4875,10 @@ HRESULT STDMETHODCALLTYPE CDefView::GetFolder(REFIID riid, void **ppv)
 
 HRESULT STDMETHODCALLTYPE CDefView::Item(int iItemIndex, PITEMID_CHILD *ppidl)
 {
+            else if (IsEqualIID(riid, IID_IPersistHistory))
+            {
+                hr = QueryInterface(riid, ppvOut);
+            }
     PCUITEMID_CHILD pidl = _PidlByItem(iItemIndex);
     if (pidl)
     {
