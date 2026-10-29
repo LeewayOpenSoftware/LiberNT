@@ -631,11 +631,21 @@ IntInvalidateWindows(PWND Wnd, PREGION Rgn, ULONG Flags)
 {
    INT RgnType = NULLREGION;
    BOOL HadPaintMessage;
+   PREGION RgnParentDC = NULL;
 
    TRACE("IntInvalidateWindows start Rgn %p\n",Rgn);
 
    if ( Rgn > PRGN_WINDOW )
    {
+      if ((Flags & RDW_INVALIDATE) &&
+          (Wnd->pcls->style & CS_PARENTDC) &&
+          (Wnd->style & (WS_CHILD | WS_POPUP)) == WS_CHILD)
+      {
+         RgnParentDC = IntSysCreateRectpRgn(0, 0, 0, 0);
+         if (RgnParentDC)
+            IntGdiCombineRgn(RgnParentDC, Rgn, NULL, RGN_COPY);
+      }
+
       /*
        * If the nonclient is not to be redrawn, clip the region to the client
        * rect
@@ -689,6 +699,7 @@ IntInvalidateWindows(PWND Wnd, PREGION Rgn, ULONG Flags)
    /* Nothing to paint, just return */
    if ((RgnType == NULLREGION && (Flags & RDW_INVALIDATE)) || RgnType == ERROR)
    {
+      if (RgnParentDC) REGION_Delete(RgnParentDC);
       return;
    }
 
@@ -743,7 +754,7 @@ IntInvalidateWindows(PWND Wnd, PREGION Rgn, ULONG Flags)
                RgnUpdate = REGION_LockRgn(Wnd->hrgnUpdate);
                if (RgnUpdate)
                {
-                  RgnType = IntGdiCombineRgn(RgnUpdate, RgnUpdate, Rgn, RGN_OR);
+                  RgnType = IntGdiCombineRgn(RgnUpdate, RgnUpdate, RgnParentDC ? RgnParentDC : Rgn, RGN_OR);
                   REGION_UnlockRgn(RgnUpdate);
                   if (RgnType == NULLREGION)
                   {
@@ -840,6 +851,7 @@ IntInvalidateWindows(PWND Wnd, PREGION Rgn, ULONG Flags)
          }
       }
    }
+   if (RgnParentDC) REGION_Delete(RgnParentDC);
    TRACE("IntInvalidateWindows exit\n");
 }
 
@@ -1548,6 +1560,11 @@ IntBeginPaint(PWND Window, PPAINTSTRUCT Ps)
    {
       RECTL_vOffsetRect(&rcUpdate, -Window->rcClient.left, -Window->rcClient.top);
       if (!RECTL_bIntersectRect(&Ps->rcPaint, &rcUpdate, &Rect))
+         RECTL_vSetEmptyRect(&Ps->rcPaint);
+   }
+   else if (Window->pcls->style & CS_PARENTDC)
+   {
+      if (!RECTL_bIntersectRect(&Ps->rcPaint, &Ps->rcPaint, &Rect))
          RECTL_vSetEmptyRect(&Ps->rcPaint);
    }
 
