@@ -3127,6 +3127,14 @@ LxMmUnmap(
     return Error;
 }
 
+static
+BOOLEAN
+LxVmaNoExec(
+    _In_ PLX_VMA Vma)
+{
+    return (Vma->File != NULL) && (Vma->File->Mount != NULL) && ((Vma->File->Mount->Flags & LX_MS_NOEXEC) != 0);
+}
+
 LONG64
 LxMmProtect(
     _In_ PLX_PROCESS Process,
@@ -3152,14 +3160,14 @@ LxMmProtect(
 
     LxMmLock(Process);
     Error = LxVmaCovers(Process, Address, End) ? 0 : -LX_ENOMEM;
-    for (Entry = LxVmaEntryAbove(Process, Address); (Error == 0) && (Prot & LX_PROT_WRITE) && (Entry != &Process->Vmas);
-         Entry = Entry->Flink)
+    for (Entry = LxVmaEntryAbove(Process, Address);
+         (Error == 0) && (Prot & (LX_PROT_WRITE | LX_PROT_EXEC)) && (Entry != &Process->Vmas); Entry = Entry->Flink)
     {
         PLX_VMA Vma = CONTAINING_RECORD(Entry, LX_VMA, Link);
 
         if (Vma->Start >= End)
             break;
-        if (Vma->Flags & LX_VMA_NOMAYWRITE)
+        if (((Prot & LX_PROT_WRITE) && (Vma->Flags & LX_VMA_NOMAYWRITE)) || ((Prot & LX_PROT_EXEC) && LxVmaNoExec(Vma)))
             Error = -LX_EACCES;
     }
     if (Error == 0)
@@ -3472,6 +3480,10 @@ LX_SYSCALL(LxSysMmap)
     {
         Result = -LX_EACCES;
     }
+    else if ((File != NULL) && (Prot & LX_PROT_EXEC) && (File->Mount != NULL) && (File->Mount->Flags & LX_MS_NOEXEC))
+    {
+        Result = -LX_EPERM;
+    }
     else if ((File != NULL) && (File->Memfd != NULL) && (Type != LX_MAP_PRIVATE) && (Prot & LX_PROT_WRITE) &&
              (File->Memfd->Seals & (LX_F_SEAL_WRITE | LX_F_SEAL_FUTURE_WRITE)))
     {
@@ -3513,21 +3525,42 @@ LX_SYSCALL(LxSysMunmap)
     return LxMmUnmap(Call->Process, Call->Args[0], Call->Args[1]);
 }
 
-/* FIXME: VMAs have no VM_MAYEXEC, so READ_IMPLIES_EXEC also makes noexec file mappings executable. */
+/* FIXME: READ_IMPLIES_EXEC adds PROT_EXEC to the whole range unless a noexec mapping is in it; Linux decides per mapping. */
 static
 ULONG
 LxReadImpliesExec(
     _In_ PLX_PROCESS Process,
+    _In_ ULONG64 Address,
+    _In_ ULONG64 Length,
     _In_ ULONG Prot)
 {
-    if ((Prot & LX_PROT_READ) && (Process->Personality & LX_PER_READ_IMPLIES_EXEC))
-        Prot |= LX_PROT_EXEC;
-    return Prot;
+    PLX_PROCESS Mm = Process->Mm;
+    ULONG64 End = Address + LX_ALIGN_UP(Length, LX_PAGE_SIZE);
+    PLIST_ENTRY Entry;
+
+    if (!(Prot & LX_PROT_READ) || !(Process->Personality & LX_PER_READ_IMPLIES_EXEC))
+        return Prot;
+    LxMmLock(Mm);
+    for (Entry = LxVmaEntryAbove(Mm, Address); Entry != &Mm->Vmas; Entry = Entry->Flink)
+    {
+        PLX_VMA Vma = CONTAINING_RECORD(Entry, LX_VMA, Link);
+
+        if (Vma->Start >= End)
+            break;
+        if (LxVmaNoExec(Vma))
+        {
+            LxMmUnlock(Mm);
+            return Prot;
+        }
+    }
+    LxMmUnlock(Mm);
+    return Prot | LX_PROT_EXEC;
 }
 
 LX_SYSCALL(LxSysMprotect)
 {
-    return LxMmProtect(Call->Process, Call->Args[0], Call->Args[1], LxReadImpliesExec(Call->Process, (ULONG)Call->Args[2]));
+    return LxMmProtect(Call->Process, Call->Args[0], Call->Args[1],
+                       LxReadImpliesExec(Call->Process, Call->Args[0], Call->Args[1], (ULONG)Call->Args[2]));
 }
 
 LX_SYSCALL(LxSysPkeyAlloc)
@@ -3555,7 +3588,8 @@ LX_SYSCALL(LxSysPkeyMprotect)
             return -LX_ENOMEM;
         return -LX_EINVAL;
     }
-    return LxMmProtect(Call->Process, Call->Args[0], Call->Args[1], LxReadImpliesExec(Call->Process, (ULONG)Call->Args[2]));
+    return LxMmProtect(Call->Process, Call->Args[0], Call->Args[1],
+                       LxReadImpliesExec(Call->Process, Call->Args[0], Call->Args[1], (ULONG)Call->Args[2]));
 }
 
 LONG
