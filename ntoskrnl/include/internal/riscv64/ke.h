@@ -19,6 +19,8 @@ KiRiscvCallUserMode(
 /* TODO(riscv64): initialize scheduler sub-nodes and maintain their idle sets
  * before enabling KI_CORE_PARKING. */
 
+#define KiPrcbTimerTableLockQueue(Prcb, Index) (&(Prcb)->TimerTableLockQueue[(Index)])
+
 /* The switch backend completes the outgoing-thread handoff on the new stack. */
 #define KI_ARCH_THREAD_HANDOFF_USES_RUNNING 1
 

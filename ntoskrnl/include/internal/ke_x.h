@@ -789,12 +789,7 @@ KiAcquireTimerLock(IN ULONG Hand)
     LockIndex &= (LOCK_QUEUE_TIMER_TABLE_LOCKS - 1);
 
     /* Now get the lock */
-#ifdef _M_ARM64
-    // Win11 arm64 LockQueue has only 17 entries; timer locks live in a ReactOS array
-    LockQueue = &KeGetCurrentPrcb()->TimerTableLockQueue[LockIndex];
-#else
-    LockQueue = &KeGetCurrentPrcb()->LockQueue[LockQueueTimerTableLock + LockIndex];
-#endif
+    LockQueue = KiPrcbTimerTableLockQueue(KeGetCurrentPrcb(), LockIndex);
 
     /* Acquire it and return */
     KeAcquireQueuedSpinLockAtDpcLevel(LockQueue);
