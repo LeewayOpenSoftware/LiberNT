@@ -350,20 +350,58 @@ LxArchEmulateInstruction(
     return TRUE;
 }
 
+typedef struct _LX_ARM64_CORE
+{
+    UCHAR Implementer;
+    USHORT Part;
+} LX_ARM64_CORE;
+
+static const LX_ARM64_CORE LxArm64SsbSafe[] =
+{
+    { 0x41, 0xD03 }, { 0x41, 0xD04 }, { 0x41, 0xD05 }, { 0x42, 0x100 }, { 0x51, 0x803 }, { 0x51, 0x805 },
+};
+
+static const LX_ARM64_CORE LxArm64MeltdownSafe[] =
+{
+    { 0x41, 0xD03 }, { 0x41, 0xD04 }, { 0x41, 0xD05 }, { 0x41, 0xD07 }, { 0x41, 0xD08 }, { 0x41, 0xD09 },
+    { 0x42, 0x100 }, { 0x42, 0x516 }, { 0x43, 0x0AF }, { 0x48, 0xD01 }, { 0x4E, 0x004 }, { 0x51, 0x800 },
+    { 0x51, 0x801 }, { 0x51, 0x803 }, { 0x51, 0x805 },
+};
+
+static const LX_ARM64_CORE LxArm64SpectreV2Safe[] =
+{
+    { 0x41, 0xD03 }, { 0x41, 0xD04 }, { 0x41, 0xD05 }, { 0x42, 0x100 }, { 0x48, 0xD01 }, { 0x51, 0x801 },
+    { 0x51, 0x803 }, { 0x51, 0x805 },
+};
+
+static const LX_ARM64_CORE LxArm64BhbSafe[] =
+{
+    { 0x41, 0xD03 }, { 0x41, 0xD04 }, { 0x41, 0xD05 }, { 0x41, 0xD46 }, { 0x41, 0xD80 }, { 0x42, 0x100 },
+    { 0x51, 0x801 }, { 0x51, 0x803 }, { 0x51, 0x805 },
+};
+
+static
+BOOLEAN
+LxArm64CoreListed(
+    _In_ ULONG64 Midr,
+    _In_reads_(Count) const LX_ARM64_CORE *List,
+    _In_ ULONG Count)
+{
+    ULONG Index;
+
+    for (Index = 0; Index < Count; Index++)
+    {
+        if ((((Midr >> 24) & 0xFF) == List[Index].Implementer) && (((Midr >> 4) & 0xFFF) == List[Index].Part))
+            return TRUE;
+    }
+    return FALSE;
+}
+
 LONG
 LxArchSpecStoreBypassMode(VOID)
 {
-    static const struct
-    {
-        UCHAR Implementer;
-        USHORT Part;
-    } Unaffected[] =
-    {
-        { 0x41, 0xD03 }, { 0x41, 0xD04 }, { 0x41, 0xD05 }, { 0x42, 0x100 }, { 0x51, 0x803 }, { 0x51, 0x805 },
-    };
     static volatile LONG Cached = MINLONG;
     ULONG64 Midr;
-    ULONG Index;
     LONG Mode;
 
     Mode = ReadNoFence(&Cached);
@@ -371,16 +409,118 @@ LxArchSpecStoreBypassMode(VOID)
         return Mode;
     Midr = ARM64_READ_SYSREG(MIDR_EL1);
     Mode = (LX_ID_FIELD(LxArm64ReadIdRegister(4, 1), 4) != 0) ? LX_SPEC_MODE_DYNAMIC : LX_SPEC_MODE_VULNERABLE;
-    for (Index = 0; Index < RTL_NUMBER_OF(Unaffected); Index++)
-    {
-        if ((((Midr >> 24) & 0xFF) == Unaffected[Index].Implementer) &&
-            (((Midr >> 4) & 0xFFF) == Unaffected[Index].Part))
-        {
-            Mode = LX_SPEC_MODE_UNAFFECTED;
-        }
-    }
+    if (LxArm64CoreListed(Midr, LxArm64SsbSafe, RTL_NUMBER_OF(LxArm64SsbSafe)))
+        Mode = LX_SPEC_MODE_UNAFFECTED;
     InterlockedExchange(&Cached, Mode);
     return Mode;
+}
+
+#define LX_A64_SCTLR_DSSBS      (1ULL << 44)
+#define LX_VULN_UNAFFECTED      0
+#define LX_VULN_MITIGATED       1
+#define LX_VULN_VULNERABLE      2
+
+typedef struct _LX_ARM64_EXPOSURE
+{
+    LONG Meltdown;
+    LONG SpectreV2;
+    LONG Bhb;
+    LONG Ssb;
+} LX_ARM64_EXPOSURE, *PLX_ARM64_EXPOSURE;
+
+static
+VOID
+LxArm64ExposureThisCpu(
+    _Inout_ PLX_ARM64_EXPOSURE Exposure)
+{
+    ULONG64 Midr = ARM64_READ_SYSREG(MIDR_EL1);
+    ULONG64 Pfr0 = LxArm64ReadIdRegister(4, 0), Pfr1 = LxArm64ReadIdRegister(4, 1), Mmfr1 = LxArm64ReadIdRegister(7, 1);
+    ULONG Csv2 = LX_ID_FIELD(Pfr0, 56);
+    LONG State;
+
+    State = ((LX_ID_FIELD(Pfr0, 60) != 0) || LxArm64CoreListed(Midr, LxArm64MeltdownSafe, RTL_NUMBER_OF(LxArm64MeltdownSafe))) ?
+            LX_VULN_UNAFFECTED : LX_VULN_VULNERABLE;
+    Exposure->Meltdown = max(Exposure->Meltdown, State);
+    State = ((Csv2 != 0) || LxArm64CoreListed(Midr, LxArm64SpectreV2Safe, RTL_NUMBER_OF(LxArm64SpectreV2Safe))) ?
+            LX_VULN_UNAFFECTED : LX_VULN_VULNERABLE;
+    Exposure->SpectreV2 = max(Exposure->SpectreV2, State);
+    if ((Csv2 >= 3) || LxArm64CoreListed(Midr, LxArm64BhbSafe, RTL_NUMBER_OF(LxArm64BhbSafe)))
+        State = LX_VULN_UNAFFECTED;
+    else if (LX_ID_FIELD(Mmfr1, 60) != 0)
+        State = LX_VULN_MITIGATED;
+    else
+        State = LX_VULN_VULNERABLE;
+    Exposure->Bhb = max(Exposure->Bhb, State);
+    if (LxArm64CoreListed(Midr, LxArm64SsbSafe, RTL_NUMBER_OF(LxArm64SsbSafe)))
+        State = LX_VULN_UNAFFECTED;
+    else if ((LX_ID_FIELD(Pfr1, 4) != 0) && !(ARM64_READ_SYSREG(SCTLR_EL1) & LX_A64_SCTLR_DSSBS))
+        State = LX_VULN_MITIGATED;
+    else
+        State = LX_VULN_VULNERABLE;
+    Exposure->Ssb = max(Exposure->Ssb, State);
+}
+
+static
+const LX_ARM64_EXPOSURE *
+LxArm64QueryExposure(VOID)
+{
+    static LX_ARM64_EXPOSURE Cached;
+    static volatile LONG Ready;
+    LX_ARM64_EXPOSURE Exposure;
+    GROUP_AFFINITY Affinity, Previous;
+    PROCESSOR_NUMBER Number;
+    ULONG Count, Index;
+
+    if (ReadAcquire(&Ready))
+        return &Cached;
+    RtlZeroMemory(&Exposure, sizeof(Exposure));
+    Count = KeQueryActiveProcessorCountEx(ALL_PROCESSOR_GROUPS);
+    for (Index = 0; Index < Count; Index++)
+    {
+        if (!NT_SUCCESS(KeGetProcessorNumberFromIndex(Index, &Number)))
+            continue;
+        RtlZeroMemory(&Affinity, sizeof(Affinity));
+        Affinity.Group = Number.Group;
+        Affinity.Mask = (KAFFINITY)1 << Number.Number;
+        KeSetSystemGroupAffinityThread(&Affinity, &Previous);
+        LxArm64ExposureThisCpu(&Exposure);
+        KeRevertToUserGroupAffinityThread(&Previous);
+    }
+    Cached = Exposure;
+    InterlockedExchange(&Ready, 1);
+    return &Cached;
+}
+
+/* TODO: the NT kernel has no kernel unmapping at EL0, no branch predictor hardening, no Spectre-BHB clearing and no user pointer sanitization, so affected cores read Vulnerable for Meltdown, Spectre v2 and BHB and every core reads Vulnerable for Spectre v1. */
+/* FIXME: cores without CSV2 or SSBS read Vulnerable without asking firmware (SMCCC_ARCH_WORKAROUND_1/2) whether they need the workaround. */
+PCSTR
+LxArchCpuVulnerability(
+    _In_ PCSTR Name)
+{
+    const LX_ARM64_EXPOSURE *Exposure;
+
+    if (strcmp(Name, "spectre_v1") == 0)
+        return "Vulnerable";
+    if ((strcmp(Name, "meltdown") != 0) && (strcmp(Name, "spectre_v2") != 0) && (strcmp(Name, "spec_store_bypass") != 0))
+        return "Not affected";
+    Exposure = LxArm64QueryExposure();
+    if (strcmp(Name, "meltdown") == 0)
+        return (Exposure->Meltdown == LX_VULN_UNAFFECTED) ? "Not affected" : "Vulnerable";
+    if (strcmp(Name, "spec_store_bypass") == 0)
+    {
+        if (Exposure->Ssb == LX_VULN_UNAFFECTED)
+            return "Not affected";
+        if (Exposure->Ssb == LX_VULN_MITIGATED)
+            return "Mitigation: Speculative Store Bypass disabled via prctl";
+        return "Vulnerable";
+    }
+    if (Exposure->SpectreV2 != LX_VULN_UNAFFECTED)
+        return "Vulnerable";
+    if (Exposure->Bhb == LX_VULN_UNAFFECTED)
+        return "Not affected";
+    if (Exposure->Bhb == LX_VULN_MITIGATED)
+        return "Mitigation: CSV2, BHB";
+    return "Mitigation: CSV2, but not BHB";
 }
 
 VOID

@@ -332,6 +332,15 @@ LxArchSpecStoreBypassMode(VOID)
     return LX_SPEC_MODE_UNSUPPORTED;
 }
 
+/* FIXME: ghostwrite reads Not affected without checking for a T-Head core with xtheadvector. */
+PCSTR
+LxArchCpuVulnerability(
+    _In_ PCSTR Name)
+{
+    UNREFERENCED_PARAMETER(Name);
+    return "Not affected";
+}
+
 VOID
 LxArchApplySpeculation(
     _In_ PLX_THREAD Thread,

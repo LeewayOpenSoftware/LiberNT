@@ -3825,6 +3825,13 @@ LxGenDmi(
     { Root "/product_version", 0444, NULL, LxGenDmi, NULL }, \
     { Root "/sys_vendor", 0444, NULL, LxGenDmi, NULL }
 
+static
+VOID
+LxGenCpuVulnerability(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text);
+
 static const LX_TABLE_ENTRY LxSysTable[] =
 {
     { "block", 0755 | LX_S_IFDIR, NULL, NULL, NULL },
@@ -3843,7 +3850,25 @@ static const LX_TABLE_ENTRY LxSysTable[] =
     { "devices/system/cpu/online", 0444, NULL, LxGenCpuOnline, NULL },
     { "devices/system/cpu/possible", 0444, NULL, LxGenCpuOnline, NULL },
     { "devices/system/cpu/present", 0444, NULL, LxGenCpuOnline, NULL },
-    /* TODO: devices/system/cpu/vulnerabilities needs the mitigation state of the NT kernel. */
+    { "devices/system/cpu/vulnerabilities/gather_data_sampling", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/ghostwrite", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/indirect_target_selection", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/itlb_multihit", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/l1tf", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/mds", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/meltdown", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/mmio_stale_data", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/old_microcode", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/reg_file_data_sampling", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/retbleed", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/spec_rstack_overflow", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/spec_store_bypass", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/spectre_v1", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/spectre_v2", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/srbds", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/tsa", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/tsx_async_abort", 0444, NULL, LxGenCpuVulnerability, NULL },
+    { "devices/system/cpu/vulnerabilities/vmscape", 0444, NULL, LxGenCpuVulnerability, NULL },
     { "devices/virtual", 0755 | LX_S_IFDIR, NULL, NULL, NULL },
     LX_DMI_ENTRIES("devices/virtual/dmi/id"),
     { "firmware", 0755 | LX_S_IFDIR, NULL, NULL, NULL },
@@ -3865,6 +3890,19 @@ static const LX_TABLE_ENTRY LxSysTable[] =
     { "module", 0755 | LX_S_IFDIR, NULL, NULL, NULL },
     { "power", 0755 | LX_S_IFDIR, NULL, NULL, NULL },
 };
+
+static
+VOID
+LxGenCpuVulnerability(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    PCSTR Name = strrchr(LxSysTable[Synth->Index].Path, '/') + 1;
+
+    UNREFERENCED_PARAMETER(Self);
+    LxTextPrintf(Text, "%s\n", LxArchCpuVulnerability(Name));
+}
 
 static
 VOID
