@@ -2561,7 +2561,10 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
             //ERR("WPSWP : set active window\n");
             if (!(Window->state & WNDS_BEINGACTIVATED)) // Inside SAW?
             {
-               co_IntSetForegroundWindow(Window); // Fixes SW_HIDE issues. Wine win test_SetActiveWindow & test_SetForegroundWindow.
+               if (Window->head.pti == pti && !CanActivateForeground(pti))
+                  UserSetActiveWindow(Window);
+               else
+                  co_IntSetForegroundWindow(Window); // Fixes SW_HIDE issues. Wine win test_SetActiveWindow & test_SetForegroundWindow.
             }
          }
       }
