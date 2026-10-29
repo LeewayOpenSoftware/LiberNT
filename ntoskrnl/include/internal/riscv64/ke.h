@@ -16,8 +16,7 @@ KiRiscvCallUserMode(
     _Out_ PVOID *OutputBuffer,
     _Out_ PULONG OutputLength);
 
-/* TODO(riscv64): initialize scheduler sub-nodes and maintain their idle sets
- * before enabling KI_CORE_PARKING. */
+#define KI_CORE_PARKING
 
 #define KiPrcbTimerTableLockQueue(Prcb, Index) (&(Prcb)->TimerTableLockQueue[(Index)])
 
@@ -276,6 +275,7 @@ DECLSPEC_NORETURN VOID NTAPI KiRiscvTrapEntry(VOID);
 DECLSPEC_NORETURN VOID NTAPI KiRiscvTrapStop(_In_ PKTRAP_FRAME TrapFrame);
 VOID NTAPI KiRiscvTrapHandler(_Inout_ PKTRAP_FRAME TrapFrame);
 VOID NTAPI KiRiscvInterruptDispatch(_Inout_ PKTRAP_FRAME TrapFrame);
+VOID NTAPI KiRiscvJoinSchedulerSubNode(_In_ PKPRCB Prcb);
 PKINTERRUPT NTAPI KiRiscvQueryInterrupt(_In_ ULONG Source);
 ULONG NTAPI KiRiscvQueryInterruptLimit(VOID);
 /* Clock ISR exported by hal.dll (hal.spec, -arch=riscv64): rearms the
@@ -427,12 +427,17 @@ _KeIsExecutingDpc(VOID)
     return Active;
 }
 
+#define KI_DPC_NORMAL_PROCESSING_REQUESTED 0x00000002L
+#define KI_DPC_NORMAL_DPC_PRESENT          0x00000010L
+#define KI_DPC_THREAD_ACTIVE               0x00010000L
+#define KI_DPC_THREAD_REQUESTED            0x00020000L
+
 FORCEINLINE
 BOOLEAN
 KiIsDpcInterruptRequested(
     _In_ PKPRCB Prcb)
 {
-    return Prcb->DpcInterruptRequested != FALSE;
+    return (Prcb->DpcRequestSummary & KI_DPC_NORMAL_PROCESSING_REQUESTED) != 0;
 }
 
 FORCEINLINE
@@ -440,7 +445,7 @@ VOID
 KiSetDpcInterruptRequested(
     _Inout_ PKPRCB Prcb)
 {
-    Prcb->DpcInterruptRequested = TRUE;
+    InterlockedOr(&Prcb->DpcRequestSummary, KI_DPC_NORMAL_PROCESSING_REQUESTED);
 }
 
 FORCEINLINE
@@ -448,7 +453,7 @@ VOID
 KiClearDpcInterruptRequested(
     _Inout_ PKPRCB Prcb)
 {
-    Prcb->DpcInterruptRequested = FALSE;
+    InterlockedAnd(&Prcb->DpcRequestSummary, ~KI_DPC_NORMAL_PROCESSING_REQUESTED);
 }
 
 FORCEINLINE
@@ -456,7 +461,7 @@ VOID
 KiSetDpcPresent(
     _Inout_ PKPRCB Prcb)
 {
-    UNREFERENCED_PARAMETER(Prcb);
+    InterlockedOr(&Prcb->DpcRequestSummary, KI_DPC_NORMAL_DPC_PRESENT);
 }
 
 FORCEINLINE
@@ -464,7 +469,7 @@ VOID
 KiClearDpcRequestState(
     _Inout_ PKPRCB Prcb)
 {
-    Prcb->DpcInterruptRequested = FALSE;
+    InterlockedAnd(&Prcb->DpcRequestSummary, ~(KI_DPC_NORMAL_PROCESSING_REQUESTED | KI_DPC_NORMAL_DPC_PRESENT));
 }
 
 FORCEINLINE
@@ -472,7 +477,7 @@ BOOLEAN
 KiIsDpcThreadActive(
     _In_ PKPRCB Prcb)
 {
-    return Prcb->DpcThreadActive != FALSE;
+    return (Prcb->DpcRequestSummary & KI_DPC_THREAD_ACTIVE) != 0;
 }
 
 FORCEINLINE
@@ -480,7 +485,7 @@ BOOLEAN
 KiIsDpcThreadRequested(
     _In_ PKPRCB Prcb)
 {
-    return Prcb->DpcThreadRequested != FALSE;
+    return (Prcb->DpcRequestSummary & KI_DPC_THREAD_REQUESTED) != 0;
 }
 
 FORCEINLINE
@@ -488,7 +493,7 @@ VOID
 KiSetDpcThreadActive(
     _Inout_ PKPRCB Prcb)
 {
-    Prcb->DpcThreadActive = TRUE;
+    InterlockedOr(&Prcb->DpcRequestSummary, KI_DPC_THREAD_ACTIVE);
 }
 
 FORCEINLINE
@@ -496,7 +501,7 @@ VOID
 KiSetDpcThreadRequested(
     _Inout_ PKPRCB Prcb)
 {
-    Prcb->DpcThreadRequested = TRUE;
+    InterlockedOr(&Prcb->DpcRequestSummary, KI_DPC_THREAD_REQUESTED);
 }
 
 FORCEINLINE
@@ -504,8 +509,7 @@ VOID
 KiClearDpcThreadState(
     _Inout_ PKPRCB Prcb)
 {
-    Prcb->DpcThreadActive = FALSE;
-    Prcb->DpcThreadRequested = FALSE;
+    InterlockedAnd(&Prcb->DpcRequestSummary, ~(KI_DPC_THREAD_ACTIVE | KI_DPC_THREAD_REQUESTED));
 }
 
 #define KiPrcbDpcTimeCount(Prcb) ((Prcb)->DpcTimeCount)

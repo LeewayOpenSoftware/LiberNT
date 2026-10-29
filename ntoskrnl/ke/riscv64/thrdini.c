@@ -291,6 +291,31 @@ KiRiscvIdlePoll(
 
 static
 VOID
+KiRiscvEnterIdleSubNode(_In_ PKPRCB Prcb)
+{
+    PKSCHEDULER_SUBNODE SubNode = Prcb->SchedulerSubNode;
+
+    InterlockedOr64((PLONG64)&SubNode->IdleCpuSet, (LONG64)Prcb->SetMember);
+    if ((Prcb->MultiThreadProcessorSet & ~SubNode->IdleCpuSet) == 0)
+    {
+        InterlockedOr64((PLONG64)&SubNode->IdleSmtSet, (LONG64)Prcb->MultiThreadProcessorSet);
+        if ((Prcb->MultiThreadProcessorSet & ~SubNode->IdleCpuSet) != 0)
+            InterlockedAnd64((PLONG64)&SubNode->IdleSmtSet, ~(LONG64)Prcb->MultiThreadProcessorSet);
+    }
+}
+
+static
+VOID
+KiRiscvLeaveIdleSubNode(_In_ PKPRCB Prcb)
+{
+    PKSCHEDULER_SUBNODE SubNode = Prcb->SchedulerSubNode;
+
+    InterlockedAnd64((PLONG64)&SubNode->IdleCpuSet, ~(LONG64)Prcb->SetMember);
+    InterlockedAnd64((PLONG64)&SubNode->IdleSmtSet, ~(LONG64)Prcb->MultiThreadProcessorSet);
+}
+
+static
+VOID
 KiRiscvCreditIdleTicks(_In_ ULONG Ticks)
 {
     KTRAP_FRAME TrapFrame;
@@ -368,6 +393,7 @@ KiIdleLoop(VOID)
             Prcb->Sleeping = FALSE;
             continue;
         }
+        KiRiscvEnterIdleSubNode(Prcb);
         if (Pcr->InterruptEnable)
             HalpRiscvSuspendClockTick();
         KiRiscvIdleWait(Pcr);
@@ -379,5 +405,6 @@ KiIdleLoop(VOID)
                 KiRiscvCreditIdleTicks(Ticks);
         }
         Prcb->Sleeping = FALSE;
+        KiRiscvLeaveIdleSubNode(Prcb);
     }
 }

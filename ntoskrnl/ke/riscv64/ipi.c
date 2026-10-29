@@ -55,7 +55,7 @@ KiRiscvSendSoftwareInterrupt(_In_ KAFFINITY TargetSet, _In_ KIRQL Irql)
     if (TargetSet & Prcb->SetMember)
     {
         if (Irql == DISPATCH_LEVEL)
-            Prcb->DpcInterruptRequested = TRUE;
+            KiSetDpcInterruptRequested(Prcb);
         KiRiscvRequestSoftwareInterrupt(Irql);
     }
 
@@ -103,7 +103,7 @@ KiIpiServiceRoutine(PKTRAP_FRAME TrapFrame, PKEXCEPTION_FRAME ExceptionFrame)
     {
         if (SmpDbgEnabled)
             SmpDbgRemoteDpc(Prcb->Number, SMPDBG_SOURCE_UNKNOWN);
-        Prcb->DpcInterruptRequested = TRUE;
+        KiSetDpcInterruptRequested(Prcb);
         HalRequestSoftwareInterrupt(DISPATCH_LEVEL);
     }
     if (InterlockedBitTestAndReset(&Prcb->RequestSummary, IPI_SYNCH_REQUEST))
