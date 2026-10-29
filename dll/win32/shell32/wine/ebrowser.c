@@ -113,6 +113,7 @@ typedef struct _ExplorerBrowserImpl {
     IShellBrowserService IShellBrowserService_iface;
     IUnknown *punk_filter;
     PCIDLIST_ABSOLUTE view_pidl;
+    BOOL fs_explicit;
 #endif
 } ExplorerBrowserImpl;
 
@@ -419,7 +420,26 @@ static HRESULT create_new_shellview(ExplorerBrowserImpl *This, IShellItem *psi)
 #endif
 
             This->fs.fFlags |= FWF_USESEARCHFOLDER | FWF_FULLROWSELECT | FWF_NOCLIENTEDGE;
+#ifdef __REACTOS__
+            {
+                IShellView3 *psv3;
+                if (This->fs_explicit &&
+                    SUCCEEDED(IShellView_QueryInterface(psv, &IID_IShellView3, (void**)&psv3)))
+                {
+                    hr = IShellView3_CreateViewWindow3(psv3, psb, This->psv,
+                                                       SV3CVW3_FORCEVIEWMODE | SV3CVW3_FORCEFOLDERFLAGS,
+                                                       ~0u, This->fs.fFlags, This->fs.ViewMode, NULL,
+                                                       &This->sv_rc, &hwnd_new);
+                    IShellView3_Release(psv3);
+                }
+                else
+                {
+                    hr = IShellView_CreateViewWindow(psv, This->psv, &This->fs, psb, &This->sv_rc, &hwnd_new);
+                }
+            }
+#else
             hr = IShellView_CreateViewWindow(psv, This->psv, &This->fs, psb, &This->sv_rc, &hwnd_new);
+#endif
 #ifdef __REACTOS__
             This->view_pidl = NULL;
             ILFree(view_pidl);
@@ -1096,6 +1116,9 @@ static HRESULT WINAPI IExplorerBrowser_fnSetFolderSettings(IExplorerBrowser *ifa
     if (pfs->ViewMode)
         browser->fs.ViewMode = pfs->ViewMode;
     browser->fs.fFlags = pfs->fFlags;
+#ifdef __REACTOS__
+    browser->fs_explicit = TRUE;
+#endif
 
     if (!browser->psv)
         return E_INVALIDARG;
