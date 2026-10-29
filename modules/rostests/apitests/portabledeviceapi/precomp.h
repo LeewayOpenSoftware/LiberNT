@@ -19,7 +19,7 @@
 #include <portabledevice.h>
 #include <wpdmtpextensions.h>
 
-#define WPD_TEST_WAIT_SECONDS 90
+#define WPD_TEST_WAIT_SECONDS 3
 
 typedef struct _WPD_TEST_DEVICE
 {
