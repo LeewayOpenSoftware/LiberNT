@@ -41,6 +41,9 @@ typedef struct _domdoctype
     IXMLDOMDocumentType IXMLDOMDocumentType_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 } domdoctype;
 
 static const struct nodemap_funcs domdoctype_entities_map;
@@ -58,11 +61,24 @@ static inline domdoctype *impl_from_IXMLDOMDocumentType( IXMLDOMDocumentType *if
     return CONTAINING_RECORD(iface, domdoctype, IXMLDOMDocumentType_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const domdoctype_typed_iids[] =
+{
+    &IID_IXMLDOMDocumentType,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI domdoctype_QueryInterface(IXMLDOMDocumentType *iface, REFIID riid, void **obj)
 {
     domdoctype *doctype = impl_from_IXMLDOMDocumentType(iface);
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&doctype->tearoff, (IUnknown *)iface, &doctype->dispex, doctype->node,
+            domdoctype_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if (IsEqualGUID(riid, &IID_IXMLDOMDocumentType) ||
         IsEqualGUID(riid, &IID_IXMLDOMNode) ||
@@ -101,23 +117,39 @@ static ULONG WINAPI domdoctype_AddRef(IXMLDOMDocumentType *iface)
 
     TRACE("%p, refcount %ld.\n", iface, refcount);
 
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&doctype->tearoff, doctype->node, refcount);
+#else
     return refcount;
+#endif
 }
 
 static ULONG WINAPI domdoctype_Release(IXMLDOMDocumentType *iface)
 {
     domdoctype *doctype = impl_from_IXMLDOMDocumentType(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG refcount = node_tearoff_decrement(&doctype->tearoff, doctype->node, &doctype->refcount, &reported);
+#else
     ULONG refcount = InterlockedDecrement(&doctype->refcount);
+#endif
 
     TRACE("%p, refcount %ld.\n", iface, refcount);
 
     if (!refcount)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&doctype->tearoff);
+#endif
         domnode_release(doctype->node);
         free(doctype);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return refcount;
+#endif
 }
 
 static HRESULT WINAPI domdoctype_GetTypeInfoCount(IXMLDOMDocumentType *iface, UINT *count)

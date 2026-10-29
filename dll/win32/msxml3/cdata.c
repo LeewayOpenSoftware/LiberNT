@@ -40,6 +40,9 @@ typedef struct
     IXMLDOMCDATASection IXMLDOMCDATASection_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 } domcdata;
 
 static const tid_t domcdata_se_tids[] = {
@@ -53,11 +56,25 @@ static inline domcdata *impl_from_IXMLDOMCDATASection( IXMLDOMCDATASection *ifac
     return CONTAINING_RECORD(iface, domcdata, IXMLDOMCDATASection_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const domcdata_typed_iids[] =
+{
+    &IID_IXMLDOMCDATASection,
+    &IID_IXMLDOMCharacterData,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI domcdata_QueryInterface(IXMLDOMCDATASection *iface, REFIID riid, void **obj)
 {
     domcdata *cdata = impl_from_IXMLDOMCDATASection(iface);
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&cdata->tearoff, (IUnknown *)iface, &cdata->dispex, cdata->node,
+            domcdata_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMCDATASection ) ||
          IsEqualGUID( riid, &IID_IXMLDOMCharacterData) ||
@@ -95,23 +112,39 @@ static ULONG WINAPI domcdata_AddRef(IXMLDOMCDATASection *iface)
     domcdata *cdata = impl_from_IXMLDOMCDATASection(iface);
     ULONG ref = InterlockedIncrement(&cdata->refcount);
     TRACE("%p, refcount %lu.\n", iface, ref);
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&cdata->tearoff, cdata->node, ref);
+#else
     return ref;
+#endif
 }
 
 static ULONG WINAPI domcdata_Release(IXMLDOMCDATASection *iface)
 {
     domcdata *cdata = impl_from_IXMLDOMCDATASection(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG ref = node_tearoff_decrement(&cdata->tearoff, cdata->node, &cdata->refcount, &reported);
+#else
     ULONG ref = InterlockedDecrement(&cdata->refcount);
+#endif
 
     TRACE("%p, refcount %lu.\n", iface, ref);
 
     if (!ref)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&cdata->tearoff);
+#endif
         domnode_release(cdata->node);
         free(cdata);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return ref;
+#endif
 }
 
 static HRESULT WINAPI domcdata_GetTypeInfoCount(IXMLDOMCDATASection *iface, UINT *count)

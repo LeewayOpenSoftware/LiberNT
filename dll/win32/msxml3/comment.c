@@ -40,6 +40,9 @@ typedef struct _domcomment
     IXMLDOMComment IXMLDOMComment_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 } domcomment;
 
 static const tid_t domcomment_se_tids[] =
@@ -54,11 +57,25 @@ static inline domcomment *impl_from_IXMLDOMComment(IXMLDOMComment *iface)
     return CONTAINING_RECORD(iface, domcomment, IXMLDOMComment_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const domcomment_typed_iids[] =
+{
+    &IID_IXMLDOMComment,
+    &IID_IXMLDOMCharacterData,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI domcomment_QueryInterface(IXMLDOMComment *iface, REFIID riid, void **obj)
 {
     domcomment *comment = impl_from_IXMLDOMComment(iface);
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&comment->tearoff, (IUnknown *)iface, &comment->dispex, comment->node,
+            domcomment_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if (IsEqualGUID(riid, &IID_IXMLDOMComment) ||
         IsEqualGUID(riid, &IID_IXMLDOMCharacterData) ||
@@ -98,23 +115,39 @@ static ULONG WINAPI domcomment_AddRef(IXMLDOMComment *iface)
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&comment->tearoff, comment->node, refcount);
+#else
     return refcount;
+#endif
 }
 
 static ULONG WINAPI domcomment_Release(IXMLDOMComment *iface)
 {
     domcomment *comment = impl_from_IXMLDOMComment(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG refcount = node_tearoff_decrement(&comment->tearoff, comment->node, &comment->refcount, &reported);
+#else
     ULONG refcount = InterlockedDecrement(&comment->refcount);
+#endif
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&comment->tearoff);
+#endif
         domnode_release(comment->node);
         free(comment);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return refcount;
+#endif
 }
 
 static HRESULT WINAPI domcomment_GetTypeInfoCount(IXMLDOMComment *iface, UINT *count)

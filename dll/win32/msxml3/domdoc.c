@@ -106,6 +106,11 @@ struct domdoc
     IDispatch *events[EVENTID_LAST];
 
     IXMLDOMSchemaCollection2 *namespaces;
+#ifdef __REACTOS__
+    IUnknown *identity;
+    IXMLDOMNode identity_iface;
+    LONG identity_refcount;
+#endif
 };
 
 static HRESULT set_doc_event(domdoc *doc, eventid_t eid, const VARIANT *v)
@@ -351,6 +356,13 @@ static HRESULT WINAPI domdoc_QueryInterface(IXMLDOMDocument3 *iface, REFIID riid
 
     *obj = NULL;
 
+#ifdef __REACTOS__
+    if (IsEqualGUID(riid, &IID_IUnknown))
+    {
+        *obj = doc->identity;
+    }
+    else
+#endif
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IDispatch) ||
         IsEqualGUID(riid, &IID_IXMLDOMNode) ||
@@ -410,6 +422,45 @@ static ULONG WINAPI domdoc_AddRef( IXMLDOMDocument3 *iface )
     return refcount;
 }
 
+#ifdef __REACTOS__
+static void domdoc_destroy(domdoc *doc)
+{
+    int eid;
+
+    if (doc->site)
+        IUnknown_Release(doc->site);
+    if (doc->base_uri)
+        IUri_Release(doc->base_uri);
+
+    domnode_release(doc->node);
+
+    for (eid = 0; eid < EVENTID_LAST; eid++)
+        if (doc->events[eid]) IDispatch_Release(doc->events[eid]);
+
+    release_namespaces(doc);
+    free(doc);
+}
+
+static ULONG WINAPI domdoc_Release( IXMLDOMDocument3 *iface )
+{
+    domdoc *doc = impl_from_IXMLDOMDocument3(iface);
+    LONG refcount = InterlockedDecrement(&doc->refcount);
+
+    TRACE("%p, refcount %ld.\n", iface, refcount);
+
+    if (!refcount)
+    {
+        IUnknown *identity = doc->identity;
+
+        IUnknown_Release(identity);
+        IUnknown_Release(identity);
+        if (identity != (IUnknown *)&doc->identity_iface)
+            domdoc_destroy(doc);
+    }
+
+    return refcount;
+}
+#else
 static ULONG WINAPI domdoc_Release( IXMLDOMDocument3 *iface )
 {
     domdoc *doc = impl_from_IXMLDOMDocument3(iface);
@@ -437,6 +488,7 @@ static ULONG WINAPI domdoc_Release( IXMLDOMDocument3 *iface )
 
     return refcount;
 }
+#endif
 
 static HRESULT WINAPI domdoc_GetTypeInfoCount(IXMLDOMDocument3 *iface, UINT *count)
 {
@@ -829,7 +881,11 @@ static HRESULT WINAPI domdoc_get_doctype(IXMLDOMDocument3 *iface, IXMLDOMDocumen
     {
         if (node->type == NODE_DOCUMENT_TYPE)
         {
+#ifdef __REACTOS__
+            return create_node_typed(node, (void **)doctype);
+#else
             return create_node(node, (IXMLDOMNode **)doctype);
+#endif
         }
     }
 
@@ -850,8 +906,10 @@ static HRESULT WINAPI domdoc_get_documentElement(IXMLDOMDocument3 *iface, IXMLDO
 {
     domdoc *doc = impl_from_IXMLDOMDocument3(iface);
     struct domnode *element;
+#ifndef __REACTOS__
     IXMLDOMNode *node;
     HRESULT hr;
+#endif
 
     TRACE("%p, %p.\n", iface, ret);
 
@@ -862,12 +920,16 @@ static HRESULT WINAPI domdoc_get_documentElement(IXMLDOMDocument3 *iface, IXMLDO
 
     if ((element = domnode_get_root_element(doc->node)))
     {
+#ifdef __REACTOS__
+        return create_node_typed(element, (void **)ret);
+#else
         if (SUCCEEDED(hr = create_node(element, &node)))
         {
             hr = IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMElement, (void **)ret);
             IXMLDOMNode_Release(node);
             return hr;
         }
+#endif
     }
 
     return S_FALSE;
@@ -915,7 +977,11 @@ static HRESULT WINAPI domdoc_createElement(IXMLDOMDocument3 *iface, BSTR tagname
     hr = IXMLDOMDocument3_createNode(iface, type, tagname, NULL, &node);
     if (hr == S_OK)
     {
+#ifdef __REACTOS__
+        create_node_typed(get_node_obj(node), (void **)element);
+#else
         IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMElement, (void**)element);
+#endif
         IXMLDOMNode_Release(node);
     }
 
@@ -940,7 +1006,11 @@ static HRESULT WINAPI domdoc_createDocumentFragment(IXMLDOMDocument3 *iface, IXM
     hr = IXMLDOMDocument3_createNode(iface, type, NULL, NULL, &node);
     if (hr == S_OK)
     {
+#ifdef __REACTOS__
+        create_node_typed(get_node_obj(node), (void **)frag);
+#else
         IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMDocumentFragment, (void**)frag);
+#endif
         IXMLDOMNode_Release(node);
     }
 
@@ -965,7 +1035,11 @@ static HRESULT WINAPI domdoc_createTextNode(IXMLDOMDocument3 *iface, BSTR data, 
     hr = IXMLDOMDocument3_createNode(iface, type, NULL, NULL, &node);
     if (hr == S_OK)
     {
+#ifdef __REACTOS__
+        create_node_typed(get_node_obj(node), (void **)text);
+#else
         IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMText, (void**)text);
+#endif
         IXMLDOMNode_Release(node);
         hr = IXMLDOMText_put_data(*text, data);
     }
@@ -991,7 +1065,11 @@ static HRESULT WINAPI domdoc_createComment(IXMLDOMDocument3 *iface, BSTR data, I
     hr = IXMLDOMDocument3_createNode(iface, type, NULL, NULL, &node);
     if (hr == S_OK)
     {
+#ifdef __REACTOS__
+        create_node_typed(get_node_obj(node), (void **)comment);
+#else
         IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMComment, (void**)comment);
+#endif
         IXMLDOMNode_Release(node);
         hr = IXMLDOMComment_put_data(*comment, data);
     }
@@ -1017,7 +1095,11 @@ static HRESULT WINAPI domdoc_createCDATASection(IXMLDOMDocument3 *iface, BSTR da
     hr = IXMLDOMDocument3_createNode(iface, type, NULL, NULL, &node);
     if (hr == S_OK)
     {
+#ifdef __REACTOS__
+        create_node_typed(get_node_obj(node), (void **)cdata);
+#else
         IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMCDATASection, (void**)cdata);
+#endif
         IXMLDOMNode_Release(node);
         hr = IXMLDOMCDATASection_put_data(*cdata, data);
     }
@@ -1051,7 +1133,11 @@ static HRESULT WINAPI domdoc_createAttribute(IXMLDOMDocument3 *iface, BSTR name,
     hr = IXMLDOMDocument3_createNode(iface, type, name, NULL, &node);
     if (hr == S_OK)
     {
+#ifdef __REACTOS__
+        create_node_typed(get_node_obj(node), (void **)attribute);
+#else
         IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMAttribute, (void**)attribute);
+#endif
         IXMLDOMNode_Release(node);
     }
 
@@ -1076,7 +1162,11 @@ static HRESULT WINAPI domdoc_createEntityReference(IXMLDOMDocument3 *iface, BSTR
     hr = IXMLDOMDocument3_createNode(iface, type, name, NULL, &node);
     if (hr == S_OK)
     {
+#ifdef __REACTOS__
+        create_node_typed(get_node_obj(node), (void **)entityref);
+#else
         IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMEntityReference, (void**)entityref);
+#endif
         IXMLDOMNode_Release(node);
     }
 
@@ -2098,6 +2188,352 @@ static const struct IXMLDOMDocument3Vtbl XMLDOMDocument3Vtbl =
     domdoc_importNode
 };
 
+#ifdef __REACTOS__
+static inline domdoc *impl_from_identity(IXMLDOMNode *iface)
+{
+    return CONTAINING_RECORD(iface, domdoc, identity_iface);
+}
+
+static HRESULT WINAPI domdoc_identity_QueryInterface(IXMLDOMNode *iface, REFIID riid, void **obj)
+{
+    domdoc *doc = impl_from_identity(iface);
+    IUnknown *unk;
+    HRESULT hr;
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+
+    if (IsEqualGUID(riid, &IID_IUnknown))
+    {
+        *obj = iface;
+        IXMLDOMNode_AddRef(iface);
+        return S_OK;
+    }
+
+    if (node_query_interface(doc->node, riid, obj))
+        return S_OK;
+
+    if (FAILED(hr = create_domdoc(doc->node, &unk)))
+    {
+        *obj = NULL;
+        return hr;
+    }
+
+    hr = IUnknown_QueryInterface(unk, riid, obj);
+    IUnknown_Release(unk);
+    return hr;
+}
+
+static ULONG WINAPI domdoc_identity_AddRef(IXMLDOMNode *iface)
+{
+    domdoc *doc = impl_from_identity(iface);
+    ULONG refcount = InterlockedIncrement(&doc->identity_refcount);
+
+    TRACE("%p, refcount %ld.\n", iface, refcount);
+
+    return refcount;
+}
+
+static ULONG WINAPI domdoc_identity_Release(IXMLDOMNode *iface)
+{
+    domdoc *doc = impl_from_identity(iface);
+    LONG refcount = domnode_release_identity(doc->node, (IUnknown *)iface, &doc->identity_refcount);
+
+    TRACE("%p, refcount %ld.\n", iface, refcount);
+
+    if (!refcount && !doc->refcount)
+        domdoc_destroy(doc);
+
+    return refcount;
+}
+
+static HRESULT WINAPI domdoc_identity_GetTypeInfoCount(IXMLDOMNode *iface, UINT *count)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_GetTypeInfoCount(&doc->IXMLDOMDocument3_iface, count);
+}
+
+static HRESULT WINAPI domdoc_identity_GetTypeInfo(IXMLDOMNode *iface, UINT index, LCID lcid, ITypeInfo **ti)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_GetTypeInfo(&doc->IXMLDOMDocument3_iface, index, lcid, ti);
+}
+
+static HRESULT WINAPI domdoc_identity_GetIDsOfNames(IXMLDOMNode *iface, REFIID riid, LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_GetIDsOfNames(&doc->IXMLDOMDocument3_iface, riid, rgszNames, cNames, lcid, rgDispId);
+}
+
+static HRESULT WINAPI domdoc_identity_Invoke(IXMLDOMNode *iface, DISPID dispIdMember, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_Invoke(&doc->IXMLDOMDocument3_iface, dispIdMember, riid, lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+}
+
+static HRESULT WINAPI domdoc_identity_get_nodeName(IXMLDOMNode *iface, BSTR *name)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_nodeName(&doc->IXMLDOMDocument3_iface, name);
+}
+
+static HRESULT WINAPI domdoc_identity_get_nodeValue(IXMLDOMNode *iface, VARIANT *value)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_nodeValue(&doc->IXMLDOMDocument3_iface, value);
+}
+
+static HRESULT WINAPI domdoc_identity_put_nodeValue(IXMLDOMNode *iface, VARIANT value)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_put_nodeValue(&doc->IXMLDOMDocument3_iface, value);
+}
+
+static HRESULT WINAPI domdoc_identity_get_nodeType(IXMLDOMNode *iface, DOMNodeType *type)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_nodeType(&doc->IXMLDOMDocument3_iface, type);
+}
+
+static HRESULT WINAPI domdoc_identity_get_parentNode(IXMLDOMNode *iface, IXMLDOMNode **node)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_parentNode(&doc->IXMLDOMDocument3_iface, node);
+}
+
+static HRESULT WINAPI domdoc_identity_get_childNodes(IXMLDOMNode *iface, IXMLDOMNodeList **list)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_childNodes(&doc->IXMLDOMDocument3_iface, list);
+}
+
+static HRESULT WINAPI domdoc_identity_get_firstChild(IXMLDOMNode *iface, IXMLDOMNode **node)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_firstChild(&doc->IXMLDOMDocument3_iface, node);
+}
+
+static HRESULT WINAPI domdoc_identity_get_lastChild(IXMLDOMNode *iface, IXMLDOMNode **node)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_lastChild(&doc->IXMLDOMDocument3_iface, node);
+}
+
+static HRESULT WINAPI domdoc_identity_get_previousSibling(IXMLDOMNode *iface, IXMLDOMNode **node)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_previousSibling(&doc->IXMLDOMDocument3_iface, node);
+}
+
+static HRESULT WINAPI domdoc_identity_get_nextSibling(IXMLDOMNode *iface, IXMLDOMNode **node)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_nextSibling(&doc->IXMLDOMDocument3_iface, node);
+}
+
+static HRESULT WINAPI domdoc_identity_get_attributes(IXMLDOMNode *iface, IXMLDOMNamedNodeMap **map)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_attributes(&doc->IXMLDOMDocument3_iface, map);
+}
+
+static HRESULT WINAPI domdoc_identity_insertBefore(IXMLDOMNode *iface, IXMLDOMNode *newChild, VARIANT refChild, IXMLDOMNode **outNewChild)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_insertBefore(&doc->IXMLDOMDocument3_iface, newChild, refChild, outNewChild);
+}
+
+static HRESULT WINAPI domdoc_identity_replaceChild(IXMLDOMNode *iface, IXMLDOMNode *newChild, IXMLDOMNode *oldChild, IXMLDOMNode **outOldChild)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_replaceChild(&doc->IXMLDOMDocument3_iface, newChild, oldChild, outOldChild);
+}
+
+static HRESULT WINAPI domdoc_identity_removeChild(IXMLDOMNode *iface, IXMLDOMNode *child, IXMLDOMNode **oldChild)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_removeChild(&doc->IXMLDOMDocument3_iface, child, oldChild);
+}
+
+static HRESULT WINAPI domdoc_identity_appendChild(IXMLDOMNode *iface, IXMLDOMNode *child, IXMLDOMNode **outChild)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_appendChild(&doc->IXMLDOMDocument3_iface, child, outChild);
+}
+
+static HRESULT WINAPI domdoc_identity_hasChildNodes(IXMLDOMNode *iface, VARIANT_BOOL *ret)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_hasChildNodes(&doc->IXMLDOMDocument3_iface, ret);
+}
+
+static HRESULT WINAPI domdoc_identity_get_ownerDocument(IXMLDOMNode *iface, IXMLDOMDocument **owner)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_ownerDocument(&doc->IXMLDOMDocument3_iface, owner);
+}
+
+static HRESULT WINAPI domdoc_identity_cloneNode(IXMLDOMNode *iface, VARIANT_BOOL deep, IXMLDOMNode **node)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_cloneNode(&doc->IXMLDOMDocument3_iface, deep, node);
+}
+
+static HRESULT WINAPI domdoc_identity_get_nodeTypeString(IXMLDOMNode *iface, BSTR *p)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_nodeTypeString(&doc->IXMLDOMDocument3_iface, p);
+}
+
+static HRESULT WINAPI domdoc_identity_get_text(IXMLDOMNode *iface, BSTR *p)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_text(&doc->IXMLDOMDocument3_iface, p);
+}
+
+static HRESULT WINAPI domdoc_identity_put_text(IXMLDOMNode *iface, BSTR text)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_put_text(&doc->IXMLDOMDocument3_iface, text);
+}
+
+static HRESULT WINAPI domdoc_identity_get_specified(IXMLDOMNode *iface, VARIANT_BOOL *v)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_specified(&doc->IXMLDOMDocument3_iface, v);
+}
+
+static HRESULT WINAPI domdoc_identity_get_definition(IXMLDOMNode *iface, IXMLDOMNode **node)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_definition(&doc->IXMLDOMDocument3_iface, node);
+}
+
+static HRESULT WINAPI domdoc_identity_get_nodeTypedValue(IXMLDOMNode *iface, VARIANT *v)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_nodeTypedValue(&doc->IXMLDOMDocument3_iface, v);
+}
+
+static HRESULT WINAPI domdoc_identity_put_nodeTypedValue(IXMLDOMNode *iface, VARIANT v)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_put_nodeTypedValue(&doc->IXMLDOMDocument3_iface, v);
+}
+
+static HRESULT WINAPI domdoc_identity_get_dataType(IXMLDOMNode *iface, VARIANT *v)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_dataType(&doc->IXMLDOMDocument3_iface, v);
+}
+
+static HRESULT WINAPI domdoc_identity_put_dataType(IXMLDOMNode *iface, BSTR p)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_put_dataType(&doc->IXMLDOMDocument3_iface, p);
+}
+
+static HRESULT WINAPI domdoc_identity_get_xml(IXMLDOMNode *iface, BSTR *p)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_xml(&doc->IXMLDOMDocument3_iface, p);
+}
+
+static HRESULT WINAPI domdoc_identity_transformNode(IXMLDOMNode *iface, IXMLDOMNode *node, BSTR *p)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_transformNode(&doc->IXMLDOMDocument3_iface, node, p);
+}
+
+static HRESULT WINAPI domdoc_identity_selectNodes(IXMLDOMNode *iface, BSTR p, IXMLDOMNodeList **list)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_selectNodes(&doc->IXMLDOMDocument3_iface, p, list);
+}
+
+static HRESULT WINAPI domdoc_identity_selectSingleNode(IXMLDOMNode *iface, BSTR p, IXMLDOMNode **node)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_selectSingleNode(&doc->IXMLDOMDocument3_iface, p, node);
+}
+
+static HRESULT WINAPI domdoc_identity_get_parsed(IXMLDOMNode *iface, VARIANT_BOOL *v)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_parsed(&doc->IXMLDOMDocument3_iface, v);
+}
+
+static HRESULT WINAPI domdoc_identity_get_namespaceURI(IXMLDOMNode *iface, BSTR *uri)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_namespaceURI(&doc->IXMLDOMDocument3_iface, uri);
+}
+
+static HRESULT WINAPI domdoc_identity_get_prefix(IXMLDOMNode *iface, BSTR *prefix)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_prefix(&doc->IXMLDOMDocument3_iface, prefix);
+}
+
+static HRESULT WINAPI domdoc_identity_get_baseName(IXMLDOMNode *iface, BSTR *name)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_get_baseName(&doc->IXMLDOMDocument3_iface, name);
+}
+
+static HRESULT WINAPI domdoc_identity_transformNodeToObject(IXMLDOMNode *iface, IXMLDOMNode *stylesheet, VARIANT output)
+{
+    domdoc *doc = impl_from_identity(iface);
+    return domdoc_transformNodeToObject(&doc->IXMLDOMDocument3_iface, stylesheet, output);
+}
+
+static const struct IXMLDOMNodeVtbl domdoc_identity_vtbl =
+{
+    domdoc_identity_QueryInterface,
+    domdoc_identity_AddRef,
+    domdoc_identity_Release,
+    domdoc_identity_GetTypeInfoCount,
+    domdoc_identity_GetTypeInfo,
+    domdoc_identity_GetIDsOfNames,
+    domdoc_identity_Invoke,
+    domdoc_identity_get_nodeName,
+    domdoc_identity_get_nodeValue,
+    domdoc_identity_put_nodeValue,
+    domdoc_identity_get_nodeType,
+    domdoc_identity_get_parentNode,
+    domdoc_identity_get_childNodes,
+    domdoc_identity_get_firstChild,
+    domdoc_identity_get_lastChild,
+    domdoc_identity_get_previousSibling,
+    domdoc_identity_get_nextSibling,
+    domdoc_identity_get_attributes,
+    domdoc_identity_insertBefore,
+    domdoc_identity_replaceChild,
+    domdoc_identity_removeChild,
+    domdoc_identity_appendChild,
+    domdoc_identity_hasChildNodes,
+    domdoc_identity_get_ownerDocument,
+    domdoc_identity_cloneNode,
+    domdoc_identity_get_nodeTypeString,
+    domdoc_identity_get_text,
+    domdoc_identity_put_text,
+    domdoc_identity_get_specified,
+    domdoc_identity_get_definition,
+    domdoc_identity_get_nodeTypedValue,
+    domdoc_identity_put_nodeTypedValue,
+    domdoc_identity_get_dataType,
+    domdoc_identity_put_dataType,
+    domdoc_identity_get_xml,
+    domdoc_identity_transformNode,
+    domdoc_identity_selectNodes,
+    domdoc_identity_selectSingleNode,
+    domdoc_identity_get_parsed,
+    domdoc_identity_get_namespaceURI,
+    domdoc_identity_get_prefix,
+    domdoc_identity_get_baseName,
+    domdoc_identity_transformNodeToObject
+};
+#endif
+
 /* IConnectionPointContainer */
 static HRESULT WINAPI ConnectionPointContainer_QueryInterface(IConnectionPointContainer *iface,
                                                               REFIID riid, void **ppv)
@@ -2522,6 +2958,19 @@ HRESULT create_domdoc(struct domnode *node, IUnknown **obj)
     ConnectionPoint_Init(&object->cp_domdocevents, object, &DIID_XMLDOMDocumentEvents);
 
     init_dispex(&object->dispex, (IUnknown *)&object->IXMLDOMDocument3_iface, &domdoc_dispex);
+
+#ifdef __REACTOS__
+    object->identity_iface.lpVtbl = &domdoc_identity_vtbl;
+    if (!(object->identity = domnode_get_identity(node)))
+    {
+        object->identity_refcount = 1;
+        if ((object->identity = domnode_set_identity(node, (IUnknown *)&object->identity_iface)))
+            object->identity_refcount = 0;
+        else
+            object->identity = (IUnknown *)&object->identity_iface;
+    }
+    IUnknown_AddRef(object->identity);
+#endif
 
     *obj = (IUnknown *)&object->IXMLDOMDocument3_iface;
 

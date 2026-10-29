@@ -39,6 +39,9 @@ struct domentity
     IXMLDOMEntity IXMLDOMEntity_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 };
 
 static const struct nodemap_funcs domentity_attr_map;
@@ -55,11 +58,24 @@ static inline struct domentity *impl_from_IXMLDOMEntity(IXMLDOMEntity *iface)
     return CONTAINING_RECORD(iface, struct domentity, IXMLDOMEntity_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const domentity_typed_iids[] =
+{
+    &IID_IXMLDOMEntity,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI domentity_QueryInterface(IXMLDOMEntity *iface, REFIID riid, void **obj)
 {
     struct domentity *entity = impl_from_IXMLDOMEntity(iface);
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&entity->tearoff, (IUnknown *)iface, &entity->dispex, entity->node,
+            domentity_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if (IsEqualGUID(riid, &IID_IXMLDOMEntity) ||
         IsEqualGUID(riid, &IID_IXMLDOMNode) ||
@@ -98,23 +114,39 @@ static ULONG WINAPI domentity_AddRef(IXMLDOMEntity *iface)
 
     TRACE("%p, refcount %ld.\n", iface, refcount);
 
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&entity->tearoff, entity->node, refcount);
+#else
     return refcount;
+#endif
 }
 
 static ULONG WINAPI domentity_Release(IXMLDOMEntity *iface)
 {
     struct domentity *entity = impl_from_IXMLDOMEntity(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG refcount = node_tearoff_decrement(&entity->tearoff, entity->node, &entity->refcount, &reported);
+#else
     ULONG refcount = InterlockedDecrement(&entity->refcount);
+#endif
 
     TRACE("%p, refcount %ld.\n", iface, refcount);
 
     if (!refcount)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&entity->tearoff);
+#endif
         domnode_release(entity->node);
         free(entity);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return refcount;
+#endif
 }
 
 static HRESULT WINAPI domentity_GetTypeInfoCount(IXMLDOMEntity *iface, UINT *count)

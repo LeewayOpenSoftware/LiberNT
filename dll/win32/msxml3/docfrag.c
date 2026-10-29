@@ -40,6 +40,9 @@ typedef struct _docfrag
     IXMLDOMDocumentFragment IXMLDOMDocumentFragment_iface;
     LONG refcount;
     struct domnode *node;
+#ifdef __REACTOS__
+    struct node_tearoff tearoff;
+#endif
 } docfrag;
 
 static const tid_t docfrag_se_tids[] =
@@ -54,11 +57,24 @@ static inline docfrag *impl_from_IXMLDOMDocumentFragment( IXMLDOMDocumentFragmen
     return CONTAINING_RECORD(iface, docfrag, IXMLDOMDocumentFragment_iface);
 }
 
+#ifdef __REACTOS__
+static const IID * const docfrag_typed_iids[] =
+{
+    &IID_IXMLDOMDocumentFragment,
+    NULL
+};
+#endif
+
 static HRESULT WINAPI docfrag_QueryInterface(IXMLDOMDocumentFragment *iface, REFIID riid, void **obj)
 {
     docfrag *docfrag = impl_from_IXMLDOMDocumentFragment(iface);
 
     TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+#ifdef __REACTOS__
+    if (node_tearoff_query_interface(&docfrag->tearoff, (IUnknown *)iface, &docfrag->dispex, docfrag->node,
+            docfrag_typed_iids, riid, obj))
+        return *obj ? S_OK : E_NOINTERFACE;
+#endif
 
     if (IsEqualGUID( riid, &IID_IXMLDOMDocumentFragment) ||
         IsEqualGUID( riid, &IID_IXMLDOMNode) ||
@@ -97,23 +113,39 @@ static ULONG WINAPI docfrag_AddRef(IXMLDOMDocumentFragment *iface)
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
+#ifdef __REACTOS__
+    return node_tearoff_refcount(&docfrag->tearoff, docfrag->node, refcount);
+#else
     return refcount;
+#endif
 }
 
 static ULONG WINAPI docfrag_Release(IXMLDOMDocumentFragment *iface)
 {
     docfrag *docfrag = impl_from_IXMLDOMDocumentFragment(iface);
+#ifdef __REACTOS__
+    ULONG reported;
+    ULONG refcount = node_tearoff_decrement(&docfrag->tearoff, docfrag->node, &docfrag->refcount, &reported);
+#else
     ULONG refcount = InterlockedDecrement(&docfrag->refcount);
+#endif
 
     TRACE("%p, refcount %lu.\n", iface, refcount);
 
     if (!refcount)
     {
+#ifdef __REACTOS__
+        node_tearoff_cleanup(&docfrag->tearoff);
+#endif
         domnode_release(docfrag->node);
         free(docfrag);
     }
 
+#ifdef __REACTOS__
+    return reported;
+#else
     return refcount;
+#endif
 }
 
 static HRESULT WINAPI docfrag_GetTypeInfoCount(IXMLDOMDocumentFragment *iface, UINT *count)

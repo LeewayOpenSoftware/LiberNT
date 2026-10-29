@@ -251,6 +251,9 @@ struct domnode
     struct list children;
     struct list attributes;
     struct list owned;
+#ifdef __REACTOS__
+    IUnknown *identity;
+#endif
 };
 
 extern IXMLDOMSchemaCollection2 *doc_properties_get_schema(struct domdoc_properties *properties);
@@ -411,6 +414,35 @@ extern HRESULT node_transform_node(struct domnode*,IXMLDOMNode*,BSTR*);
 extern HRESULT node_transform_node_params(struct domnode*,IXMLDOMNode*,BSTR*,ISequentialStream*,
     const struct xslprocessor_params*);
 extern HRESULT node_create_supporterrorinfo(const tid_t*,void**);
+#ifdef __REACTOS__
+enum node_tearoff_kind
+{
+    NODE_TEAROFF_NONE = 0,
+    NODE_TEAROFF_IDENTITY,
+    NODE_TEAROFF_NODE,
+    NODE_TEAROFF_TYPED,
+    NODE_TEAROFF_DISPATCH,
+    NODE_TEAROFF_DISPATCHEX,
+};
+
+struct node_tearoff
+{
+    enum node_tearoff_kind kind;
+    IUnknown *identity;
+    IUnknown *source;
+};
+
+extern bool node_tearoff_query_interface(struct node_tearoff *tearoff, IUnknown *iface, DispatchEx *dispex,
+        struct domnode *node, const IID * const *typed_iids, REFIID riid, void **obj);
+extern ULONG node_tearoff_refcount(const struct node_tearoff *tearoff, const struct domnode *node, LONG refcount);
+extern LONG node_tearoff_decrement(const struct node_tearoff *tearoff, struct domnode *node, LONG *refcount,
+        ULONG *reported);
+extern void node_tearoff_cleanup(struct node_tearoff *tearoff);
+extern HRESULT create_node_typed(struct domnode *node, void **ret);
+extern IUnknown *domnode_get_identity(struct domnode *node);
+extern IUnknown *domnode_set_identity(struct domnode *node, IUnknown *identity);
+extern LONG domnode_release_identity(struct domnode *node, IUnknown *identity, LONG *refcount);
+#endif
 extern HRESULT node_save(struct domnode *, IStream *);
 extern HRESULT node_get_elements_by_tagname(struct domnode *,BSTR,IXMLDOMNodeList**);
 extern HRESULT node_validate(struct domnode *, IXMLDOMNode *, IXMLDOMParseError **);
