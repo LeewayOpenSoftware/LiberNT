@@ -764,6 +764,8 @@ co_MsqInsertMouseMessage(MSG* Msg, DWORD flags, ULONG_PTR dwExtraInfo, BOOL Hook
    }
 }
 
+static LONG64 MsqNextMessageId;
+
 PUSER_MESSAGE FASTCALL
 MsqCreateMessage(LPMSG Msg)
 {
@@ -777,8 +779,26 @@ MsqCreateMessage(LPMSG Msg)
 
    RtlZeroMemory(Message, sizeof(*Message));
    RtlMoveMemory(&Message->Msg, Msg, sizeof(MSG));
+   Message->Id = (ULONGLONG)InterlockedIncrement64(&MsqNextMessageId);
    PostMsgCount++;
    return Message;
+}
+
+static PUSER_MESSAGE
+MsqFindHardwareMessage(_In_ PUSER_MESSAGE_QUEUE MessageQueue, _In_ ULONGLONG Id)
+{
+   PLIST_ENTRY Entry;
+
+   for (Entry = MessageQueue->HardwareMessagesListHead.Flink;
+        Entry != &MessageQueue->HardwareMessagesListHead;
+        Entry = Entry->Flink)
+   {
+      PUSER_MESSAGE Message = CONTAINING_RECORD(Entry, USER_MESSAGE, ListEntry);
+
+      if (Message->Id == Id)
+         return Message;
+   }
+   return NULL;
 }
 
 VOID FASTCALL
@@ -2083,6 +2103,8 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
    LONG_PTR ExtraInfo;
    MSG clk_msg;
    BOOL Ret = FALSE;
+   BOOL TookSysLock = FALSE;
+   ULONGLONG MessageId;
    PUSER_MESSAGE_QUEUE MessageQueue = pti->MessageQueue;
    INPUT_MESSAGE_SOURCE Source = { IMDT_UNAVAILABLE, IMO_UNAVAILABLE };
 
@@ -2096,6 +2118,7 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
    {
       MessageQueue->ptiSysLock = pti;
       pti->pcti->CTI_flags |= CTI_THREADSYSLOCK;
+      TookSysLock = TRUE;
    }
 
    if (MessageQueue->ptiSysLock != pti)
@@ -2103,6 +2126,8 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
       TRACE("Thread Q is locked to ptiSysLock 0x%p pti 0x%p\n",MessageQueue->ptiSysLock,pti);
       return FALSE;
    }
+
+   IntReferenceMessageQueue(MessageQueue);
 
    while (ListHead != &MessageQueue->HardwareMessagesListHead)
    {
@@ -2137,8 +2162,21 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
 
          NotForUs = FALSE;
 
+         MessageId = CurrentMessage->Id;
+
          UpdateKeyStateFromMsg(MessageQueue, &msg);
          AcceptMessage = co_IntProcessHardwareMessage(&msg, &Remove, &NotForUs, ExtraInfo, MsgFilterLow, MsgFilterHigh);
+
+         if (pti->MessageQueue != MessageQueue)
+         {
+            MessageQueue->idSysPeek = idSave;
+            Ret = FALSE;
+            break;
+         }
+
+         CurrentMessage = MsqFindHardwareMessage(MessageQueue, MessageId);
+         ListHead = CurrentMessage ? CurrentMessage->ListEntry.Flink :
+                                     MessageQueue->HardwareMessagesListHead.Flink;
 
          if (!NotForUs && (MsgFilterLow != 0 || MsgFilterHigh != 0))
          {
@@ -2153,11 +2191,11 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
 
          if (Remove)
          {
-             if (CurrentMessage->pti != NULL && (MessageQueue->idSysPeek == (ULONG_PTR)CurrentMessage))
+             if (CurrentMessage != NULL && (MessageQueue->idSysPeek == (ULONG_PTR)CurrentMessage))
              {
                 MsqDestroyMessage(CurrentMessage);
+                ClearMsgBitsMask(pti, QS_Flags);
              }
-             ClearMsgBitsMask(pti, QS_Flags);
          }
 
          MessageQueue->idSysPeek = idSave;
@@ -2198,8 +2236,12 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
       }
    }
 
-   MessageQueue->ptiSysLock = NULL;
-   pti->pcti->CTI_flags &= ~CTI_THREADSYSLOCK;
+   if (TookSysLock && MessageQueue->ptiSysLock == pti)
+   {
+      MessageQueue->ptiSysLock = NULL;
+      pti->pcti->CTI_flags &= ~CTI_THREADSYSLOCK;
+   }
+   IntDereferenceMessageQueue(MessageQueue);
    return Ret;
 }
 
