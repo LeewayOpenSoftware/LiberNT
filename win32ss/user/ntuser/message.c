@@ -1312,12 +1312,14 @@ co_IntPeekMessage( PMSG Msg,
             if (RemoveMessages)
             {
                 pti->QuitPosted = FALSE;
-                ClearMsgBitsMask(pti, QS_POSTMESSAGE);
                 pti->pcti->fsWakeBits &= ~QS_ALLPOSTMESSAGE;
                 pti->pcti->fsChangeBits &= ~QS_ALLPOSTMESSAGE;
             }
             goto GotMessage;
         }
+
+        if (ProcessMask & QS_POSTMESSAGE)
+            ClearMsgBitsMask(pti, QS_POSTMESSAGE);
 
         /* Check for hardware events. */
         if ((ProcessMask & QS_INPUT) &&

@@ -464,7 +464,6 @@ MsqWakeQueue(PTHREADINFO pti, DWORD MessageBits, BOOL KeyEvent)
       if (MessageBits & QS_MOUSEMOVE)   pti->nCntsQBits[QSRosMouseMove]++;
       if (MessageBits & QS_MOUSEBUTTON) pti->nCntsQBits[QSRosMouseButton]++;
    }
-   if (MessageBits & QS_POSTMESSAGE) pti->nCntsQBits[QSRosPostMessage]++;
    if (MessageBits & QS_SENDMESSAGE) pti->nCntsQBits[QSRosSendMessage]++;
    if (MessageBits & QS_HOTKEY)      pti->nCntsQBits[QSRosHotKey]++;
    if (MessageBits & QS_EVENT)       pti->nCntsQBits[QSRosEvent]++;
@@ -475,11 +474,30 @@ MsqWakeQueue(PTHREADINFO pti, DWORD MessageBits, BOOL KeyEvent)
    UserDomainUnlockExclusive(DLT_QUEUE);
 }
 
+static BOOL FASTCALL
+MsqHasPostedMessage(PTHREADINFO pti)
+{
+   PLIST_ENTRY Entry;
+
+   if (pti->QuitPosted)
+      return TRUE;
+
+   for (Entry = pti->PostedMessagesListHead.Flink; Entry != &pti->PostedMessagesListHead; Entry = Entry->Flink)
+   {
+      PUSER_MESSAGE Message = CONTAINING_RECORD(Entry, USER_MESSAGE, ListEntry);
+      if (Message->QS_Flags & QS_POSTMESSAGE)
+         return TRUE;
+   }
+   return FALSE;
+}
+
 VOID FASTCALL
 ClearMsgBitsMask(PTHREADINFO pti, UINT MessageBits)
 {
    UINT ClrMask = 0;
 
+   if (MessageBits & QS_POSTMESSAGE)
+      UserDomainLockExclusive(DLT_POST);
    UserDomainLockExclusive(DLT_QUEUE);
    if (MessageBits & QS_KEY)
    {
@@ -499,7 +517,7 @@ ClearMsgBitsMask(PTHREADINFO pti, UINT MessageBits)
    }
    if (MessageBits & QS_POSTMESSAGE)
    {
-      if (--pti->nCntsQBits[QSRosPostMessage] == 0) ClrMask |= QS_POSTMESSAGE | QS_ALLPOSTMESSAGE;
+      if (!MsqHasPostedMessage(pti)) ClrMask |= QS_POSTMESSAGE | QS_ALLPOSTMESSAGE;
    }
    if (MessageBits & QS_TIMER) // ReactOS hard coded.
    {  // Handle timer bits here.
@@ -535,6 +553,8 @@ ClearMsgBitsMask(PTHREADINFO pti, UINT MessageBits)
    pti->pcti->fsWakeBits &= ~ClrMask;
    pti->pcti->fsChangeBits &= ~ClrMask;
    UserDomainUnlockExclusive(DLT_QUEUE);
+   if (MessageBits & QS_POSTMESSAGE)
+      UserDomainUnlockExclusive(DLT_POST);
 }
 
 VOID FASTCALL
@@ -881,13 +901,15 @@ MsqRemoveWindowMessagesFromQueue(PWND Window)
 
       if (PostedMessage->Msg.hwnd == UserHMGetHandle(Window))
       {
+         UINT QS_Flags = PostedMessage->QS_Flags;
+
          if (PostedMessage->Msg.message == WM_QUIT && pti->QuitPosted == 0)
          {
             pti->QuitPosted = 1;
             pti->exitCode = PostedMessage->Msg.wParam;
          }
-         ClearMsgBitsMask(pti, PostedMessage->QS_Flags);
          MsqDestroyMessage(PostedMessage);
+         ClearMsgBitsMask(pti, QS_Flags);
          CurrentEntry = pti->PostedMessagesListHead.Flink;
       }
       else
@@ -2479,7 +2501,6 @@ MsqCleanupThreadMsgs(PTHREADINFO pti)
    pti->nCntsQBits[QSRosKey] = 0;
    pti->nCntsQBits[QSRosMouseMove] = 0;
    pti->nCntsQBits[QSRosMouseButton] = 0;
-   pti->nCntsQBits[QSRosPostMessage] = 0;
    pti->nCntsQBits[QSRosSendMessage] = 0;
    pti->nCntsQBits[QSRosHotKey] = 0;
    pti->nCntsQBits[QSRosEvent] = 0;
