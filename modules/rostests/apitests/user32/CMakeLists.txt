@@ -70,6 +70,7 @@ list(APPEND SOURCE
     NextDlgItem.c
     NonClientPaint.c
     OwnerDestroy.c
+    PersianLayout.c
     PhysicalPoint.c
     PhysicalToLogicalPoint.c
     LogicalToPhysicalPoint.c
