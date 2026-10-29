@@ -1,0 +1,149 @@
+--- a/mono/metadata/custom-attrs-internals.h
++++ b/mono/metadata/custom-attrs-internals.h
+@@ -37,4 +37,7 @@
+ 													  gpointer **typed_args_out, gpointer **named_args_out, int *num_named_args,
+ 													  CattrNamedArg **named_arg_info, MonoError *error);
+ 
++gboolean
++mono_class_is_type_equivalent (MonoClass *c1, MonoClass *c2);
++
+ #endif  /* __MONO_METADATA_REFLECTION_CUSTOM_ATTRS_INTERNALS_H__ */
+--- a/mono/metadata/custom-attrs.c
++++ b/mono/metadata/custom-attrs.c
+@@ -2784,3 +2784,117 @@
+ 	/* The hash is not mutated, no need to lock */
+ 	return g_hash_table_lookup (image->weak_field_indexes, GINT_TO_POINTER (field_idx)) != NULL;
+ }
++
++typedef struct {
++	gboolean type_identifier;
++	gboolean has_scope;
++	char scope [128];
++	char identifier [512];
++	char guid [64];
++} TypeEquivalenceInfo;
++
++static gboolean
++type_equivalence_read_strings (MonoImage *image, guint32 value, char **out, const size_t *sizes, int count)
++{
++	const char *p = mono_metadata_blob_heap (image, value);
++	guint32 len = mono_metadata_decode_blob_size (p, &p);
++	const char *end = p + len;
++	int i;
++
++	if (len < 2 || p [0] != 1 || p [1] != 0)
++		return FALSE;
++	p += 2;
++	for (i = 0; i < count; i++) {
++		guint32 slen;
++
++		if (p >= end || (guchar)*p == 0xFF)
++			return FALSE;
++		slen = mono_metadata_decode_value (p, &p);
++		if (p + slen > end || slen >= sizes [i])
++			return FALSE;
++		memcpy (out [i], p, slen);
++		out [i][slen] = 0;
++		p += slen;
++	}
++	return TRUE;
++}
++
++static gboolean
++type_equivalence_class_attr (MonoImage *image, guint32 typeref_scope_token, const gchar *nspace, const gchar *name, guint32 method_token, guint32 index, guint32 value, gpointer user_data)
++{
++	TypeEquivalenceInfo *info = (TypeEquivalenceInfo *)user_data;
++
++	if (strcmp (nspace, "System.Runtime.InteropServices"))
++		return FALSE;
++	if (!strcmp (name, "TypeIdentifierAttribute")) {
++		char *out [2] = { info->scope, info->identifier };
++		size_t sizes [2] = { sizeof (info->scope), sizeof (info->identifier) };
++
++		info->type_identifier = TRUE;
++		info->has_scope = type_equivalence_read_strings (image, value, out, sizes, 2);
++	} else if (!strcmp (name, "GuidAttribute")) {
++		char *out [1] = { info->guid };
++		size_t sizes [1] = { sizeof (info->guid) };
++
++		if (!type_equivalence_read_strings (image, value, out, sizes, 1))
++			info->guid [0] = 0;
++	}
++	return FALSE;
++}
++
++static gboolean
++type_equivalence_assembly_attr (MonoImage *image, guint32 typeref_scope_token, const gchar *nspace, const gchar *name, guint32 method_token, guint32 index, guint32 value, gpointer user_data)
++{
++	if (strcmp (nspace, "System.Runtime.InteropServices"))
++		return FALSE;
++	if (strcmp (name, "PrimaryInteropAssemblyAttribute") && strcmp (name, "ImportedFromTypeLibAttribute"))
++		return FALSE;
++	*(gboolean *)user_data = TRUE;
++	return TRUE;
++}
++
++static gboolean
++type_equivalence_info (MonoClass *klass, TypeEquivalenceInfo *info)
++{
++	MonoAssembly *assembly = m_class_get_image (klass)->assembly;
++	gboolean interop = FALSE;
++
++	memset (info, 0, sizeof (*info));
++	mono_class_metadata_foreach_custom_attr (klass, type_equivalence_class_attr, info);
++	if (info->has_scope)
++		return TRUE;
++	if (!MONO_CLASS_IS_INTERFACE_INTERNAL (klass) || !(mono_class_get_flags (klass) & TYPE_ATTRIBUTE_IMPORT) || !info->guid [0])
++		return FALSE;
++	if (info->type_identifier)
++		return TRUE;
++	if (assembly)
++		mono_assembly_metadata_foreach_custom_attr (assembly, type_equivalence_assembly_attr, &interop);
++	return interop;
++}
++
++gboolean
++mono_class_is_type_equivalent (MonoClass *c1, MonoClass *c2)
++{
++	TypeEquivalenceInfo i1, i2;
++
++	if (c1 == c2)
++		return TRUE;
++	if (mono_class_is_ginst (c1) || mono_class_is_ginst (c2) || mono_class_is_gtd (c1) || mono_class_is_gtd (c2))
++		return FALSE;
++	if (m_class_get_rank (c1) || m_class_get_rank (c2) || m_class_get_nested_in (c1) || m_class_get_nested_in (c2))
++		return FALSE;
++	if (m_class_is_valuetype (c1) != m_class_is_valuetype (c2) ||
++	    MONO_CLASS_IS_INTERFACE_INTERNAL (c1) != MONO_CLASS_IS_INTERFACE_INTERNAL (c2))
++		return FALSE;
++	if (strcmp (m_class_get_name (c1), m_class_get_name (c2)) || strcmp (m_class_get_name_space (c1), m_class_get_name_space (c2)))
++		return FALSE;
++	if (image_is_dynamic (m_class_get_image (c1)) || image_is_dynamic (m_class_get_image (c2)))
++		return FALSE;
++	if (!type_equivalence_info (c1, &i1) || !type_equivalence_info (c2, &i2))
++		return FALSE;
++	if (i1.has_scope != i2.has_scope)
++		return FALSE;
++	if (i1.has_scope)
++		return !g_ascii_strcasecmp (i1.scope, i2.scope) && !strcmp (i1.identifier, i2.identifier);
++	return !g_ascii_strcasecmp (i1.guid, i2.guid);
++}
+--- a/mono/metadata/metadata.c
++++ b/mono/metadata/metadata.c
+@@ -32,6 +32,7 @@
+ #include "assembly-internals.h"
+ #include "abi-details.h"
+ #include "cominterop.h"
++#include "custom-attrs-internals.h"
+ #include <mono/metadata/exception-internals.h>
+ #include <mono/utils/mono-error-internals.h>
+ #include <mono/utils/mono-memory-model.h>
+@@ -6025,6 +6026,8 @@
+ 	if (signature_only &&
+ 	    (c1_type->type == MONO_TYPE_ARRAY) && (c2_type->type == MONO_TYPE_ARRAY))
+ 		return do_mono_metadata_type_equal (c1_type, c2_type, signature_only);
++	if (signature_only)
++		return mono_class_is_type_equivalent (c1, c2);
+ 	return FALSE;
+ }
+ 
