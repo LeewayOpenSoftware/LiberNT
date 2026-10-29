@@ -749,3 +749,13 @@
 #define IDS_TARGET                     839
 #define IDS_TARGET_FORMAT              840
 #define IDS_PAGE_LEGACY                841
+#define IDS_PAGE_DRIVERS               842
+#define IDS_DRIVERS_DESC               843
+#define IDS_DRIVERS_DEVICES            844
+#define IDS_UPDATE_DRIVER              845
+#define IDS_DRIVER_STATUS_OK           846
+#define IDS_DRIVER_STATUS_NO_DRIVER    847
+#define IDS_DRIVER_STATUS_PROBLEM      848
+#define IDS_DRIVER_STATUS_UNKNOWN      849
+#define IDS_DRIVERS_NONE               850
+#define IDS_DRIVER_UNKNOWN_DEVICE      851
