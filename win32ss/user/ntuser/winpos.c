@@ -3221,6 +3221,14 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
                IntShowOwnedPopups(Wnd, FALSE );
                Swp |= SWP_FRAMECHANGED | co_WinPosMinMaximize(Wnd, Cmd, &NewPos);
 
+               if (Cmd == SW_SHOWMINIMIZED && !(style & WS_CHILD) &&
+                   (Wnd->style & WS_MINIMIZE) && pti->MessageQueue->spwndFocus &&
+                   (pti->MessageQueue->spwndFocus == Wnd ||
+                    IntIsChildWindow(Wnd, pti->MessageQueue->spwndFocus)))
+               {
+                  co_UserSetFocus(NULL);
+               }
+
                EventMsg = EVENT_SYSTEM_MINIMIZESTART;
             }
             else
