@@ -1785,6 +1785,12 @@ static HANDLE notification_wake;
 static HANDLE notification_stop;
 static HANDLE notification_complete;
 static HANDLE notification_thread;
+static HANDLE change_file;
+static HANDLE change_event;
+static IO_STATUS_BLOCK change_iosb;
+static ULONG change_generation;
+static BOOL change_pending;
+static BOOL change_unavailable;
 
 static ULONG hash_data(ULONG hash, const void *data, SIZE_T size)
 {
@@ -1901,17 +1907,49 @@ static DWORD cached_table_hash(struct nsi_table_state *states, ULONG *count, ULO
     return states[(*count)++].error;
 }
 
+static void change_request(void)
+{
+    UNICODE_STRING name = RTL_CONSTANT_STRING(L"\\Device\\Ip");
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS status;
+
+    if (change_pending || change_unavailable || !change_event) return;
+    if (!change_file)
+    {
+        InitializeObjectAttributes(&attr, &name, OBJ_CASE_INSENSITIVE, NULL, NULL);
+        if (!NT_SUCCESS(NtOpenFile(&change_file, SYNCHRONIZE, &attr, &iosb, FILE_SHARE_READ | FILE_SHARE_WRITE, 0)))
+        {
+            change_file = NULL;
+            change_unavailable = TRUE;
+            return;
+        }
+    }
+    status = NtDeviceIoControlFile(change_file, change_event, NULL, NULL, &change_iosb, IOCTL_IP_WAIT_CHANGE,
+                                   &change_generation, sizeof(change_generation),
+                                   &change_generation, sizeof(change_generation));
+    if (NT_SUCCESS(status))
+        change_pending = TRUE;
+    else
+        change_unavailable = TRUE;
+}
+
 static DWORD WINAPI notification_worker(void *arg)
 {
-    HANDLE handles[2] = {notification_stop, notification_wake};
+    HANDLE handles[3] = {notification_stop, notification_wake, change_event};
 
     for (;;)
     {
         struct nsi_notification **cursor;
         struct nsi_table_state states[16];
         ULONG state_count = 0;
+        DWORD wait;
 
-        if (WaitForMultipleObjects(ARRAY_SIZE(handles), handles, FALSE, 1000) == WAIT_OBJECT_0) break;
+        change_request();
+        /* TODO: changes tcpip does not signal (router-advertised IPv6 routes, neighbors, statistics) are seen only by this 1 s poll */
+        wait = WaitForMultipleObjects(change_pending ? 3 : 2, handles, FALSE, 1000);
+        if (wait == WAIT_OBJECT_0) break;
+        if (wait == WAIT_OBJECT_0 + 2) change_pending = FALSE;
         EnterCriticalSection(&notification_cs);
         cursor = &notifications;
         while (*cursor)
@@ -1931,6 +1969,14 @@ static DWORD WINAPI notification_worker(void *arg)
         }
         LeaveCriticalSection(&notification_cs);
     }
+    if (change_file)
+    {
+        IO_STATUS_BLOCK iosb;
+
+        if (change_pending) NtCancelIoFile(change_file, &iosb);
+        NtClose(change_file);
+        change_file = NULL;
+    }
     return 0;
 }
 
@@ -1940,6 +1986,7 @@ BOOL nsi_reactos_init(void)
     notification_wake = CreateEventW(NULL, FALSE, FALSE, NULL);
     notification_stop = CreateEventW(NULL, TRUE, FALSE, NULL);
     notification_complete = CreateEventW(NULL, FALSE, FALSE, NULL);
+    change_event = CreateEventW(NULL, FALSE, FALSE, NULL);
     return notification_wake && notification_stop && notification_complete;
 }
 
@@ -1956,6 +2003,7 @@ void nsi_reactos_cleanup(void)
         HeapFree(GetProcessHeap(), 0, notification);
     }
     CloseHandle(notification_thread);
+    if (change_event) CloseHandle(change_event);
     CloseHandle(notification_complete);
     CloseHandle(notification_stop);
     CloseHandle(notification_wake);

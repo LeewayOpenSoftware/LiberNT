@@ -519,6 +519,96 @@ TiDispatchInternal(
  * @return
  *   Status of the operation
  */
+static LIST_ENTRY TiChangeIrps;
+static KSPIN_LOCK TiChangeLock;
+static ULONG TiChangeGeneration;
+
+static
+VOID
+NTAPI
+TiChangeCancel(
+    PDEVICE_OBJECT DeviceObject,
+    PIRP Irp)
+{
+    KIRQL OldIrql;
+
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    IoReleaseCancelSpinLock(Irp->CancelIrql);
+    KeAcquireSpinLock(&TiChangeLock, &OldIrql);
+    RemoveEntryList(&Irp->Tail.Overlay.ListEntry);
+    KeReleaseSpinLock(&TiChangeLock, OldIrql);
+    Irp->IoStatus.Status = STATUS_CANCELLED;
+    Irp->IoStatus.Information = 0;
+    IoCompleteRequest(Irp, IO_NO_INCREMENT);
+}
+
+static
+NTSTATUS
+TiWaitChange(
+    PIRP Irp,
+    PIO_STACK_LOCATION IrpSp)
+{
+    PULONG Generation = Irp->AssociatedIrp.SystemBuffer;
+    KIRQL OldIrql;
+
+    if (IrpSp->Parameters.DeviceIoControl.InputBufferLength < sizeof(ULONG) ||
+        IrpSp->Parameters.DeviceIoControl.OutputBufferLength < sizeof(ULONG))
+        return STATUS_INVALID_PARAMETER;
+
+    KeAcquireSpinLock(&TiChangeLock, &OldIrql);
+    if (*Generation != TiChangeGeneration)
+    {
+        *Generation = TiChangeGeneration;
+        KeReleaseSpinLock(&TiChangeLock, OldIrql);
+        Irp->IoStatus.Information = sizeof(ULONG);
+        return STATUS_SUCCESS;
+    }
+    IoSetCancelRoutine(Irp, TiChangeCancel);
+    if (Irp->Cancel && IoSetCancelRoutine(Irp, NULL))
+    {
+        KeReleaseSpinLock(&TiChangeLock, OldIrql);
+        return STATUS_CANCELLED;
+    }
+    IoMarkIrpPending(Irp);
+    InsertTailList(&TiChangeIrps, &Irp->Tail.Overlay.ListEntry);
+    KeReleaseSpinLock(&TiChangeLock, OldIrql);
+    return STATUS_PENDING;
+}
+
+VOID
+TiSignalChange(VOID)
+{
+    LIST_ENTRY Completed;
+    PLIST_ENTRY Entry, Next;
+    KIRQL OldIrql;
+
+    InitializeListHead(&Completed);
+    KeAcquireSpinLock(&TiChangeLock, &OldIrql);
+    TiChangeGeneration++;
+    for (Entry = TiChangeIrps.Flink; Entry != &TiChangeIrps; Entry = Next)
+    {
+        PIRP Irp = CONTAINING_RECORD(Entry, IRP, Tail.Overlay.ListEntry);
+
+        Next = Entry->Flink;
+        if (!IoSetCancelRoutine(Irp, NULL))
+            continue;
+        RemoveEntryList(Entry);
+        *(PULONG)Irp->AssociatedIrp.SystemBuffer = TiChangeGeneration;
+        InsertTailList(&Completed, Entry);
+    }
+    KeReleaseSpinLock(&TiChangeLock, OldIrql);
+
+    while (!IsListEmpty(&Completed))
+    {
+        PIRP Irp = CONTAINING_RECORD(RemoveHeadList(&Completed), IRP, Tail.Overlay.ListEntry);
+
+        Irp->IoStatus.Status = STATUS_SUCCESS;
+        Irp->IoStatus.Information = sizeof(ULONG);
+        IoCompleteRequest(Irp, IO_NETWORK_INCREMENT);
+    }
+}
+
 NTSTATUS NTAPI
 TiDispatch(
     PDEVICE_OBJECT DeviceObject,
@@ -658,6 +748,13 @@ TiDispatch(
                 }
                 break;
 
+            case IOCTL_IP_WAIT_CHANGE:
+                if (DeviceObject != IPDeviceObject)
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                else
+                    Status = TiWaitChange(Irp, IrpSp);
+                break;
+
             case IOCTL_IP_QUERY_PATHS:
                 if (DeviceObject == IPDeviceObject)
                     Status = PathQuery(Irp->AssociatedIrp.SystemBuffer,
@@ -756,6 +853,20 @@ TiDispatch(
     }
 
     TI_DbgPrint(DEBUG_IRP, ("[TCPIP, TiDispatch] Leaving. Status = (0x%X).\n", Status));
+
+    if (Status == STATUS_SUCCESS)
+    {
+        switch (IrpSp->Parameters.DeviceIoControl.IoControlCode)
+        {
+            case IOCTL_IP6_SET_ADDRESS:
+            case IOCTL_IP6_SET_ROUTE:
+            case IOCTL_IP6_SET_INTERFACE:
+            case IOCTL_IP6_SET_NEIGHBOR:
+            case IOCTL_IP_SET_INTERFACE:
+                TiSignalChange();
+                break;
+        }
+    }
 
     return IRPFinish(Irp, Status);
 }
@@ -1099,6 +1210,9 @@ DriverEntry(
     UNICODE_STRING strNdisDeviceName = RTL_CONSTANT_STRING(TCPIP_PROTOCOL_NAME);
     NDIS_STATUS NdisStatus;
     LARGE_INTEGER DueTime;
+
+    InitializeListHead(&TiChangeIrps);
+    KeInitializeSpinLock(&TiChangeLock);
 
     TI_DbgPrint(MAX_TRACE, ("[TCPIP, DriverEntry] Called\n"));
 

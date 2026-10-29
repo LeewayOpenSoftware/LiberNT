@@ -93,6 +93,10 @@
 #include "lwip/nd6.h"
 #endif
 
+#ifdef LWIP_HOOK_FILENAME
+#include LWIP_HOOK_FILENAME
+#endif
+
 #if LWIP_NETIF_STATUS_CALLBACK
 #define NETIF_STATUS_CALLBACK(n) do{ if (n->status_callback) { (n->status_callback)(n); }}while(0)
 #else
@@ -1463,6 +1467,9 @@ netif_ip6_addr_set_state(struct netif *netif, s8_t addr_idx, u8_t state)
   if (old_state != state) {
     u8_t old_valid = old_state & IP6_ADDR_VALID;
     u8_t new_valid = state & IP6_ADDR_VALID;
+#ifdef LWIP_HOOK_IP6_ADDR_STATE_CHANGED
+    LWIP_HOOK_IP6_ADDR_STATE_CHANGED(netif, addr_idx);
+#endif
     LWIP_DEBUGF(NETIF_DEBUG | LWIP_DBG_STATE, ("netif_ip6_addr_set_state: netif address state being changed\n"));
 
 #if LWIP_IPV6_MLD

@@ -327,6 +327,7 @@ PFIB_ENTRY RouterAddRoute(
     /* Add FIB to the forward information base */
     TcpipInterlockedInsertTailList(&FIBListHead, &FIBE->ListEntry, &FIBLock);
 
+    TiSignalChange();
     return FIBE;
 }
 
@@ -617,7 +618,10 @@ NTSTATUS RouterRemoveRoute(PIP_ADDRESS Target, PIP_ADDRESS Router)
 
     TI_DbgPrint(DEBUG_ROUTER, ("Leaving\n"));
 
-    return Found ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
+    if (!Found)
+        return STATUS_UNSUCCESSFUL;
+    TiSignalChange();
+    return STATUS_SUCCESS;
 }
 
 

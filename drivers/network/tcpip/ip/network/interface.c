@@ -758,6 +758,7 @@ NTSTATUS IPAddInterfaceAddress(PIP_INTERFACE Interface, IPv4_RAW_ADDRESS Address
 
     ExReleaseFastMutex(&NetTableMutex);
 
+    TiSignalChange();
     return STATUS_SUCCESS;
 }
 
@@ -796,7 +797,10 @@ NTSTATUS IPDeleteInterfaceAddress(ULONG Context)
 
     ExReleaseFastMutex(&NetTableMutex);
 
-    return Nte ? STATUS_SUCCESS : STATUS_NOT_FOUND;
+    if (!Nte)
+        return STATUS_NOT_FOUND;
+    TiSignalChange();
+    return STATUS_SUCCESS;
 }
 
 VOID IPDeleteInterfaceAddresses(PIP_INTERFACE Interface)
@@ -835,6 +839,7 @@ VOID IPDeleteInterfaceAddresses(PIP_INTERFACE Interface)
     }
 
     ExReleaseFastMutex(&NetTableMutex);
+    TiSignalChange();
 }
 
 static
@@ -996,7 +1001,10 @@ VOID NteDadTimeout(VOID)
     {
         ARPTransmitDad(Pending[i].Interface, Pending[i].Address, Pending[i].Announce);
         if (Pending[i].Announce)
+        {
             RdiscStart(Pending[i].Interface);
+            TiSignalChange();
+        }
         IPDereferenceInterface(Pending[i].Interface);
     }
 }
@@ -1005,6 +1013,7 @@ VOID NteDadConflict(PIP_INTERFACE Interface, IPv4_RAW_ADDRESS Sender, IPv4_RAW_A
 {
     PLIST_ENTRY Entry;
     KIRQL OldIrql;
+    BOOLEAN Changed = FALSE;
 
     if (Interface->AddressLength && RtlEqualMemory(SenderLinkAddress, Interface->Address, Interface->AddressLength))
         return;
@@ -1020,10 +1029,13 @@ VOID NteDadConflict(PIP_INTERFACE Interface, IPv4_RAW_ADDRESS Sender, IPv4_RAW_A
         if (Sender == Address || (Sender == 0 && Target == Address))
         {
             Nte->DadState = IpDadStateDuplicate;
+            Changed = TRUE;
             TI_DbgPrint(MIN_TRACE, ("Duplicate address %lx on interface %lu\n", DN2H(Address), Interface->Index));
         }
     }
     TcpipReleaseSpinLock(&NetTableListLock, OldIrql);
+    if (Changed)
+        TiSignalChange();
 }
 
 NTSTATUS IPQueryAddressV4(PIP4_ADDRESS_INFO Info)
