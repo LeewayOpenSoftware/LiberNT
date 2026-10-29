@@ -3458,6 +3458,11 @@ co_WinPosSearchChildren(
         return NULL;
     }
 
+    if (IntLayeredIsInputTransparent(ScopeWin))
+    {
+        return NULL;
+    }
+
     if (!Ignore && (ScopeWin->style & WS_DISABLED))
     {   /* disabled child */
         if ((ScopeWin->style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return NULL;

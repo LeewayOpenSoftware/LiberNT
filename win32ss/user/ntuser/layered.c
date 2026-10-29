@@ -17,6 +17,7 @@ typedef struct _LRD_PROP
    BYTE     is_Layered;
    BYTE     PixelAlpha;
    BYTE     UpdateLayered;
+   BYTE     InputTransparent;
    DWORD    Flags;
 } LRD_PROP, *PLRD_PROP;
 
@@ -40,6 +41,14 @@ IntGetLayeredProp(PWND pWnd, BOOL Create)
       return NULL;
    }
    return pLrdProp;
+}
+
+BOOL FASTCALL
+IntLayeredIsInputTransparent(PWND pWnd)
+{
+   PLRD_PROP pLrdProp = UserGetProp(pWnd, AtomLayer, TRUE);
+
+   return pLrdProp && pLrdProp->InputTransparent;
 }
 
 BOOL FASTCALL
@@ -141,6 +150,7 @@ IntSetLayeredWindowAttributes(PWND pWnd,
       pLrdProp->PixelAlpha = FALSE;
       pLrdProp->UpdateLayered = FALSE;
       pLrdProp->is_Layered = 1;
+      pLrdProp->InputTransparent = (dwFlags & LWA_ALPHA) && bAlpha == 0;
   
       if (!was_Layered)
          co_UserRedrawWindow(pWnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME );
