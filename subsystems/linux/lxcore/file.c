@@ -1678,9 +1678,22 @@ LxDeviceStat(
     return 0;
 }
 
+static
+ULONG
+LxDevicePoll(
+    _In_ PLX_FILE File,
+    _In_opt_ PLX_POLL_ENTRY Entry)
+{
+    UNREFERENCED_PARAMETER(Entry);
+
+    if ((LX_DEVICE_KIND)(ULONG_PTR)File->Object == LxDeviceKmsg)
+        return 0;
+    return LX_POLLIN | LX_POLLOUT | LX_POLLRDNORM | LX_POLLWRNORM;
+}
+
 static const LX_FILE_OPS LxDeviceOps =
 {
-    LxDeviceRead, LxDeviceWrite, NULL, NULL, LxDeviceStat, LxDeviceSeek, NULL, NULL, NULL
+    LxDeviceRead, LxDeviceWrite, NULL, LxDevicePoll, LxDeviceStat, LxDeviceSeek, NULL, NULL, NULL
 };
 
 PLX_FILE
