@@ -1607,7 +1607,20 @@ static DWORD copy_move_files(FILE_OPERATION *op, const FILE_LIST *flFrom, const 
     for (i = 0; i < flFrom->dwNumFiles; i++)
     {
         if (!flFrom->feFiles[i].szFullPath[0])
+        {
+            if (MultiSource && !MultiDest && flTo->dwNumFiles && flTo->feFiles[0].szFullPath[0] &&
+                !PathFileExistsW(flTo->feFiles[0].szFullPath))
+            {
+                create_dest_dirs(flTo->feFiles[0].szFullPath);
+            }
             return DE_INVALIDFILES;
+        }
+    }
+
+    for (i = 0; MultiDest && i < flFrom->dwNumFiles && i < flTo->dwNumFiles; i++)
+    {
+        if (!flTo->feFiles[i].szFullPath[0])
+            return ERROR_ACCESS_DENIED;
     }
 
     ZeroMemory(&Current, sizeof(Current));
