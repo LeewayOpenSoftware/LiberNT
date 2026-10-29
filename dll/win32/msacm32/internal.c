@@ -377,6 +377,10 @@ void MSACM_RegisterAllDrivers(void)
 	    if (!wcsnicmp(valname, msacmW, ARRAY_SIZE(msacmW)))
 		MSACM_RegisterDriver(valname, buf, 0);
 	    ++i;
+#ifdef __REACTOS__
+	    cnt = ARRAY_SIZE(valname);
+	    bufLen = sizeof(buf);
+#endif
 	}
     	RegCloseKey( hKey );
     }
