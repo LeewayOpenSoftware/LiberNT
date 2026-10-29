@@ -8,6 +8,16 @@
 
 static void LibTCPPathMtuSync(PTCP_PCB pcb);
 
+static
+void
+LibTCPConfirmPath(PTCP_PCB pcb)
+{
+    if (IP_IS_V4(&pcb->remote_ip))
+        PathConfirmV4(ip4_addr_get_u32(ip_2_ip4(&pcb->remote_ip)));
+    else
+        LibIP6ConfirmPath(ip_2_ip6(&pcb->remote_ip));
+}
+
 static const char * const tcp_state_str[] = {
   "CLOSED",
   "LISTEN",
@@ -305,6 +315,7 @@ InternalSendEventHandler(void *arg, PTCP_PCB pcb, const u16_t space)
     /* Make sure the socket didn't get closed */
     if (!arg) return ERR_OK;
 
+    LibTCPConfirmPath(pcb);
     TCPSendEventHandler(arg, space);
 
     return ERR_OK;
@@ -327,6 +338,7 @@ InternalRecvEventHandler(void *arg, PTCP_PCB pcb, struct pbuf *p, const err_t er
 
     if (p)
     {
+        LibTCPConfirmPath(pcb);
         if (!LibTCPWfpReceive(Connection, p))
         {
             tcp_recved(pcb, p->tot_len);

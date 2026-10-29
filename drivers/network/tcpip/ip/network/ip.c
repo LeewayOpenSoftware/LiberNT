@@ -133,6 +133,7 @@ VOID NTAPI IPTimeoutDpcFn(PKDPC Dpc,
     if ((IpTimerExpirations % 10) == 0)
     {
         LogActiveObjects();
+        PathTimeout();
     }
 
     /* Check if datagram fragments have taken too long to assemble */

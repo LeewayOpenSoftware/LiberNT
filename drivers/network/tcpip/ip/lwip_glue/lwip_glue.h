@@ -134,6 +134,8 @@ VOID        LibTCPPathMtuExceeded(PIP_INTERFACE Interface, ULONG Source, ULONG D
 BOOLEAN     PmtuLower(PIP_INTERFACE Interface, IPv4_RAW_ADDRESS Destination, ULONG Mtu);
 ULONG       PmtuQuery(PIP_INTERFACE Interface, IPv4_RAW_ADDRESS Destination, PBOOLEAN Raised);
 ULONG       PmtuForDestination(IPv4_RAW_ADDRESS Destination, ULONG Default);
+VOID        PathConfirmV4(IPv4_RAW_ADDRESS Destination);
+VOID        LibIP6ConfirmPath(const ip6_addr_t *Destination);
 
 struct lib_ip6_query
 {

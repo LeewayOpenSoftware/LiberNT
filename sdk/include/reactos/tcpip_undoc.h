@@ -51,6 +51,30 @@ typedef struct _IP4_ROUTE_INFO
     ULONG Reserved;
 } IP4_ROUTE_INFO, *PIP4_ROUTE_INFO;
 
+#define IOCTL_IP_QUERY_PATHS _TCP_CTL_CODE(0x80D, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+#define IOCTL_IP_FLUSH_PATHS _TCP_CTL_CODE(0x80E, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+typedef struct _IP_PATH_ROW
+{
+    ULONG Index;
+    UCHAR Source[16];
+    UCHAR Destination[16];
+    UCHAR NextHop[16];
+    ULONG PathMtu;
+    ULONG LastReachable;
+    BOOLEAN IsReachable;
+    BOOLEAN Reserved[3];
+    ULONGLONG LinkSpeed;
+} IP_PATH_ROW, *PIP_PATH_ROW;
+
+typedef struct _IP_PATH_TABLE
+{
+    ULONG NumEntries;
+    ULONG Reserved;
+    IP_PATH_ROW Rows[ANYSIZE_ARRAY];
+} IP_PATH_TABLE, *PIP_PATH_TABLE;
+
 typedef struct _IP4_INTERFACE_INFO
 {
     ULONG Index;

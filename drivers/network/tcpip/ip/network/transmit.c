@@ -10,6 +10,8 @@
 
 #include "precomp.h"
 
+#include <icmp.h>
+
 BOOLEAN PrepareNextFragment(PIPFRAGMENT_CONTEXT IFC);
 NTSTATUS IPSendFragment(PNDIS_PACKET NdisPacket,
 			PNEIGHBOR_CACHE_ENTRY NCE,
@@ -251,6 +253,10 @@ NTSTATUS IPSendDatagram(PIP_PACKET IPPacket, PNEIGHBOR_CACHE_ENTRY NCE)
 
     /* Fetch path MTU now, because it may change */
     TI_DbgPrint(MID_TRACE,("PathMTU: %d\n", NCE->Interface->MTU));
+
+    if (IPPacket->Type == IP_ADDRESS_V4 && IPPacket->HeaderSize >= sizeof(IPv4_HEADER))
+        PathTouch(NCE->Interface, ((PIPv4_HEADER)IPPacket->Header)->SrcAddr,
+                  ((PIPv4_HEADER)IPPacket->Header)->DstAddr, NCE->Address.Address.IPv4Address);
 
     return SendFragments(IPPacket, NCE, NCE->Interface->MTU);
 }

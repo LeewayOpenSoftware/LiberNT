@@ -70,6 +70,7 @@
 #define LWIP_HOOK_IP6_NO_DEFAULT_NETIF  1
 
 #define LWIP_HOOK_IP4_DONT_FRAGMENT(proto) ((proto) == IP_PROTO_TCP)
+#define LWIP_HOOK_IP6_PATH_OUTPUT(netif, src, dest, nexth, p) LibIP6PathOutput(netif, src, dest, nexth, p)
 #define LWIP_HOOK_IP4_PATH_MTU(dest, netif) LibIP4PathMtu(dest, netif)
 #define LWIP_TCP_PCB_BASE_MSS           1
 

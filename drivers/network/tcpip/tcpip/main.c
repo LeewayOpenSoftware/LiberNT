@@ -658,6 +658,31 @@ TiDispatch(
                 }
                 break;
 
+            case IOCTL_IP_QUERY_PATHS:
+                if (DeviceObject == IPDeviceObject)
+                    Status = PathQuery(Irp->AssociatedIrp.SystemBuffer,
+                                       IrpSp->Parameters.DeviceIoControl.OutputBufferLength,
+                                       (PULONG)&Irp->IoStatus.Information);
+                else if (DeviceObject == IP6DeviceObject)
+                    Status = LibIP6QueryPaths(Irp->AssociatedIrp.SystemBuffer,
+                                              IrpSp->Parameters.DeviceIoControl.OutputBufferLength,
+                                              (PULONG)&Irp->IoStatus.Information);
+                else
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                break;
+
+            case IOCTL_IP_FLUSH_PATHS:
+                if (DeviceObject == IPDeviceObject)
+                {
+                    PathFlush();
+                    Status = STATUS_SUCCESS;
+                }
+                else if (DeviceObject == IP6DeviceObject)
+                    Status = LibIP6FlushPaths();
+                else
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                break;
+
             case IOCTL_IP_QUERY_ROUTE:
                 if (DeviceObject != IPDeviceObject)
                     Status = STATUS_INVALID_DEVICE_REQUEST;

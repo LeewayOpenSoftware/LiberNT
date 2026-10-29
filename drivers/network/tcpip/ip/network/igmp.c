@@ -445,6 +445,17 @@ BOOLEAN IGMPIsMember(PVOID Owner, ULONG InterfaceIndex, IPv4_RAW_ADDRESS Group)
     return Member;
 }
 
+BOOLEAN IGMPIsJoined(ULONG InterfaceIndex, IPv4_RAW_ADDRESS Group)
+{
+    BOOLEAN Joined;
+    KIRQL OldIrql;
+
+    TcpipAcquireSpinLock(&IGMPLock, &OldIrql);
+    Joined = IGMPFindGroup(InterfaceIndex, Group) != NULL;
+    TcpipReleaseSpinLock(&IGMPLock, OldIrql);
+    return Joined;
+}
+
 VOID IGMPTimeout(VOID)
 {
     IGMP_SEND Send[4];
