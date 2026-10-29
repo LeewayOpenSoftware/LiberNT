@@ -2717,6 +2717,13 @@ KiArm64HandleSynchronousException(
 
             Mode = KiArm64PreviousModeFromVector(Context->State.VectorId);
 
+            if ((EsrClass == 0x32) && !(Esr & (1UL << 24)))
+            {
+                ARM64_WRITE_SYSREG(MDSCR_EL1, ARM64_READ_SYSREG(MDSCR_EL1) & ~1ULL);
+                KiArm64UserStepArmed[KeGetCurrentPrcb()->Number] = 0;
+                goto HandledExit;
+            }
+
             /*
              * A watchpoint reports the accessed data address in FAR_EL1, which
              * is needed to identify the closest watchpoint. Preserve it and

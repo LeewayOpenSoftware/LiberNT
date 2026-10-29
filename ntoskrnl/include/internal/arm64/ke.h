@@ -727,6 +727,7 @@ extern BOOLEAN KiArm64IrqFiqConfigured;
 /* Debug register counts from ID_AA64DFR0_EL1 */
 extern ULONG KiArm64NumBreakpoints;
 extern ULONG KiArm64NumWatchpoints;
+extern UCHAR KiArm64UserStepArmed[MAXIMUM_PROCESSORS];
 
 /*
  * CPU feature flags populated from ID_AA64* register reads during
