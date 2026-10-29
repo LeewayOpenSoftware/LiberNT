@@ -1702,6 +1702,8 @@ UserPostMessage( HWND Wnd,
             return FALSE;
         }
 
+        Message.hwnd = UserHMGetHandle(Window);
+
         if ( Msg >= WM_DDE_FIRST && Msg <= WM_DDE_LAST )
         {
            if (!IntDdePostMessageHook(Window, Msg, wParam, &lParam, &ExtraInfo))
