@@ -1372,6 +1372,8 @@ typedef struct _WINPOS_ENTRY
    BOOL bChained;
    BOOL bSilent;
    BOOL bPointerInWindow;
+   BOOL bDeferActivate;
+   BOOL bCompositedPureMove;
    UINT Flags;
    HWND hwndBand;
    WINDOWPOS WinPos;
@@ -1967,6 +1969,56 @@ VOID FASTCALL IntImeWindowPosChanged(VOID)
     IntFreeHwndList(pWL);
 }
 
+static VOID FASTCALL
+co_WinPosActivateEntry(PWND Window)
+{
+   PTHREADINFO pti = PsGetCurrentThreadWin32Thread();
+
+   if ( pti->MessageQueue->spwndActive != Window ||
+        pti->MessageQueue != gpqForeground )
+   {
+      //ERR("WPSWP : set active window\n");
+      if (!(Window->state & WNDS_BEINGACTIVATED)) // Inside SAW?
+      {
+         if (Window->head.pti == pti && !CanActivateForeground(pti))
+            UserSetActiveWindow(Window);
+         else
+            co_IntSetForegroundWindow(Window); // Fixes SW_HIDE issues. Wine win test_SetActiveWindow & test_SetForegroundWindow.
+      }
+   }
+}
+
+static VOID FASTCALL
+co_WinPosBatchSyncPaint(PWINPOS_ENTRY Entry)
+{
+   PWND Window = Entry->Window;
+   UINT flags = Entry->Flags;
+   PWINDOWPOS WinPos = &Entry->WinPos;
+
+   if(!(flags & SWP_DEFERERASE) &&
+      !((Window->state & WNDS_BEINGACTIVATED) && (WinPos->flags & SWP_AGG_STATUSFLAGS) == SWP_AGG_NOPOSCHANGE))
+   {
+       /* erase parent when hiding or resizing child */
+       if (!Entry->bCompositedPureMove &&
+          ((flags & SWP_HIDEWINDOW) ||
+         (!(flags & SWP_SHOWWINDOW) &&
+          (WinPos->flags & SWP_AGG_STATUSFLAGS) != SWP_AGG_NOGEOMETRYCHANGE)))
+       {
+           PWND Parent = Window->spwndParent;
+           if (!Parent || UserIsDesktopWindow(Parent)) Parent = Window;
+           UserSyncAndPaintWindows( Parent, RDW_ERASENOW | RDW_CLIPCHILDREN);
+       }
+
+       /* Give newly shown windows a chance to redraw */
+       if(((WinPos->flags & SWP_AGG_STATUSFLAGS) != SWP_AGG_NOPOSCHANGE)
+                && !(flags & SWP_AGG_NOCLIENTCHANGE) && (flags & SWP_SHOWWINDOW)
+                && !(Window->style & WS_MINIMIZE))
+       {
+           UserSyncAndPaintWindows( Window, RDW_ERASENOW | RDW_CLIPCHILDREN);
+       }
+   }
+}
+
 static BOOL FASTCALL
 co_WinPosBatchApply(PWINPOS_ENTRY Entry)
 {
@@ -1991,7 +2043,6 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
    BOOL bExComposited = FALSE;
    PWND pwndAncestor;
    UINT ZOrderFlags;
-   PTHREADINFO pti = PsGetCurrentThreadWin32Thread();
 
    ZOrderFlags = WinPos.flags & SWP_NOZORDER;
    if (Entry->bChained && !Entry->hwndBand && !ZOrderFlags &&
@@ -2551,21 +2602,10 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
       {
          co_IntSendMessageNoWait(WinPos.hwnd, WM_CHILDACTIVATE, 0, 0);
       }
-      else
+      else if (!Entry->bDeferActivate)
       {
          //ERR("SetWindowPos Set FG Window!\n");
-         if ( pti->MessageQueue->spwndActive != Window ||
-              pti->MessageQueue != gpqForeground )
-         {
-            //ERR("WPSWP : set active window\n");
-            if (!(Window->state & WNDS_BEINGACTIVATED)) // Inside SAW?
-            {
-               if (Window->head.pti == pti && !CanActivateForeground(pti))
-                  UserSetActiveWindow(Window);
-               else
-                  co_IntSetForegroundWindow(Window); // Fixes SW_HIDE issues. Wine win test_SetActiveWindow & test_SetForegroundWindow.
-            }
-         }
+         co_WinPosActivateEntry(Window);
       }
    }
 
@@ -2637,31 +2677,11 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
       CopyRgn = NULL;
    }
 
-   if(!(flags & SWP_DEFERERASE) &&
-      !((Window->state & WNDS_BEINGACTIVATED) && (WinPos.flags & SWP_AGG_STATUSFLAGS) == SWP_AGG_NOPOSCHANGE))
-   {
-       /* erase parent when hiding or resizing child */
-       if (!bCompositedPureMove &&
-          ((flags & SWP_HIDEWINDOW) ||
-         (!(flags & SWP_SHOWWINDOW) &&
-          (WinPos.flags & SWP_AGG_STATUSFLAGS) != SWP_AGG_NOGEOMETRYCHANGE)))
-       {
-           PWND Parent = Window->spwndParent;
-           if (!Parent || UserIsDesktopWindow(Parent)) Parent = Window;
-           UserSyncAndPaintWindows( Parent, RDW_ERASENOW | RDW_CLIPCHILDREN);
-       }
-
-       /* Give newly shown windows a chance to redraw */
-       if(((WinPos.flags & SWP_AGG_STATUSFLAGS) != SWP_AGG_NOPOSCHANGE)
-                && !(flags & SWP_AGG_NOCLIENTCHANGE) && (flags & SWP_SHOWWINDOW)
-                && !(Window->style & WS_MINIMIZE))
-       {
-           UserSyncAndPaintWindows( Window, RDW_ERASENOW | RDW_CLIPCHILDREN);
-       }
-   }
-
    Entry->WinPos = WinPos;
    Entry->NewWindowRect = NewWindowRect;
+   Entry->bCompositedPureMove = bCompositedPureMove;
+   if (!Entry->bDeferActivate)
+      co_WinPosBatchSyncPaint(Entry);
    return TRUE;
 }
 
@@ -2802,8 +2822,22 @@ co_WinPosBatchRun(PWINPOS_BATCH Batch)
    for (i = 0; i < Batch->Count; i++)
    {
       Entry = &Batch->Entries[i];
+      Entry->bDeferActivate = Batch->Count > 1 &&
+                              !(Entry->WinPos.flags & (SWP_NOACTIVATE | SWP_HIDEWINDOW)) &&
+                              (Entry->Window->style & (WS_CHILD | WS_POPUP)) != WS_CHILD;
       if (Entry->bActive && (!IntIsWindow(Entry->WinPos.hwnd) || !co_WinPosBatchApply(Entry)))
          Entry->bActive = FALSE;
+   }
+
+   for (i = 0; i < Batch->Count; i++)
+   {
+      Entry = &Batch->Entries[i];
+      if (Entry->bActive && Entry->bDeferActivate && IntIsWindow(Entry->WinPos.hwnd))
+      {
+         co_WinPosActivateEntry(Entry->Window);
+         if (IntIsWindow(Entry->WinPos.hwnd))
+            co_WinPosBatchSyncPaint(Entry);
+      }
    }
 
    for (i = 0; i < Batch->Count; i++)
