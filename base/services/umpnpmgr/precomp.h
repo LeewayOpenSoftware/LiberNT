@@ -149,6 +149,18 @@ DrvInstpEnumJobs(
     _In_ ULONG Max);
 
 
+/* drvinst/rollback.c */
+
+DWORD
+DrvInstSnapshotDevice(
+    _In_ PCWSTR DeviceInstanceId,
+    _Out_opt_ PULONG OutSeq);
+
+DWORD
+DrvInstRollbackDevice(
+    _In_ PCWSTR DeviceInstanceId);
+
+
 /* rpcserver.c */
 
 extern LIST_ENTRY NotificationListHead;

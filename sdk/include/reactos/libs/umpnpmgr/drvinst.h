@@ -19,7 +19,8 @@ typedef enum _DRVINST_JOB_STATE
     DrvInstJobSucceeded,
     DrvInstJobFailed,
     DrvInstJobTimedOut,
-    DrvInstJobCanceled
+    DrvInstJobCanceled,
+    DrvInstJobRolledBack     /* the install failed and the previous driver state was restored */
 } DRVINST_JOB_STATE;
 
 /* Where the job came from */
@@ -33,6 +34,7 @@ typedef enum _DRVINST_JOB_STATE
 /* DRVINST_RESULT.Flags */
 #define DRVINST_RF_STARTED          0x00000001  /* the devnode was started when the job ended */
 #define DRVINST_RF_NEEDREBOOT       0x00000002  /* the install asked for a restart */
+#define DRVINST_RF_ROLLEDBACK       0x00000004  /* the failed install was rolled back to the snapshot */
 
 /*
  * What the worker reports back. Win32 is the real error of the install
@@ -73,11 +75,16 @@ typedef struct _DRVINST_JOB_INFO
 
 /* Registry: HKLM\SYSTEM\CurrentControlSet\Control\DrvInst
  *   UseWorker (REG_DWORD)  1 = the service installs through the worker
- *   WorkerTimeoutMs (REG_DWORD)  how long one install may run (default 600000) */
+ *   WorkerTimeoutMs (REG_DWORD)  how long one install may run (default 600000)
+ *   AutoRollback (REG_DWORD)  1 = restore the snapshot when the new driver fails to start
+ *   Snapshots\<encoded id>\<seq>\  copies of the devnode, class and service keys */
 #define DRVINST_REG_KEY             L"SYSTEM\\CurrentControlSet\\Control\\DrvInst"
 #define DRVINST_REG_USEWORKER       L"UseWorker"
 #define DRVINST_REG_TIMEOUT         L"WorkerTimeoutMs"
+#define DRVINST_REG_AUTOROLLBACK    L"AutoRollback"
+#define DRVINST_REG_SNAPSHOTS       L"SYSTEM\\CurrentControlSet\\Control\\DrvInst\\Snapshots"
 #define DRVINST_DEFAULT_TIMEOUT_MS  600000
+#define DRVINST_MAX_SNAPSHOTS       2
 
 /* Client API, exported by newdev.dll. All return a Win32 error (0 = success). */
 DWORD WINAPI DrvInstSubmitDevice(_In_ PCWSTR DeviceInstanceId, _In_ DWORD Flags, _Out_ DRVINST_JOB_ID *JobId);
@@ -85,5 +92,7 @@ DWORD WINAPI DrvInstGetJob(_In_ DRVINST_JOB_ID JobId, _Out_ PDRVINST_JOB_INFO In
 DWORD WINAPI DrvInstEnumJobs(_Out_writes_to_(*Count, *Count) DRVINST_JOB_ID *JobIds, _Inout_ PDWORD Count);
 /* Waits until the job has ended or TimeoutMs has passed (ERROR_TIMEOUT). Info may be NULL. */
 DWORD WINAPI DrvInstWait(_In_ DRVINST_JOB_ID JobId, _In_ DWORD TimeoutMs, _Out_opt_ PDRVINST_JOB_INFO Info);
+/* Restores the device to the state saved by the last install job (manual rollback). */
+DWORD WINAPI DrvInstRollback(_In_ PCWSTR DeviceInstanceId);
 
 #endif /* _UMPNPMGR_DRVINST_H_ */
