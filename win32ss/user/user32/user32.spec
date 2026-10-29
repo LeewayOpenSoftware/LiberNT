@@ -360,6 +360,9 @@
 @ stdcall GetOpenClipboardWindow() NtUserGetOpenClipboardWindow
 @ stdcall GetParent(long)
 @ stdcall -version=0x602+ GetPointerInfo(long ptr)
+@ stdcall -version=0x602+ GetPointerInfoHistory(long ptr ptr)
+@ stdcall -version=0x602+ GetPointerFrameInfo(long ptr ptr)
+@ stdcall -version=0x602+ GetPointerFrameInfoHistory(long ptr ptr ptr)
 @ stdcall -version=0x602+ GetPointerTouchInfo(long ptr)
 @ stdcall -version=0x602+ GetPointerTouchInfoHistory(long ptr ptr)
 @ stdcall -version=0x602+ GetPointerDevice(long ptr)

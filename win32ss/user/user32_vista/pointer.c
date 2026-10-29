@@ -138,6 +138,57 @@ GetPointerInfo(
 
 BOOL
 WINAPI
+GetPointerInfoHistory(
+    _In_ UINT32 pointerId,
+    _Inout_ UINT32 *entriesCount,
+    _Out_writes_opt_(*entriesCount) POINTER_INFO *pointerInfo)
+{
+    if (entriesCount == NULL || *entriesCount == 0)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!PointerQuery(pointerId, PT_POINTER, sizeof(*pointerInfo), pointerInfo))
+        return FALSE;
+
+    *entriesCount = 1;
+    return TRUE;
+}
+
+BOOL
+WINAPI
+GetPointerFrameInfo(
+    _In_ UINT32 pointerId,
+    _Inout_ UINT32 *pointerCount,
+    _Out_writes_opt_(*pointerCount) POINTER_INFO *pointerInfo)
+{
+    return PointerQueryFrame(pointerId, PT_POINTER, sizeof(*pointerInfo), pointerCount, pointerInfo);
+}
+
+BOOL
+WINAPI
+GetPointerFrameInfoHistory(
+    _In_ UINT32 pointerId,
+    _Inout_ UINT32 *entriesCount,
+    _Inout_ UINT32 *pointerCount,
+    _Out_writes_opt_(*entriesCount * *pointerCount) POINTER_INFO *pointerInfo)
+{
+    if (entriesCount == NULL || *entriesCount == 0)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!PointerQueryFrame(pointerId, PT_POINTER, sizeof(*pointerInfo), pointerCount, pointerInfo))
+        return FALSE;
+
+    *entriesCount = 1;
+    return TRUE;
+}
+
+BOOL
+WINAPI
 GetPointerTouchInfo(
     _In_ UINT32 pointerId,
     _Out_ POINTER_TOUCH_INFO *touchInfo)
