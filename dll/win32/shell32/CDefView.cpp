@@ -401,6 +401,12 @@ private:
     SFVM_CUSTOMVIEWINFO_DATA  m_viewinfo_data;
 
     HICON                     m_hMyComputerIcon;
+    INT                       m_IconSize;
+    INT                       m_himlViewSize;
+    HIMAGELIST                m_himlView;
+    BOOL                      m_himlViewOwned;
+    WNDPROC                   m_ListViewOrigProc;
+    INT                       m_GestureZoomDistance;
 
     HRESULT _MergeToolbar();
     void _MergeMenus();
@@ -425,6 +431,12 @@ private:
     void CancelFillList();
     bool IsComputerTileView() const;
     UINT ComputerViewDpi() const;
+    HIMAGELIST CreateSizedViewImageList(INT cx);
+    void SyncViewImageList();
+    void ApplyViewIconSize();
+    INT GetZoomStep() const;
+    void ZoomView(INT iDelta);
+    static LRESULT CALLBACK ListViewInputHook(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     bool LoadExplorerContentMaterial();
     void ClearExplorerContentBackdrop(bool RestoreNonClient);
     void RefreshExplorerContentAppearance();
@@ -822,7 +834,14 @@ CDefView::CDefView() :
     m_FillListIsRefresh(FALSE),
     m_FillListGeneration(0),
     m_ChangeAddedDuringFill(FALSE),
-    m_dwPositionCookie(0)
+    m_dwPositionCookie(0),
+    m_hMyComputerIcon(NULL),
+    m_IconSize(0),
+    m_himlViewSize(0),
+    m_himlView(NULL),
+    m_himlViewOwned(FALSE),
+    m_ListViewOrigProc(NULL),
+    m_GestureZoomDistance(0)
 {
     ZeroMemory(&m_FolderSettings, sizeof(m_FolderSettings));
     m_FolderSettings.ViewMode = FVM_TILE;
@@ -859,6 +878,10 @@ CDefView::~CDefView()
     {
         DestroyViewWindow();
     }
+
+    if (m_himlView && m_himlViewOwned)
+        ImageList_Destroy(m_himlView);
+    m_himlView = NULL;
 
     SHFree(m_apidl);
     DPA_Destroy(m_LoadColumnsList);
@@ -1640,6 +1663,9 @@ BOOL CDefView::CreateList()
         case FVM_LIST:
             dwStyle |= LVS_LIST;
             break;
+        case FVM_CONTENT:
+            dwStyle |= LVS_REPORT;
+            break;
         default:
             dwStyle |= LVS_LIST;
             break;
@@ -1696,6 +1722,12 @@ BOOL CDefView::CreateList()
         UpdateListColors();
 
     /*  UpdateShellSettings(); */
+    m_ListViewOrigProc = (WNDPROC)::SetWindowLongPtrW(m_ListView.m_hWnd, GWLP_WNDPROC, (LONG_PTR)ListViewInputHook);
+    SetPropW(m_ListView.m_hWnd, L"CDefViewHost", (HANDLE)this);
+    {
+        GESTURECONFIG gestureConfig = { GID_ZOOM, GC_ZOOM, 0 };
+        SetGestureConfig(m_ListView.m_hWnd, 0, 1, &gestureConfig, sizeof(gestureConfig));
+    }
     return TRUE;
 }
 
@@ -1769,6 +1801,7 @@ BOOL CDefView::InitList()
         HRESULT hr = MapFolderColumnToListColumn(m_sortInfo.ListColumn);
         m_sortInfo.ListColumn = SUCCEEDED(hr) ? hr : 0;
     }
+    ApplyViewIconSize();
     return TRUE;
 }
 
@@ -2173,6 +2206,7 @@ int CDefView::LV_AddItem(PCUITEMID_CHILD pidl)
     /* Image lookup can enter the shell namespace. Keep that work out of the
        first visible paint and inside the bounded enumeration batches. */
     lvItem.iImage = SHMapPIDLToSystemImageListIndex(m_pSFParent, pidl, 0);
+    SyncViewImageList();
     lvItem.stateMask = LVIS_CUT;
     if (m_HasCutItems)
     {
@@ -2227,6 +2261,7 @@ BOOLEAN CDefView::LV_RenameItem(PCUITEMID_CHILD pidlOld, PCUITEMID_CHILD pidlNew
         lvItem.lParam = reinterpret_cast<LPARAM>(ILClone(pidlNew)); // set item's data
         lvItem.pszText = LPSTR_TEXTCALLBACKW;
         lvItem.iImage = SHMapPIDLToSystemImageListIndex(m_pSFParent, pidlNew, 0);
+        SyncViewImageList();
         m_ListView.SetItem(&lvItem);
         m_ListView.Update(nItem);
 
@@ -2257,6 +2292,7 @@ BOOL CDefView::LV_UpdateItem(INT nItem, PCUITEMID_CHILD pidl)
             lvItem.mask |= LVIF_STATE;
             lvItem.state = GetItemAttributes(pidl, SFGAO_HIDDEN | SFGAO_GHOSTED) ? LVIS_CUT : 0;
         }
+        SyncViewImageList();
         PCUITEMID_CHILD pidlOld = _PidlByItem(nItem);
         if (pidlOld && (lvItem.lParam = reinterpret_cast<LPARAM>(ILClone(pidl))) != NULL)
             lvItem.mask |= LVIF_PARAM;
@@ -2352,6 +2388,7 @@ void CDefView::FinishFillList()
 
     _DoFolderViewCB(SFVM_LISTREFRESHED, 0, 0);
 
+    SyncViewImageList();
     ApplySavedItemPositions();
     ArrangeComputerView();
     if (m_ListView.GetItemCount() > 0 && m_ListView.GetNextItem(-1, LVNI_FOCUSED) < 0)
@@ -2708,6 +2745,16 @@ LRESULT CDefView::OnDestroy(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHand
     if (!m_Destroyed)
     {
         m_Destroyed = TRUE;
+        if (m_ListViewOrigProc && m_ListView.m_hWnd)
+        {
+            ::SetWindowLongPtrW(m_ListView.m_hWnd, GWLP_WNDPROC, (LONG_PTR)m_ListViewOrigProc);
+            RemovePropW(m_ListView.m_hWnd, L"CDefViewHost");
+            m_ListViewOrigProc = NULL;
+        }
+        if (m_himlView && m_himlViewOwned)
+            ImageList_Destroy(m_himlView);
+        m_himlView = NULL;
+        m_himlViewOwned = FALSE;
         ClearExplorerContentBackdrop(true);
         CancelFillList();
         ClearComputerTiles();
@@ -4957,6 +5004,7 @@ HRESULT STDMETHODCALLTYPE CDefView::SetCurrentViewMode(UINT ViewMode)
         case FVM_SMALLICON: dwStyle = LVS_SMALLICON; break;
         case FVM_LIST:      dwStyle = LVS_LIST;      break;
         case FVM_DETAILS:   dwStyle = LVS_REPORT;    break;
+        case FVM_CONTENT:   dwStyle = LVS_REPORT;    break;
         default:
             FIXME("ViewMode %d not implemented\n", ViewMode);
             dwStyle = LVS_LIST;
@@ -4984,6 +5032,7 @@ HRESULT STDMETHODCALLTYPE CDefView::SetCurrentViewMode(UINT ViewMode)
             m_ListView.Arrange(LVA_DEFAULT);
         m_ListView.InvalidateRect(NULL, TRUE);
     }
+    ApplyViewIconSize();
     CheckToolbar();
     return S_OK;
 }
@@ -5480,8 +5529,28 @@ HRESULT STDMETHODCALLTYPE CDefView::InvokeVerbOnSelection(LPCSTR verb)
     return InvokeContextMenuCommand(pCM, verb, NULL);
 }
 
+struct VIEWZOOMSTEP
+{
+    FOLDERVIEWMODE Mode;
+    INT IconSize;
+};
+
+static const VIEWZOOMSTEP s_ZoomSteps[] =
+{
+    { FVM_DETAILS, 16 },
+    { FVM_LIST, 16 },
+    { FVM_SMALLICON, 16 },
+    { FVM_ICON, 48 },
+    { FVM_ICON, 96 },
+    { FVM_ICON, 256 },
+    { FVM_ICON, 384 },
+};
+
 HRESULT STDMETHODCALLTYPE CDefView::SetViewModeAndIconSize(FOLDERVIEWMODE mode, int size)
 {
+    if (size <= 0)
+        size = GetSystemMetrics(SM_CXICON);
+    m_IconSize = size;
     return SetCurrentViewMode(mode);
 }
 
@@ -5493,13 +5562,313 @@ HRESULT STDMETHODCALLTYPE CDefView::GetViewModeAndIconSize(FOLDERVIEWMODE *mode,
         *mode = (FOLDERVIEWMODE)m_FolderSettings.ViewMode;
     if (size)
     {
-        int cx = 0, cy = 0;
-        HIMAGELIST himl = m_ListView ? ListView_GetImageList(m_ListView, m_FolderSettings.ViewMode == FVM_ICON ? LVSIL_NORMAL : LVSIL_SMALL) : NULL;
-        if (!himl || !ImageList_GetIconSize(himl, &cx, &cy))
-            cx = GetSystemMetrics(m_FolderSettings.ViewMode == FVM_ICON ? SM_CXICON : SM_CXSMICON);
-        *size = cx;
+        switch (m_FolderSettings.ViewMode)
+        {
+            case FVM_ICON:
+                if (m_IconSize > 0)
+                    *size = m_IconSize;
+                else if (m_himlView)
+                    *size = m_himlViewSize;
+                else
+                    *size = GetSystemMetrics(SM_CXICON);
+                break;
+            case FVM_TILE:
+                *size = 48;
+                break;
+            case FVM_CONTENT:
+                *size = 32;
+                break;
+            default:
+                *size = GetSystemMetrics(SM_CXSMICON);
+                break;
+        }
     }
     return S_OK;
+}
+
+static HBITMAP
+StretchIconBitmap(HBITMAP bitmap, INT srcCx, INT srcCy, INT dstCx, INT dstCy, BOOL isMask)
+{
+    HDC screen, sourceDC, destDC;
+    BITMAPINFO info;
+    HBITMAP result;
+    HGDIOBJ oldSource, oldDest;
+    VOID *bits;
+
+    screen = GetDC(NULL);
+    sourceDC = CreateCompatibleDC(screen);
+    destDC = CreateCompatibleDC(screen);
+    ZeroMemory(&info, sizeof(info));
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = dstCx;
+    info.bmiHeader.biHeight = -dstCy;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = isMask ? 1 : 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    result = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (result)
+    {
+        oldSource = SelectObject(sourceDC, bitmap);
+        oldDest = SelectObject(destDC, result);
+        SetStretchBltMode(destDC, isMask ? BLACKONWHITE : HALFTONE);
+        SetBrushOrgEx(destDC, 0, 0, NULL);
+        StretchBlt(destDC, 0, 0, dstCx, dstCy, sourceDC, 0, 0, srcCx, srcCy, SRCCOPY);
+        SelectObject(destDC, oldDest);
+        SelectObject(sourceDC, oldSource);
+    }
+    DeleteDC(destDC);
+    DeleteDC(sourceDC);
+    ReleaseDC(NULL, screen);
+    return result;
+}
+
+static INT
+AddIconScaled(HIMAGELIST dest, HIMAGELIST srcList, HIMAGELIST fallback, INT index, INT cx)
+{
+    INT srcCx = 0, srcCy = 0;
+    HICON icon;
+    ICONINFO info;
+    HBITMAP colorBitmap, maskBitmap;
+    INT result = -1;
+
+    ImageList_GetIconSize(srcList, &srcCx, &srcCy);
+    icon = ImageList_GetIcon(srcList, index, ILD_TRANSPARENT);
+    if (!icon && fallback)
+    {
+        icon = ImageList_GetIcon(fallback, index, ILD_TRANSPARENT);
+        ImageList_GetIconSize(fallback, &srcCx, &srcCy);
+    }
+    if (!icon)
+        return -1;
+    if (GetIconInfo(icon, &info))
+    {
+        colorBitmap = StretchIconBitmap(info.hbmColor, srcCx, srcCy, cx, cx, FALSE);
+        maskBitmap = StretchIconBitmap(info.hbmMask, srcCx, srcCy, cx, cx, TRUE);
+        if (colorBitmap && maskBitmap)
+            result = ImageList_Add(dest, colorBitmap, maskBitmap);
+        if (colorBitmap)
+            DeleteObject(colorBitmap);
+        if (maskBitmap)
+            DeleteObject(maskBitmap);
+        DeleteObject(info.hbmColor);
+        DeleteObject(info.hbmMask);
+    }
+    DestroyIcon(icon);
+    return result;
+}
+
+HIMAGELIST CDefView::CreateSizedViewImageList(INT cx)
+{
+    HIMAGELIST bigList, smallList, srcList, newList;
+    INT srcCx = 0, srcCy = 0, count, i;
+
+    Shell_GetImageLists(&bigList, &smallList);
+    srcList = SIC_GetImageList(SHIL_JUMBO);
+    if (srcList && (!ImageList_GetIconSize(srcList, &srcCx, &srcCy) || srcCx < 256))
+    {
+        srcList = NULL;
+        srcCx = 0;
+    }
+    if (!srcList)
+    {
+        srcList = SIC_GetImageList(SHIL_EXTRALARGE);
+        srcCx = 0;
+        if (!srcList || !ImageList_GetIconSize(srcList, &srcCx, &srcCy))
+            srcList = NULL;
+    }
+    if (!srcList)
+    {
+        srcList = bigList;
+        srcCx = 0;
+        ImageList_GetIconSize(bigList, &srcCx, &srcCy);
+    }
+    count = ImageList_GetImageCount(smallList);
+    newList = ImageList_Create(cx, cx, ILC_COLOR32 | ILC_MASK, max(count, 1), 0x20);
+    if (!newList)
+        return NULL;
+    for (i = 0; i < count; i++)
+    {
+        INT index = AddIconScaled(newList, srcList, bigList, i, cx);
+
+        if (index != i)
+        {
+            ImageList_Destroy(newList);
+            return NULL;
+        }
+    }
+    return newList;
+}
+
+void CDefView::SyncViewImageList()
+{
+    HIMAGELIST smallList, bigList, srcList;
+    INT srcCx = 0, srcCy = 0;
+    INT have, need, i;
+
+    if (!m_himlView || !m_himlViewOwned)
+        return;
+    Shell_GetImageLists(&bigList, &smallList);
+    srcList = SIC_GetImageList(SHIL_JUMBO);
+    if (!srcList || !ImageList_GetIconSize(srcList, &srcCx, &srcCy) || srcCx < 256)
+        srcList = bigList;
+    need = ImageList_GetImageCount(smallList);
+    have = ImageList_GetImageCount(m_himlView);
+    for (i = have; i < need; i++)
+    {
+        INT index = AddIconScaled(m_himlView, srcList, bigList, i, m_himlViewSize);
+
+        if (index == -1)
+            break;
+    }
+}
+
+void CDefView::ApplyViewIconSize()
+{
+    HIMAGELIST bigList, smallList;
+    FOLDERVIEWMODE mode;
+    INT bigSize;
+    HWND hHeader;
+
+    if (!m_ListView.m_hWnd)
+        return;
+    Shell_GetImageLists(&bigList, &smallList);
+    mode = (FOLDERVIEWMODE)m_FolderSettings.ViewMode;
+    bigSize = GetSystemMetrics(SM_CXICON);
+    if (mode == FVM_ICON && !IsComputerTileView() && m_IconSize > 0 && m_IconSize != bigSize)
+    {
+        if (!m_himlView || m_himlViewSize != m_IconSize)
+        {
+            if (m_himlView && m_himlViewOwned)
+                ImageList_Destroy(m_himlView);
+            m_himlView = NULL;
+            m_himlViewOwned = FALSE;
+            m_himlViewSize = 0;
+            if (m_IconSize == bigSize * 3 / 2)
+            {
+                m_himlView = SIC_GetImageList(SHIL_EXTRALARGE);
+                m_himlViewOwned = FALSE;
+            }
+            else
+            {
+                m_himlView = CreateSizedViewImageList(m_IconSize);
+                m_himlViewOwned = m_himlView != NULL;
+            }
+            m_himlViewSize = m_IconSize;
+        }
+        SyncViewImageList();
+        m_ListView.SetImageList(m_himlView ? m_himlView : bigList, LVSIL_NORMAL);
+    }
+    else
+    {
+        m_ListView.SetImageList(bigList, LVSIL_NORMAL);
+    }
+    if (mode == FVM_CONTENT)
+        m_ListView.SetImageList(bigList, LVSIL_SMALL);
+    else
+        m_ListView.SetImageList(smallList, LVSIL_SMALL);
+    hHeader = ListView_GetHeader(m_ListView.m_hWnd);
+    if (hHeader)
+        ::ShowWindow(hHeader, mode == FVM_CONTENT ? SW_HIDE : SW_SHOW);
+    if (mode == FVM_ICON && !IsComputerTileView())
+    {
+        m_ListView.SetTextBkColor(CLR_NONE);
+        m_ListView.Arrange(LVA_DEFAULT);
+    }
+    m_ListView.InvalidateRect(NULL, TRUE);
+}
+
+INT CDefView::GetZoomStep() const
+{
+    FOLDERVIEWMODE mode = (FOLDERVIEWMODE)m_FolderSettings.ViewMode;
+
+    if (mode == FVM_ICON && !IsComputerTileView())
+    {
+        INT size = m_IconSize > 0 ? m_IconSize : GetSystemMetrics(SM_CXICON);
+        INT best = 3, bestDiff = INT_MAX;
+        for (INT i = 0; i < (INT)_countof(s_ZoomSteps); i++)
+        {
+            if (s_ZoomSteps[i].Mode != FVM_ICON)
+                continue;
+            INT diff = size - s_ZoomSteps[i].IconSize;
+            if (diff < 0)
+                diff = -diff;
+            if (diff < bestDiff)
+            {
+                bestDiff = diff;
+                best = i;
+            }
+        }
+        return best;
+    }
+    for (INT i = 0; i < (INT)_countof(s_ZoomSteps); i++)
+        if (s_ZoomSteps[i].Mode == mode)
+            return i;
+    return 0;
+}
+
+void CDefView::ZoomView(INT iDelta)
+{
+    INT step;
+
+    if (m_FolderSettings.fFlags & FWF_DESKTOP)
+        return;
+    step = GetZoomStep() + iDelta;
+    if (step < 0)
+        step = 0;
+    if (step >= (INT)_countof(s_ZoomSteps))
+        step = (INT)_countof(s_ZoomSteps) - 1;
+    SetViewModeAndIconSize(s_ZoomSteps[step].Mode, s_ZoomSteps[step].IconSize);
+}
+
+LRESULT CALLBACK CDefView::ListViewInputHook(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    CDefView *pThis = (CDefView*)GetPropW(hwnd, L"CDefViewHost");
+
+    if (pThis)
+    {
+        if (uMsg == WM_MOUSEWHEEL && (GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL))
+        {
+            INT delta = GET_WHEEL_DELTA_WPARAM(wParam);
+            if (delta)
+                pThis->ZoomView(delta > 0 ? 1 : -1);
+            return 0;
+        }
+        if (uMsg == WM_GESTURE)
+        {
+            GESTUREINFO gi;
+
+            ZeroMemory(&gi, sizeof(gi));
+            gi.cbSize = sizeof(gi);
+            if (GetGestureInfo((HGESTUREINFO)lParam, &gi))
+            {
+                BOOL isZoom = gi.dwID == GID_ZOOM;
+                CloseGestureInfoHandle((HGESTUREINFO)lParam);
+                if (isZoom)
+                {
+                    INT dist = (INT)(gi.ullArguments & 0xFFFF);
+                    if (gi.dwFlags & GF_BEGIN)
+                        pThis->m_GestureZoomDistance = dist;
+                    else if (!(gi.dwFlags & GF_END))
+                    {
+                        if (dist - pThis->m_GestureZoomDistance >= 25)
+                        {
+                            pThis->ZoomView(1);
+                            pThis->m_GestureZoomDistance = dist;
+                        }
+                        else if (pThis->m_GestureZoomDistance - dist >= 25)
+                        {
+                            pThis->ZoomView(-1);
+                            pThis->m_GestureZoomDistance = dist;
+                        }
+                    }
+                    return 0;
+                }
+            }
+        }
+        if (pThis->m_ListViewOrigProc)
+            return CallWindowProcW(pThis->m_ListViewOrigProc, hwnd, uMsg, wParam, lParam);
+    }
+    return ::DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
 
 HRESULT STDMETHODCALLTYPE CDefView::SetGroupSubsetCount(UINT visible_rows)
