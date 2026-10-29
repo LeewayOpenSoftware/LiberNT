@@ -206,7 +206,7 @@ function(bootloader_media _target _directory _image)
         DEPENDS native-fatten native-mkisofs native-wimage bootmgfw winload ${_directory}/BCD
         VERBATIM)
 
-    add_dependencies(${_target} livecd_hives)
+    add_dependencies(${_target} livecd_hives livecd_files)
 endfunction()
 
 function(bootloader_dword _out _value)

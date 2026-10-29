@@ -396,6 +396,7 @@ function(image_list_command _image _var)
 endfunction()
 
 ## LiveImage -- Constitutes a small RAMDISK ISO, and is also merged with the BootCD
+add_custom_target(livecd_files)
 # Create the file list
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/livecd.cmake.lst "${CMAKE_CURRENT_BINARY_DIR}/empty\n")
 # Create TEMP directory
