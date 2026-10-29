@@ -1272,7 +1272,7 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
         (IS_KEY_DOWN(gafAsyncKeyState, VK_MENU) &&
         !IS_KEY_DOWN(gafAsyncKeyState, VK_CONTROL)) ||
          // See MSDN WM_SYSKEYDOWN/UP fixes last wine Win test_keyboard_input.
-        (pFocusQueue && !pFocusQueue->spwndFocus) )
+        (pFocusQueue && !pFocusQueue->spwndFocus && pFocusQueue->spwndActive) )
     {
         bMenuDownRecently = FALSE; // reset
         if (bIsDown)
