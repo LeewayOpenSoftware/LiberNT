@@ -2201,6 +2201,20 @@ LxMmGrowDown(
 }
 
 BOOLEAN
+LxMmAddressMapped(
+    _In_ PLX_PROCESS Process,
+    _In_ ULONG64 Address)
+{
+    BOOLEAN Mapped;
+
+    Process = Process->Mm;
+    LxMmLock(Process);
+    Mapped = (LxVmaFind(Process, Address) != NULL);
+    LxMmUnlock(Process);
+    return Mapped;
+}
+
+BOOLEAN
 LxMmHandleFault(
     _In_ PLX_PROCESS Process,
     _In_ ULONG64 Address,

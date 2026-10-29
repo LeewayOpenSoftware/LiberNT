@@ -92,6 +92,11 @@ LxPicoDispatchFault(
         Code = Thread->FaultBus;
         Thread->FaultBus = 0;
     }
+    else if ((ExceptionRecord->ExceptionCode == STATUS_ACCESS_VIOLATION) && (ExceptionRecord->NumberParameters >= 2) &&
+             !LxMmAddressMapped(Thread->Process, (ULONG64)ExceptionRecord->ExceptionInformation[1]))
+    {
+        Code = LX_SEGV_MAPERR;
+    }
 
     RtlZeroMemory(&Info, sizeof(Info));
     Info.Signo = Signal;

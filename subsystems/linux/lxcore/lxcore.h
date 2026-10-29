@@ -1296,6 +1296,7 @@ VOID LxMmUnlock(_In_ PLX_PROCESS Process);
 LONG LxMmFork(_In_ PLX_PROCESS Child, _In_ PLX_PROCESS Parent);
 VOID LxMmRelease(_In_ PLX_PROCESS Process);
 BOOLEAN LxMmHandleFault(_In_ PLX_PROCESS Process, _In_ ULONG64 Address, _In_ ULONG Access);
+BOOLEAN LxMmAddressMapped(_In_ PLX_PROCESS Process, _In_ ULONG64 Address);
 BOOLEAN LxMmFaultIn(_In_ ULONG64 Address, _In_ SIZE_T Length, _In_ BOOLEAN Write);
 LONG LxMmZero(_In_ PLX_PROCESS Process, _In_ ULONG64 Address, _In_ ULONG64 End);
 ULONG LxProtToNt(_In_ ULONG Prot);
