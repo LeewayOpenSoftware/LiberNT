@@ -46,6 +46,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(shell);
 #define NP_MIN_WIDTH 60
 #define NP_DEFAULT_WIDTH 150
 #define SV_MIN_WIDTH 150
+#ifdef __REACTOS__
+#define EBM_NAVIGATEPARENT (WM_USER + 0x200)
+#endif
 
 typedef struct _event_client {
     struct list entry;
@@ -452,6 +455,10 @@ static HRESULT create_new_shellview(ExplorerBrowserImpl *This, IShellItem *psi)
 
                 This->psv = psv;
                 This->hwnd_sv = hwnd_new;
+#ifdef __REACTOS__
+                if(This->pcdb3_site)
+                    ICommDlgBrowser3_OnPreviewCreated(This->pcdb3_site, psv);
+#endif
                 events_ViewCreated(This, psv);
             }
             else
@@ -844,6 +851,12 @@ static LRESULT CALLBACK main_wndproc(HWND hWnd, UINT uMessage, WPARAM wParam, LP
     case WM_CREATE:           return main_on_wm_create(hWnd, (CREATESTRUCTW*)lParam);
     case WM_SIZE:             return main_on_wm_size(This);
     case CWM_GETISHELLBROWSER: return main_on_cwm_getishellbrowser(This);
+#ifdef __REACTOS__
+    case EBM_NAVIGATEPARENT:
+        if (This && This->current_pidl && !_ILIsDesktop(This->current_pidl))
+            IExplorerBrowser_BrowseToIDList(&This->IExplorerBrowser_iface, NULL, SBSP_PARENT);
+        return 0;
+#endif
     default:                  return DefWindowProcW(hWnd, uMessage, wParam, lParam);
     }
 
@@ -2264,10 +2277,47 @@ static HRESULT WINAPI IInputObject_fnTranslateAcceleratorIO(IInputObject *iface,
 {
     ExplorerBrowserImpl *This = impl_from_IInputObject(iface);
 #ifdef __REACTOS__
+    HWND hwnd_focus;
+
     TRACE("%p (%p)\n", This, pMsg);
     if (!This->psv)
         return E_FAIL;
-    return IShellView_TranslateAccelerator(This->psv, pMsg) == S_OK ? S_OK : S_FALSE;
+    if (IShellView_TranslateAccelerator(This->psv, pMsg) == S_OK)
+        return S_OK;
+    if (pMsg->message != WM_KEYDOWN)
+        return S_FALSE;
+
+    hwnd_focus = GetFocus();
+    if (!hwnd_focus || (hwnd_focus != This->hwnd_sv && !IsChild(This->hwnd_sv, hwnd_focus)))
+    {
+        if (pMsg->wParam != VK_TAB)
+            return S_FALSE;
+        IShellView_UIActivate(This->psv, SVUIA_ACTIVATE_FOCUS);
+        return S_OK;
+    }
+    if (hwnd_focus != This->hwnd_sv && GetParent(hwnd_focus) != This->hwnd_sv)
+        return S_FALSE;
+
+    switch (pMsg->wParam)
+    {
+    case VK_BACK:
+        PostMessageW(This->hwnd_main, EBM_NAVIGATEPARENT, 0, 0);
+        return S_OK;
+    case VK_RETURN:
+    case VK_PRIOR:
+    case VK_NEXT:
+    case VK_END:
+    case VK_HOME:
+    case VK_LEFT:
+    case VK_UP:
+    case VK_RIGHT:
+    case VK_DOWN:
+        TranslateMessage(pMsg);
+        if (pMsg->hwnd == hwnd_focus)
+            DispatchMessageW(pMsg);
+        return S_OK;
+    }
+    return S_FALSE;
 #else
     FIXME("stub, %p (%p)\n", This, pMsg);
     return E_NOTIMPL;
