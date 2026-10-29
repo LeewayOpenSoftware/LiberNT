@@ -158,6 +158,19 @@ static HRESULT get_typelib(unsigned lib, ITypeLib **tl)
     return S_OK;
 }
 
+#ifdef __REACTOS__
+HRESULT get_class_typeinfo(const CLSID *clsid, ITypeInfo **typeinfo)
+{
+    ITypeLib *typelib;
+    HRESULT hr;
+
+    if (FAILED(hr = get_typelib(LibXml2, &typelib)))
+        return hr;
+
+    return ITypeLib_GetTypeInfoOfGuid(typelib, clsid, typeinfo);
+}
+#endif
+
 HRESULT get_typeinfo(enum tid_t tid, ITypeInfo **typeinfo)
 {
     unsigned lib = get_libid_from_tid(tid);

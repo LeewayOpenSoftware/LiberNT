@@ -110,6 +110,9 @@ struct domdoc
     IUnknown *identity;
     IXMLDOMNode identity_iface;
     LONG identity_refcount;
+    IProvideClassInfo IProvideClassInfo_iface;
+    IPersistMoniker IPersistMoniker_iface;
+    IMoniker *moniker;
 #endif
 };
 
@@ -401,6 +404,16 @@ static HRESULT WINAPI domdoc_QueryInterface(IXMLDOMDocument3 *iface, REFIID riid
     {
         *obj = &doc->IConnectionPointContainer_iface;
     }
+#ifdef __REACTOS__
+    else if (IsEqualGUID(riid, &IID_IProvideClassInfo))
+    {
+        *obj = &doc->IProvideClassInfo_iface;
+    }
+    else if (IsEqualGUID(riid, &IID_IPersistMoniker))
+    {
+        *obj = &doc->IPersistMoniker_iface;
+    }
+#endif
     else
     {
         TRACE("interface %s not implemented\n", debugstr_guid(riid));
@@ -431,6 +444,8 @@ static void domdoc_destroy(domdoc *doc)
         IUnknown_Release(doc->site);
     if (doc->base_uri)
         IUri_Release(doc->base_uri);
+    if (doc->moniker)
+        IMoniker_Release(doc->moniker);
 
     domnode_release(doc->node);
 
@@ -2818,6 +2833,221 @@ static const IObjectWithSiteVtbl domdocObjectSite =
     domdoc_ObjectWithSite_GetSite
 };
 
+#ifdef __REACTOS__
+static inline domdoc *impl_from_IProvideClassInfo(IProvideClassInfo *iface)
+{
+    return CONTAINING_RECORD(iface, domdoc, IProvideClassInfo_iface);
+}
+
+static HRESULT WINAPI domdoc_ProvideClassInfo_QueryInterface(IProvideClassInfo *iface, REFIID riid, void **obj)
+{
+    domdoc *doc = impl_from_IProvideClassInfo(iface);
+    return IXMLDOMDocument3_QueryInterface(&doc->IXMLDOMDocument3_iface, riid, obj);
+}
+
+static ULONG WINAPI domdoc_ProvideClassInfo_AddRef(IProvideClassInfo *iface)
+{
+    domdoc *doc = impl_from_IProvideClassInfo(iface);
+    return IXMLDOMDocument3_AddRef(&doc->IXMLDOMDocument3_iface);
+}
+
+static ULONG WINAPI domdoc_ProvideClassInfo_Release(IProvideClassInfo *iface)
+{
+    domdoc *doc = impl_from_IProvideClassInfo(iface);
+    return IXMLDOMDocument3_Release(&doc->IXMLDOMDocument3_iface);
+}
+
+static HRESULT WINAPI domdoc_ProvideClassInfo_GetClassInfo(IProvideClassInfo *iface, ITypeInfo **ti)
+{
+    domdoc *doc = impl_from_IProvideClassInfo(iface);
+
+    TRACE("%p, %p.\n", iface, ti);
+
+    if (!ti)
+        return E_POINTER;
+
+    return get_class_typeinfo(DOMDocument_version(doc->node->properties->version), ti);
+}
+
+static const IProvideClassInfoVtbl domdocProvideClassInfoVtbl =
+{
+    domdoc_ProvideClassInfo_QueryInterface,
+    domdoc_ProvideClassInfo_AddRef,
+    domdoc_ProvideClassInfo_Release,
+    domdoc_ProvideClassInfo_GetClassInfo
+};
+
+static inline domdoc *impl_from_IPersistMoniker(IPersistMoniker *iface)
+{
+    return CONTAINING_RECORD(iface, domdoc, IPersistMoniker_iface);
+}
+
+static HRESULT WINAPI domdoc_PersistMoniker_QueryInterface(IPersistMoniker *iface, REFIID riid, void **obj)
+{
+    domdoc *doc = impl_from_IPersistMoniker(iface);
+    return IXMLDOMDocument3_QueryInterface(&doc->IXMLDOMDocument3_iface, riid, obj);
+}
+
+static ULONG WINAPI domdoc_PersistMoniker_AddRef(IPersistMoniker *iface)
+{
+    domdoc *doc = impl_from_IPersistMoniker(iface);
+    return IXMLDOMDocument3_AddRef(&doc->IXMLDOMDocument3_iface);
+}
+
+static ULONG WINAPI domdoc_PersistMoniker_Release(IPersistMoniker *iface)
+{
+    domdoc *doc = impl_from_IPersistMoniker(iface);
+    return IXMLDOMDocument3_Release(&doc->IXMLDOMDocument3_iface);
+}
+
+static HRESULT WINAPI domdoc_PersistMoniker_GetClassID(IPersistMoniker *iface, CLSID *clsid)
+{
+    domdoc *doc = impl_from_IPersistMoniker(iface);
+    return IPersistStreamInit_GetClassID(&doc->IPersistStreamInit_iface, clsid);
+}
+
+static HRESULT WINAPI domdoc_PersistMoniker_IsDirty(IPersistMoniker *iface)
+{
+    domdoc *doc = impl_from_IPersistMoniker(iface);
+    return IPersistStreamInit_IsDirty(&doc->IPersistStreamInit_iface);
+}
+
+static void domdoc_set_moniker(domdoc *doc, IMoniker *moniker)
+{
+    if (moniker)
+        IMoniker_AddRef(moniker);
+    if (doc->moniker)
+        IMoniker_Release(doc->moniker);
+    doc->moniker = moniker;
+}
+
+static HRESULT WINAPI domdoc_PersistMoniker_Load(IPersistMoniker *iface, BOOL fully_available, IMoniker *moniker,
+        IBindCtx *bindctx, DWORD mode)
+{
+    domdoc *doc = impl_from_IPersistMoniker(iface);
+    struct domnode *node;
+    WCHAR *name = NULL;
+    IUri *uri = NULL;
+    HRESULT hr;
+
+    TRACE("%p, %d, %p, %p, %#lx.\n", iface, fully_available, moniker, bindctx, mode);
+
+    if (!moniker)
+        return E_INVALIDARG;
+
+    if (SUCCEEDED(IMoniker_GetDisplayName(moniker, bindctx, NULL, &name)))
+    {
+        CreateUri(name, Uri_CREATE_ALLOW_RELATIVE | Uri_CREATE_ALLOW_IMPLICIT_FILE_SCHEME, 0, &uri);
+        CoTaskMemFree(name);
+    }
+
+    if (FAILED(hr = domdoc_load_moniker(doc, moniker)))
+    {
+        if (uri)
+            IUri_Release(uri);
+        doc->error = E_FAIL;
+
+        if (SUCCEEDED(domnode_create(NODE_DOCUMENT, NULL, 0, NULL, 0, NULL, &node)))
+        {
+            node->properties = domdoc_create_properties(doc->node->properties->version);
+            attach_doc_node(doc, node);
+        }
+        return hr;
+    }
+
+    if (doc->node->properties->uri)
+        IUri_Release(doc->node->properties->uri);
+    doc->node->properties->uri = uri;
+    doc->error = S_OK;
+    domdoc_set_moniker(doc, moniker);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI domdoc_PersistMoniker_Save(IPersistMoniker *iface, IMoniker *moniker, IBindCtx *bindctx,
+        BOOL remember)
+{
+    domdoc *doc = impl_from_IPersistMoniker(iface);
+    WCHAR *name, path[MAX_PATH];
+    DWORD len = ARRAY_SIZE(path);
+    VARIANT dest;
+    HRESULT hr;
+
+    TRACE("%p, %p, %p, %d.\n", iface, moniker, bindctx, remember);
+
+    if (!moniker && !(moniker = doc->moniker))
+        return E_INVALIDARG;
+
+    if (FAILED(hr = IMoniker_GetDisplayName(moniker, bindctx, NULL, &name)))
+        return hr;
+
+    V_VT(&dest) = VT_BSTR;
+    if (UrlIsFileUrlW(name) && SUCCEEDED(PathCreateFromUrlW(name, path, &len, 0)))
+        V_BSTR(&dest) = SysAllocString(path);
+    else
+        V_BSTR(&dest) = SysAllocString(name);
+    CoTaskMemFree(name);
+
+    if (!V_BSTR(&dest))
+        return E_OUTOFMEMORY;
+
+    hr = IXMLDOMDocument3_save(&doc->IXMLDOMDocument3_iface, dest);
+    SysFreeString(V_BSTR(&dest));
+
+    if (SUCCEEDED(hr) && remember)
+        domdoc_set_moniker(doc, moniker);
+
+    return hr;
+}
+
+static HRESULT WINAPI domdoc_PersistMoniker_SaveCompleted(IPersistMoniker *iface, IMoniker *moniker,
+        IBindCtx *bindctx)
+{
+    domdoc *doc = impl_from_IPersistMoniker(iface);
+
+    TRACE("%p, %p, %p.\n", iface, moniker, bindctx);
+
+    if (moniker)
+        domdoc_set_moniker(doc, moniker);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI domdoc_PersistMoniker_GetCurMoniker(IPersistMoniker *iface, IMoniker **moniker)
+{
+    domdoc *doc = impl_from_IPersistMoniker(iface);
+
+    TRACE("%p, %p.\n", iface, moniker);
+
+    if (!moniker)
+        return E_POINTER;
+
+    if ((*moniker = doc->moniker))
+    {
+        IMoniker_AddRef(*moniker);
+        return S_OK;
+    }
+
+    if (doc->node->properties->uri)
+        return CreateURLMonikerEx2(NULL, doc->node->properties->uri, moniker, URL_MK_UNIFORM);
+
+    return E_UNEXPECTED;
+}
+
+static const IPersistMonikerVtbl domdocPersistMonikerVtbl =
+{
+    domdoc_PersistMoniker_QueryInterface,
+    domdoc_PersistMoniker_AddRef,
+    domdoc_PersistMoniker_Release,
+    domdoc_PersistMoniker_GetClassID,
+    domdoc_PersistMoniker_IsDirty,
+    domdoc_PersistMoniker_Load,
+    domdoc_PersistMoniker_Save,
+    domdoc_PersistMoniker_SaveCompleted,
+    domdoc_PersistMoniker_GetCurMoniker
+};
+#endif
+
 static HRESULT WINAPI domdoc_Safety_QueryInterface(IObjectSafety *iface, REFIID riid, void **ppv)
 {
     domdoc *doc = impl_from_IObjectSafety(iface);
@@ -2949,6 +3179,10 @@ HRESULT create_domdoc(struct domnode *node, IUnknown **obj)
     object->IObjectWithSite_iface.lpVtbl = &domdocObjectSite;
     object->IObjectSafety_iface.lpVtbl = &domdocObjectSafetyVtbl;
     object->IConnectionPointContainer_iface.lpVtbl = &ConnectionPointContainerVtbl;
+#ifdef __REACTOS__
+    object->IProvideClassInfo_iface.lpVtbl = &domdocProvideClassInfoVtbl;
+    object->IPersistMoniker_iface.lpVtbl = &domdocPersistMonikerVtbl;
+#endif
     object->refcount = 1;
     object->async = VARIANT_TRUE;
     object->node = domnode_addref(node);

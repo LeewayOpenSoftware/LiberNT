@@ -87,6 +87,9 @@ typedef enum tid_t
 } tid_t;
 
 extern HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo);
+#ifdef __REACTOS__
+extern HRESULT get_class_typeinfo(const CLSID *clsid, ITypeInfo **typeinfo);
+#endif
 extern void release_typelib(void);
 
 typedef struct dispex_data_t dispex_data_t;
