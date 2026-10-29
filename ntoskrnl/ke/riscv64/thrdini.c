@@ -249,7 +249,6 @@ KiRiscvIdlePoll(
 {
     LARGE_INTEGER Frequency;
     ULONG64 Start, Ticks;
-    KIRQL OldIrql;
     BOOLEAN Work;
 
     if (KiRiscvIdlePollMicroseconds == 0)
@@ -281,9 +280,7 @@ KiRiscvIdlePoll(
 
     if (ReadNoFence(&Prcb->RequestSummary))
     {
-        OldIrql = KfRaiseIrql(IPI_LEVEL);
-        KiIpiProcessRequests();
-        KfLowerIrql(OldIrql);
+        __asm__ __volatile__("csrsi sip, 2" ::: "memory");
         Work = TRUE;
     }
     return Work || KiRiscvIdleWorkPending(Prcb);
