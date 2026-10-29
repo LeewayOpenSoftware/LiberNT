@@ -3513,6 +3513,7 @@ LX_SYSCALL(LxSysMunmap)
     return LxMmUnmap(Call->Process, Call->Args[0], Call->Args[1]);
 }
 
+/* FIXME: VMAs have no VM_MAYEXEC, so READ_IMPLIES_EXEC also makes noexec file mappings executable. */
 static
 ULONG
 LxReadImpliesExec(
