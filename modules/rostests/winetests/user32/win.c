@@ -8927,11 +8927,6 @@ static void test_gettext(void)
     }
 
     /* GetWindowText doesn't crash */
-#ifdef __REACTOS__
-    if (is_reactos()) {
-        ok(FALSE, "FIXME: These tests crash on ReactOS!\n");
-    } else {
-#endif
     r = GetWindowTextA( hwnd, (LPSTR)0x10, 0x1000 );
     ok( r == 0, "GetWindowText should return zero (%lld)\n", (long long)r );
     r = GetWindowTextA( hwnd, (LPSTR)0x10000, 0 );
@@ -8949,9 +8944,6 @@ static void test_gettext(void)
     ok( r == 0, "GetWindowText should return zero (%lld)\n", (long long)r );
     r = GetWindowTextW( hwnd, (LPWSTR)0x1000, 0xff000000);
     ok( r == 0, "GetWindowText should return zero (%lld)\n", (long long)r );
-#ifdef __REACTOS__
-    }
-#endif
 
     DestroyWindow(hwnd);
 }
