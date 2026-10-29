@@ -1399,8 +1399,16 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
 
         /* Init message */
         Msg.hwnd = Wnd ? UserHMGetHandle(Wnd) : NULL;
-        Msg.wParam = wFixedVk & 0xFF; /* Note: It's simplified by msg queue */
-        Msg.lParam = MAKELPARAM(1, wScanCode);
+        if (bPacket)
+        {
+            Msg.wParam = MAKEWPARAM(VK_PACKET, wScanCode);
+            Msg.lParam = MAKELPARAM(1, 0);
+        }
+        else
+        {
+            Msg.wParam = wFixedVk & 0xFF; /* Note: It's simplified by msg queue */
+            Msg.lParam = MAKELPARAM(1, wScanCode);
+        }
         Msg.time = dwTime;
         Msg.pt = gpsi->ptCursor;
 
@@ -1417,22 +1425,19 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
         }
 
         /* If it is VK_PACKET, high word of wParam is used for wchar */
-        if (!bPacket)
-        {
-            if (bExt)
-                Msg.lParam |= KF_EXTENDED << 16;
-            if (IS_KEY_DOWN(gafAsyncKeyState, VK_MENU))
-                Msg.lParam |= KF_ALTDOWN << 16;
-            if (IntIsKeyDownForQueue(pti->MessageQueue, wSimpleVk))
-                Msg.lParam |= KF_REPEAT << 16;
-            if (!bIsDown)
-                Msg.lParam |= (ULONG)KF_UP << 16;
-            /* FIXME: Set KF_DLGMODE and KF_MENUMODE when needed */
-            if (pFocusQueue->QF_flags & QF_DIALOGACTIVE)
-                Msg.lParam |= KF_DLGMODE << 16;
-            if (pFocusQueue->MenuOwner) // pti->pMenuState->fMenuStarted
-                Msg.lParam |= KF_MENUMODE << 16;
-        }
+        if (bExt && !bPacket)
+            Msg.lParam |= KF_EXTENDED << 16;
+        if (IS_KEY_DOWN(gafAsyncKeyState, VK_MENU))
+            Msg.lParam |= KF_ALTDOWN << 16;
+        if (IntIsKeyDownForQueue(pti->MessageQueue, wSimpleVk))
+            Msg.lParam |= KF_REPEAT << 16;
+        if (!bIsDown)
+            Msg.lParam |= (ULONG)KF_UP << 16;
+        /* FIXME: Set KF_DLGMODE and KF_MENUMODE when needed */
+        if (pFocusQueue->QF_flags & QF_DIALOGACTIVE)
+            Msg.lParam |= KF_DLGMODE << 16;
+        if (pFocusQueue->MenuOwner) // pti->pMenuState->fMenuStarted
+            Msg.lParam |= KF_MENUMODE << 16;
 
         // Post mouse move before posting key buttons, to keep it syned.
         if (pFocusQueue->QF_flags & QF_MOUSEMOVED)
@@ -1706,8 +1711,8 @@ IntTranslateKbdMessage(LPMSG lpMsg,
     if (lpMsg->wParam == VK_PACKET)
     {
         NewMsg.message = (lpMsg->message == WM_KEYDOWN) ? WM_CHAR : WM_SYSCHAR;
-        NewMsg.wParam = HIWORD(lpMsg->lParam);
-        NewMsg.lParam = LOWORD(lpMsg->lParam);
+        NewMsg.wParam = pti->wchInjected;
+        NewMsg.lParam = lpMsg->lParam;
         MsqPostMessage(pti, &NewMsg, FALSE, QS_KEY, 0, 0);
         return TRUE;
     }

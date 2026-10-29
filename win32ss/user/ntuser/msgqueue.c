@@ -2012,8 +2012,11 @@ BOOL co_IntProcessKeyboardMessage(MSG* Msg, BOOL* RemoveMessages)
     PTHREADINFO pti = PsGetCurrentThreadWin32Thread();
     const UINT uMsg = Msg->message;
 
-    if (uMsg == VK_PACKET)
+    if (LOWORD(Msg->wParam) == VK_PACKET)
+    {
         pti->wchInjected = HIWORD(Msg->wParam);
+        Msg->wParam = VK_PACKET;
+    }
 
     if (uMsg == WM_KEYDOWN || uMsg == WM_SYSKEYDOWN || uMsg == WM_KEYUP || uMsg == WM_SYSKEYUP)
     {
