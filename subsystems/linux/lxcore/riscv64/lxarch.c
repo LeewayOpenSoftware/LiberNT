@@ -326,6 +326,19 @@ LxArchRestartSyscall(
     TrapFrame->Context.Pc -= 4;
 }
 
+VOID
+LxArchClassifyFault(
+    _In_ PEXCEPTION_RECORD ExceptionRecord,
+    _In_ PKTRAP_FRAME TrapFrame,
+    _Inout_ PLONG Signal,
+    _Inout_ PLONG Code)
+{
+    UNREFERENCED_PARAMETER(ExceptionRecord);
+    UNREFERENCED_PARAMETER(TrapFrame);
+    UNREFERENCED_PARAMETER(Signal);
+    UNREFERENCED_PARAMETER(Code);
+}
+
 BOOLEAN
 LxArchEmulateInstruction(
     _In_ PEXCEPTION_RECORD ExceptionRecord,

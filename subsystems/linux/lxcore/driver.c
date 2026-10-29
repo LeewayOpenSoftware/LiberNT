@@ -77,6 +77,7 @@ LxPicoDispatchFault(
 
     if (LxArchEmulateInstruction(ExceptionRecord, ExceptionFrame, TrapFrame))
         return TRUE;
+    LxArchClassifyFault(ExceptionRecord, TrapFrame, &Signal, &Code);
     if ((ExceptionRecord->ExceptionCode == STATUS_ACCESS_VIOLATION) &&
         (ExceptionRecord->NumberParameters >= 2) &&
         LxMmHandleFault(Thread->Process,

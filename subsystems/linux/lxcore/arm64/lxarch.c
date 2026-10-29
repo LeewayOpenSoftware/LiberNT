@@ -351,6 +351,32 @@ LxArchEmulateInstruction(
 }
 
 VOID
+LxArchClassifyFault(
+    _In_ PEXCEPTION_RECORD ExceptionRecord,
+    _In_ PKTRAP_FRAME TrapFrame,
+    _Inout_ PLONG Signal,
+    _Inout_ PLONG Code)
+{
+    ULONG Instruction;
+
+    if ((ExceptionRecord->ExceptionCode != STATUS_ILLEGAL_INSTRUCTION) &&
+        (ExceptionRecord->ExceptionCode != STATUS_BREAKPOINT) &&
+        (ExceptionRecord->ExceptionCode != STATUS_ASSERTION_FAILURE) &&
+        (ExceptionRecord->ExceptionCode != STATUS_INTEGER_DIVIDE_BY_ZERO) &&
+        (ExceptionRecord->ExceptionCode != STATUS_STACK_BUFFER_OVERRUN))
+    {
+        return;
+    }
+    if (LxCopyFromUser(&Instruction, TrapFrame->Pc, sizeof(Instruction)) != 0)
+        return;
+    if ((Instruction & 0xFFE0001F) == 0xD4200000)
+    {
+        *Signal = LX_SIGTRAP;
+        *Code = LX_TRAP_BRKPT;
+    }
+}
+
+VOID
 LxArchRestartSyscall(
     _Inout_ PKTRAP_FRAME TrapFrame,
     _In_ ULONG64 Argument)
