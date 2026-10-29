@@ -7059,6 +7059,7 @@ struct TFYNETROW
     RECT rcButton2;
     RECT rcCheck;
     RECT rcEdit;
+    RECT rcReveal;
     RECT rcInfo;
 };
 
@@ -7493,6 +7494,9 @@ public:
     BOOL m_bWifiPage;
     int m_yFooter;
     HFONT m_hFontRow;
+    BOOL m_bFrameStarted;
+    BOOL m_bReveal;
+    WCHAR m_chPassword;
 
     CTrayNetworkWnd() : m_hFont(NULL), m_hFontSmall(NULL), m_hFontHeader(NULL),
                         m_hWlanApi(NULL), m_hWlan(NULL),
@@ -7508,7 +7512,8 @@ public:
                         m_bConnecting(FALSE), m_bTracking(FALSE), m_nIfaces(0),
                         m_bWifiOn(TRUE), m_bAirplane(FALSE), m_bPane(FALSE), m_bBack(FALSE),
                         m_nVisRows(TFY_NET_VISROWS), m_hFontPaneTitle(NULL),
-                        m_bWifiPage(FALSE), m_yFooter(0), m_hFontRow(NULL)
+                        m_bWifiPage(FALSE), m_yFooter(0), m_hFontRow(NULL),
+                        m_bFrameStarted(FALSE), m_bReveal(FALSE), m_chPassword(0)
     {
         SetRectEmpty(&m_rcBack);
         ZeroMemory(&m_Pal, sizeof(m_Pal));
@@ -7837,6 +7842,7 @@ public:
             SetRectEmpty(&row.rcButton2);
             SetRectEmpty(&row.rcCheck);
             SetRectEmpty(&row.rcEdit);
+            SetRectEmpty(&row.rcReveal);
             SetRectEmpty(&row.rcInfo);
             if (row.nType != 2)
                 continue;
@@ -7860,6 +7866,7 @@ public:
                 {
                     yb += Sc(22);
                     SetRect(&row.rcEdit, Sc(52), yb, cx - Sc(24), yb + Sc(28));
+                    SetRect(&row.rcReveal, row.rcEdit.right - Sc(32), row.rcEdit.top, row.rcEdit.right, row.rcEdit.bottom);
                     yb += Sc(28) + Sc(10);
                     SetRect(&row.rcButton, cx - Sc(24) - Sc(216), yb, cx - Sc(24) - Sc(112), yb + Sc(32));
                     SetRect(&row.rcButton2, cx - Sc(24) - Sc(104), yb, cx - Sc(24), yb + Sc(32));
@@ -7893,7 +7900,7 @@ public:
         {
             TFYNETROW &row = m_Rows[m_iSel];
             ::SetWindowPos(m_hwndEdit, NULL, row.rcEdit.left + Sc(6), row.rcEdit.top + Sc(5),
-                           row.rcEdit.right - row.rcEdit.left - Sc(12), row.rcEdit.bottom - row.rcEdit.top - Sc(10),
+                           row.rcReveal.left - row.rcEdit.left - Sc(6), row.rcEdit.bottom - row.rcEdit.top - Sc(10),
                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         }
     }
@@ -7960,6 +7967,7 @@ public:
                     SetRect(&row.rcButton2, 0, 0, 0, 0);
                     SetRect(&row.rcCheck, 0, 0, 0, 0);
                     SetRect(&row.rcEdit, 0, 0, 0, 0);
+                    SetRect(&row.rcReveal, 0, 0, 0, 0);
                     continue;
                 }
             }
@@ -7967,6 +7975,7 @@ public:
             SetRect(&row.rcButton2, 0, 0, 0, 0);
             SetRect(&row.rcCheck, 0, 0, 0, 0);
             SetRect(&row.rcEdit, 0, 0, 0, 0);
+            SetRect(&row.rcReveal, 0, 0, 0, 0);
             if (bExpanded)
             {
                 int yb = y + nRowH;
@@ -7974,6 +7983,7 @@ public:
                 {
                     yb += Sc(22);
                     SetRect(&row.rcEdit, Sc(46), yb, m_size.cx - Sc(20), yb + Sc(24));
+                    SetRect(&row.rcReveal, row.rcEdit.right - Sc(28), row.rcEdit.top, row.rcEdit.right, row.rcEdit.bottom);
                     yb += Sc(24) + Sc(8);
                     SetRect(&row.rcButton, m_size.cx - Sc(20) - Sc(160), yb, m_size.cx - Sc(20) - Sc(84), yb + Sc(26));
                     SetRect(&row.rcButton2, m_size.cx - Sc(20) - Sc(76), yb, m_size.cx - Sc(20), yb + Sc(26));
@@ -8008,7 +8018,7 @@ public:
         {
             TFYNETROW &row = m_Rows[m_iSel];
             ::SetWindowPos(m_hwndEdit, NULL, row.rcEdit.left, row.rcEdit.top,
-                           row.rcEdit.right - row.rcEdit.left, row.rcEdit.bottom - row.rcEdit.top,
+                           row.rcReveal.left - row.rcEdit.left, row.rcEdit.bottom - row.rcEdit.top,
                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         }
     }
@@ -8090,8 +8100,75 @@ public:
 
     VOID HideEdit()
     {
+        EndReveal();
         if (m_hwndEdit)
             ::ShowWindow(m_hwndEdit, SW_HIDE);
+    }
+
+    BOOL CanReveal() const
+    {
+        return m_hwndEdit && m_bPassMode && ::GetWindowTextLengthW(m_hwndEdit) > 0;
+    }
+
+    VOID BeginReveal()
+    {
+        if (m_bReveal || !CanReveal())
+            return;
+        m_chPassword = (WCHAR)::SendMessageW(m_hwndEdit, EM_GETPASSWORDCHAR, 0, 0);
+        ::SendMessageW(m_hwndEdit, EM_SETPASSWORDCHAR, 0, 0);
+        ::InvalidateRect(m_hwndEdit, NULL, TRUE);
+        m_bReveal = TRUE;
+        SetCapture();
+        InvalidateRect(NULL, FALSE);
+    }
+
+    VOID EndReveal()
+    {
+        if (!m_bReveal)
+            return;
+        m_bReveal = FALSE;
+        if (m_hwndEdit)
+        {
+            ::SendMessageW(m_hwndEdit, EM_SETPASSWORDCHAR, m_chPassword, 0);
+            ::InvalidateRect(m_hwndEdit, NULL, TRUE);
+        }
+        if (::GetCapture() == m_hWnd)
+            ReleaseCapture();
+        InvalidateRect(NULL, FALSE);
+    }
+
+    VOID DrawRevealButton(HDC hdc, const RECT *prc, COLORREF crBack)
+    {
+        HICON hGlyph;
+        int cx = Sc(16);
+
+        if (!CanReveal())
+            return;
+        if (m_bReveal || m_iHotBtn == 6)
+        {
+            RECT rcHot = *prc;
+            InflateRect(&rcHot, -Sc(3), -Sc(3));
+            TfyFillRound(hdc, &rcHot, Sc(3), TfyMix(crBack, m_Pal.PanelText, m_bReveal ? 50 : 30), crBack);
+        }
+        if (!m_bFrameStarted)
+            m_bFrameStarted = ShellFrame::Startup();
+        hGlyph = m_bFrameStarted ? ShellFrame::CreateGlyphIcon(L"eye_20_regular", cx, m_Pal.PanelText) : NULL;
+        if (!hGlyph)
+            return;
+        DrawIconEx(hdc, (prc->left + prc->right - cx) / 2, (prc->top + prc->bottom - cx) / 2, hGlyph, cx, cx, 0, NULL, DI_NORMAL);
+        DestroyIcon(hGlyph);
+    }
+
+    BOOL IsConnectingRow(const TFYNETROW &row) const
+    {
+        return m_bConnecting && !row.bConnected && m_szSelName[0] && !wcscmp(row.szName, m_szSelName);
+    }
+
+    LPCWSTR RowButtonText(const TFYNETROW &row) const
+    {
+        if (row.bConnected)
+            return L"Disconnect";
+        return IsConnectingRow(row) ? L"Cancel" : L"Connect";
     }
 
     VOID ShowEdit()
@@ -8267,6 +8344,34 @@ public:
             SetRowFailed(row, L"Can't connect to this network");
         }
         Relayout();
+    }
+
+    VOID CancelConnect(int i)
+    {
+        if (i < 0 || i >= (int)m_Rows.GetCount())
+            return;
+        TFYNETROW &row = m_Rows[i];
+        if (row.nType != 2 || !LoadWlan() || !m_pfnDisconnect)
+            return;
+        m_bConnecting = FALSE;
+        KillTimer(TFY_TIMER_POLL);
+        row.szStatus[0] = 0;
+        m_pfnDisconnect(m_hWlan, &row.ifGuid, NULL);
+        Relayout();
+    }
+
+    VOID ActivateRowButton(int i)
+    {
+        TFYNETROW &row = m_Rows[i];
+
+        if (m_bPassMode)
+            SubmitPassword();
+        else if (row.bConnected)
+            DisconnectRow(i);
+        else if (IsConnectingRow(row))
+            CancelConnect(i);
+        else
+            ConnectRow(i, NULL);
     }
 
     VOID DisconnectRow(int i)
@@ -8522,6 +8627,7 @@ public:
                 InflateRect(&rcEditFrame, -1, -1);
                 TfyFillRound(hdc, &rcEditFrame, Sc(3), TfyMix(m_Pal.PanelBg, m_Pal.PanelText, 20),
                              TfyMix(m_Pal.PanelBg, m_Pal.PanelText, 70));
+                DrawRevealButton(hdc, &row.rcReveal, TfyMix(m_Pal.PanelBg, m_Pal.PanelText, 20));
                 DrawButton(hdc, &row.rcButton, L"Next", m_iHotBtn == 1, TRUE);
                 DrawButton(hdc, &row.rcButton2, L"Cancel", m_iHotBtn == 2, FALSE);
             }
@@ -8529,8 +8635,8 @@ public:
             {
                 if (!row.bConnected)
                     DrawCheck(hdc, &row.rcCheck, m_bAutoConnect, L"Connect automatically", m_iHotBtn == 3);
-                DrawButton(hdc, &row.rcButton, row.bConnected ? L"Disconnect" : L"Connect",
-                           m_iHotBtn == 1, !row.bConnected);
+                DrawButton(hdc, &row.rcButton, RowButtonText(row),
+                           m_iHotBtn == 1, !row.bConnected && !IsConnectingRow(row));
             }
         }
 
@@ -8797,6 +8903,7 @@ public:
                         InflateRect(&rcEditFrame, 1, 1);
                         FrameRect(hdcMem, &rcEditFrame, hbrEditEdge);
                         DeleteObject(hbrEditEdge);
+                        DrawRevealButton(hdcMem, &row.rcReveal, m_Pal.PanelBg);
                         DrawButton(hdcMem, &row.rcButton, L"Next", m_iHotBtn == 1, TRUE);
                         DrawButton(hdcMem, &row.rcButton2, L"Cancel", m_iHotBtn == 2, FALSE);
                     }
@@ -8804,8 +8911,8 @@ public:
                     {
                         if (!row.bConnected)
                             DrawCheck(hdcMem, &row.rcCheck, m_bAutoConnect, L"Connect automatically", m_iHotBtn == 3);
-                        DrawButton(hdcMem, &row.rcButton, row.bConnected ? L"Disconnect" : L"Connect",
-                                   m_iHotBtn == 1, !row.bConnected);
+                        DrawButton(hdcMem, &row.rcButton, RowButtonText(row),
+                                   m_iHotBtn == 1, !row.bConnected && !IsConnectingRow(row));
                     }
                 }
             }
@@ -8906,6 +9013,8 @@ public:
                 TfyQueueNetworkRefresh(m_hWnd, FALSE);
                 break;
             case wlan_notification_acm_connection_attempt_fail:
+                if (!m_bConnecting)
+                    break;
                 m_bConnecting = FALSE;
                 KillTimer(TFY_TIMER_POLL);
                 for (SIZE_T i = 0; i < m_Rows.GetCount(); i++)
@@ -9023,6 +9132,7 @@ public:
                 if (PtInRect(&row.rcButton, pt)) *pnBtn = 1;
                 else if (PtInRect(&row.rcButton2, pt)) *pnBtn = 2;
                 else if (PtInRect(&row.rcCheck, pt)) *pnBtn = 3;
+                else if (PtInRect(&row.rcReveal, pt)) *pnBtn = 6;
                 else if (PtInRect(&row.rcEdit, pt)) *pnBtn = 4;
             }
             return (int)i;
@@ -9075,11 +9185,54 @@ public:
         return 0;
     }
 
-    LRESULT OnLButtonUp(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled)
+    LRESULT OnLButtonDown(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled)
     {
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         int nBtn = 0;
         int i = HitTest(pt, &nBtn);
+
+        if (i >= 0 && i == m_iSel && nBtn == 6 && CanReveal())
+            BeginReveal();
+        else
+            bHandled = FALSE;
+        return 0;
+    }
+
+    LRESULT OnCaptureChanged(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled)
+    {
+        EndReveal();
+        bHandled = FALSE;
+        return 0;
+    }
+
+    LRESULT OnCommand(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled)
+    {
+        if (LOWORD(wParam) == TFY_NET_EDIT_ID && HIWORD(wParam) == EN_CHANGE &&
+            m_iSel >= 0 && m_iSel < (int)m_Rows.GetCount())
+        {
+            if (!CanReveal())
+                EndReveal();
+            InvalidateRect(&m_Rows[m_iSel].rcReveal, FALSE);
+            return 0;
+        }
+        bHandled = FALSE;
+        return 0;
+    }
+
+    LRESULT OnLButtonUp(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled)
+    {
+        POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        int nBtn = 0;
+        int i;
+
+        if (m_bReveal)
+        {
+            EndReveal();
+            if (m_hwndEdit)
+                ::SetFocus(m_hwndEdit);
+            return 0;
+        }
+        i = HitTest(pt, &nBtn);
         if (i == TFY_NETHIT_BACK)
         {
             HWND hwndOwner = ::GetWindow(m_hWnd, GW_OWNER);
@@ -9142,12 +9295,7 @@ public:
         {
             if (nBtn == 1)
             {
-                if (m_bPassMode)
-                    SubmitPassword();
-                else if (row.bConnected)
-                    DisconnectRow(i);
-                else
-                    ConnectRow(i, NULL);
+                ActivateRowButton(i);
                 return 0;
             }
             if (nBtn == 2)
@@ -9161,7 +9309,7 @@ public:
                 InvalidateRect(NULL, FALSE);
                 return 0;
             }
-            if (nBtn == 4)
+            if (nBtn == 4 || nBtn == 6)
             {
                 if (m_hwndEdit)
                     ::SetFocus(m_hwndEdit);
@@ -9194,12 +9342,7 @@ public:
             if (m_bPassMode)
                 SubmitPassword();
             else if (m_iSel >= 0 && m_Rows[m_iSel].nType == 2)
-            {
-                if (m_Rows[m_iSel].bConnected)
-                    DisconnectRow(m_iSel);
-                else
-                    ConnectRow(m_iSel, NULL);
-            }
+                ActivateRowButton(m_iSel);
             return 0;
         }
         if (wParam == VK_DOWN || wParam == VK_UP)
@@ -9250,6 +9393,11 @@ public:
         if (m_hFontHeader) { DeleteObject(m_hFontHeader); m_hFontHeader = NULL; }
         if (m_hFontPaneTitle) { DeleteObject(m_hFontPaneTitle); m_hFontPaneTitle = NULL; }
         if (m_hFontRow) { DeleteObject(m_hFontRow); m_hFontRow = NULL; }
+        if (m_bFrameStarted)
+        {
+            ShellFrame::Shutdown();
+            m_bFrameStarted = FALSE;
+        }
         return 0;
     }
 
@@ -9262,7 +9410,10 @@ public:
         MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
         MESSAGE_HANDLER(WM_MOUSEWHEEL, OnMouseWheel)
         MESSAGE_HANDLER(WM_MOUSELEAVE, OnMouseLeave)
+        MESSAGE_HANDLER(WM_LBUTTONDOWN, OnLButtonDown)
         MESSAGE_HANDLER(WM_LBUTTONUP, OnLButtonUp)
+        MESSAGE_HANDLER(WM_CAPTURECHANGED, OnCaptureChanged)
+        MESSAGE_HANDLER(WM_COMMAND, OnCommand)
         MESSAGE_HANDLER(WM_ACTIVATE, OnActivate)
         MESSAGE_HANDLER(WM_KEYDOWN, OnKeyDown)
         MESSAGE_HANDLER(WM_CTLCOLOREDIT, OnCtlColorEdit)
