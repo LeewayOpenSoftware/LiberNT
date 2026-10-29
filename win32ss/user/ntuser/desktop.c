@@ -1393,10 +1393,10 @@ IntSetFocusMessageQueue(PUSER_MESSAGE_QUEUE NewQueue)
         (void)InterlockedExchangePointer((PVOID*)&NewQueue->Desktop, pdo);
     }
     Old = (PUSER_MESSAGE_QUEUE)InterlockedExchangePointer((PVOID*)&pdo->ActiveMessageQueue, NewQueue);
+    gpqForegroundPrev = Old;
     if (Old != NULL)
     {
         (void)InterlockedExchangePointer((PVOID*)&Old->Desktop, 0);
-        gpqForegroundPrev = Old;
         IntDereferenceMessageQueue(Old);
     }
     // Only one Q can have active foreground even when there are more than one desktop.
