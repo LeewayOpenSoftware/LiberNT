@@ -102,10 +102,14 @@ IsServiceReferencedElsewhere(
                 if (!lstrcmpW(FullId, ExcludeDeviceId))
                     continue;
                 ServiceSize = sizeof(Service);
-                if (RegGetValueW(hInst, InstName, L"Service", RRF_RT_REG_SZ, NULL,
-                                 Service, &ServiceSize) == ERROR_SUCCESS &&
-                    !lstrcmpW(Service, ServiceName))
-                    Referenced = TRUE;
+                {
+                    LONG SvcError = RegGetValueW(hInst, InstName, L"Service", RRF_RT_REG_SZ, NULL,
+                                                 Service, &ServiceSize);
+                    if (SvcError == ERROR_SUCCESS && !lstrcmpW(Service, ServiceName))
+                        Referenced = TRUE;
+                    else if (SvcError != ERROR_FILE_NOT_FOUND && SvcError != ERROR_SUCCESS)
+                        Referenced = TRUE; /* a name we cannot read may be the shared one */
+                }
             }
             RegCloseKey(hInst);
             hInst = NULL;
