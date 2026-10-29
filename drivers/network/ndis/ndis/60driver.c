@@ -1401,6 +1401,7 @@ Ndis6DispatchPnp(
                     Ext->Initialized = TRUE;
                     InterlockedExchange(&Ext->ProtocolBindingsClosing, 0);
                 }
+                Ndis6SetNetInterfaceState(Adapter, TRUE);
                 Status = STATUS_SUCCESS;
 
                 /* Build the paused stack first: filter modules attach below

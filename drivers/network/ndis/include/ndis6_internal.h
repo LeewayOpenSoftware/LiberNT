@@ -617,6 +617,11 @@ Ndis6CallMiniportHaltEx(
     _In_ PLOGICAL_ADAPTER       Adapter,
     _In_ NDIS_HALT_ACTION       HaltAction);
 
+VOID
+Ndis6SetNetInterfaceState(
+    _In_ PLOGICAL_ADAPTER       Adapter,
+    _In_ BOOLEAN                Enable);
+
 /* Intermediate-driver upper-miniport instantiation (NdisIMInitializeDeviceInstanceEx).
  * Creates a virtual 802.3 miniport with no PnP PDO, runs the driver's
  * InitializeHandlerEx, and binds protocols. */

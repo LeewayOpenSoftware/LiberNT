@@ -22,6 +22,7 @@
 
 #include "ndis6_internal.h"
 #include <ntstrsafe.h>
+#include <ndisguid.h>
 
 #define NDIS6_ADAPTER_TAG  'aDNn'  /* "nNDa" */
 
@@ -512,6 +513,57 @@ Ndis6ImSeedTcpipRegistry(_In_ PCUNICODE_STRING DeviceName)
  *  resources.
  * ============================================================================ */
 
+static
+VOID
+Ndis6RegisterNetInterface(
+    _Inout_ PLOGICAL_ADAPTER Adapter)
+{
+    PUNICODE_STRING Name = &Adapter->NdisMiniportBlock.MiniportName;
+    UNICODE_STRING ReferenceString;
+    USHORT Index;
+    NTSTATUS Status;
+
+    RtlInitEmptyUnicodeString(&ReferenceString, NULL, 0);
+    for (Index = 0; Index < Name->Length / sizeof(WCHAR); Index++)
+    {
+        if (Name->Buffer[Index] == L'{')
+        {
+            ReferenceString.Buffer = &Name->Buffer[Index];
+            ReferenceString.Length = Name->Length - Index * sizeof(WCHAR);
+            ReferenceString.MaximumLength = ReferenceString.Length;
+            break;
+        }
+    }
+
+    Status = IoRegisterDeviceInterface(Adapter->NdisMiniportBlock.PhysicalDeviceObject,
+                                       &GUID_DEVINTERFACE_NET,
+                                       ReferenceString.Length ? &ReferenceString : NULL,
+                                       &Adapter->NdisMiniportBlock.SymbolicLinkName);
+    if (!NT_SUCCESS(Status))
+    {
+        DbgPrint("NDIS6: IoRegisterDeviceInterface(%wZ) failed 0x%08lx\n", Name, (ULONG)Status);
+        RtlInitEmptyUnicodeString(&Adapter->NdisMiniportBlock.SymbolicLinkName, NULL, 0);
+    }
+}
+
+VOID
+Ndis6SetNetInterfaceState(
+    _In_ PLOGICAL_ADAPTER Adapter,
+    _In_ BOOLEAN Enable)
+{
+    NTSTATUS Status;
+
+    if (Adapter->NdisMiniportBlock.SymbolicLinkName.Buffer == NULL)
+        return;
+
+    Status = IoSetDeviceInterfaceState(&Adapter->NdisMiniportBlock.SymbolicLinkName, Enable);
+    if (!NT_SUCCESS(Status))
+    {
+        DbgPrint("NDIS6: IoSetDeviceInterfaceState(%wZ, %u) failed 0x%08lx\n",
+                 &Adapter->NdisMiniportBlock.SymbolicLinkName, Enable, (ULONG)Status);
+    }
+}
+
 static NDIS_STATUS
 Ndis6InitializeLogicalAdapter(
     _In_ PNDIS6_DRIVER_BLOCK DriverBlock,
@@ -713,6 +765,8 @@ Ndis6InitializeLogicalAdapter(
         Fdo->Flags |= DO_DIRECT_IO | DO_POWER_PAGABLE;
         Fdo->Flags &= ~DO_DEVICE_INITIALIZING;
     }
+
+    Ndis6RegisterNetInterface(Adapter);
 
     /* Insert into the global adapter list so legacy NdisOpenAdapter
      * (which calls MiniLocateDevice) can find this adapter by name. */
@@ -998,6 +1052,8 @@ Ndis6CallMiniportHaltEx(
     Ext = NDIS6_EXT(Adapter);
     if (Ext == NULL || Ext->DriverBlock == NULL)
         return;
+
+    Ndis6SetNetInterfaceState(Adapter, FALSE);
 
     /* Close registration-time bind/attach admission before pausing. A late
      * filter registration can otherwise observe Initialized while final halt
@@ -1552,6 +1608,7 @@ Ndis6DestroyLogicalAdapter(
     }
 
     Ndis6FreeAdapterName(&Adapter->NdisMiniportBlock.MiniportName);
+    RtlFreeUnicodeString(&Adapter->NdisMiniportBlock.SymbolicLinkName);
 
     /* Sever the LOGICAL_ADAPTER → Ext link before freeing Ext, so any
      * stale reference goes through a NULL check rather than touching

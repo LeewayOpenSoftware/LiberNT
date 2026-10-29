@@ -145,6 +145,16 @@ Ndis6WdfBuildCompleteAddParameters(
     Parameters->NetLuid = Ext->NetLuid;
     Parameters->MediaType = NdisMedium802_3;
     Parameters->BaseName = *Name;
+    for (Index = 0; Index < Name->Length / sizeof(WCHAR); Index++)
+    {
+        if (Name->Buffer[Index] == L'{')
+        {
+            Parameters->BaseName.Buffer = &Name->Buffer[Index];
+            Parameters->BaseName.Length = Name->Length - Index * sizeof(WCHAR);
+            Parameters->BaseName.MaximumLength = Parameters->BaseName.Length;
+            break;
+        }
+    }
     Parameters->AdapterInstanceName = *Name;
     Parameters->DriverImageName = Ext->DriverBlock->DriverObject->DriverName;
     Parameters->ExecutionContextKnobs = &Ndis6WdfEcKnobs;
@@ -458,6 +468,7 @@ NdisWdfPnpPowerEventHandler(
                     Ext->DriverBlock->WdfCxDriver->Characteristics.EvtCxDeviceStartComplete(
                         Ext->MiniportAdapterContext);
                 }
+                Ndis6SetNetInterfaceState(Adapter, TRUE);
             }
             return STATUS_SUCCESS;
 
