@@ -3613,6 +3613,10 @@ static void FASTCALL MENU_SelectItem(PWND pwndOwner, PMENU menu, UINT wIndex,
               if (pwndFocus)
                  IntNotifyWinEvent(EVENT_OBJECT_FOCUS, pwndFocus, OBJID_CLIENT, wIndex + 1, 0);
            }
+           else
+           {
+              IntNotifyWinEvent(EVENT_OBJECT_FOCUS, pWnd, (menu->fFlags & MNF_SYSMENU) ? OBJID_SYSMENU : OBJID_MENU, wIndex + 1, 0);
+           }
         }
     }
     else if (sendMenuSelect) 
@@ -4781,6 +4785,11 @@ static INT FASTCALL MENU_TrackMenu(PMENU pmenu, UINT wFlags, INT x, INT y,
 
     MsqSetStateWindow(pti, MSQ_STATE_MENUOWNER, NULL);
     pti->MessageQueue->QF_flags &= ~QF_CAPTURELOCKED;
+    if (VerifyMenu(mt.TopMenu) && !(mt.TopMenu->fFlags & MNF_POPUP) &&
+        mt.TopMenu->iItem != NO_SELECTED_ITEM && VerifyWnd(mt.OwnerWnd))
+    {
+        IntNotifyWinEvent(EVENT_OBJECT_FOCUS, mt.OwnerWnd, IS_SYSTEM_MENU(mt.TopMenu) ? OBJID_SYSMENU : OBJID_MENU, CHILDID_SELF, 0);
+    }
     co_UserSetCapture(NULL); /* release the capture */
 
     /* If dropdown is still painted and the close box is clicked on
@@ -4888,11 +4897,14 @@ static BOOL FASTCALL MENU_InitTracking(PWND pWnd, PMENU Menu, BOOL bPopup, UINT 
 /***********************************************************************
  *           MenuExitTracking
  */
-static BOOL FASTCALL MENU_ExitTracking(PWND pWnd, BOOL bPopup, UINT wFlags)
+static BOOL FASTCALL MENU_ExitTracking(PWND pWnd, PMENU Menu, BOOL bPopup, UINT wFlags)
 {
     TRACE("Exit Track hwnd=%p bPopup %d\n", UserHMGetHandle(pWnd), bPopup);
 
-    IntNotifyWinEvent( EVENT_SYSTEM_MENUEND, pWnd, OBJID_WINDOW, CHILDID_SELF, 0);
+    IntNotifyWinEvent( EVENT_SYSTEM_MENUEND,
+                       pWnd,
+                       (bPopup || !Menu) ? OBJID_WINDOW : (Menu->fFlags & MNF_SYSMENU ? OBJID_SYSMENU : OBJID_MENU),
+                       CHILDID_SELF, 0);
 
     if (!(wFlags & TPM_NONOTIFY))
        co_IntSendMessage( UserHMGetHandle(pWnd), WM_EXITMENULOOP, bPopup && !(wFlags & TPM_SYSTEM_MENU), 0 );
@@ -4931,7 +4943,7 @@ VOID MENU_TrackMouseMenuBar( PWND pWnd, ULONG ht, POINT pt)
         /* fetch the window menu again, it may have changed */
         pMenu = (ht == HTSYSMENU) ? get_win_sys_menu( UserHMGetHandle(pWnd) ) : IntGetMenu( UserHMGetHandle(pWnd) );
         MENU_TrackMenu(pMenu, wFlags, pt.x, pt.y, pWnd);
-        MENU_ExitTracking(pWnd, FALSE, wFlags);
+        MENU_ExitTracking(pWnd, VerifyMenu(pMenu) ? pMenu : NULL, FALSE, wFlags);
     }
 }
 
@@ -4995,7 +5007,7 @@ VOID MENU_TrackKbdMenuBar(PWND pwnd, UINT wParam, WCHAR wChar)
 
 track_menu:
     MENU_TrackMenu( TrackMenu, wFlags, 0, 0, pwnd );
-    MENU_ExitTracking( pwnd, FALSE, wFlags);
+    MENU_ExitTracking( pwnd, VerifyMenu(TrackMenu) ? TrackMenu : NULL, FALSE, wFlags);
 }
 
 BOOL FASTCALL
@@ -5055,7 +5067,7 @@ IntTrackPopupMenuEx(
           co_UserSetCapture(NULL); /* release the capture */
        }
 
-       MENU_ExitTracking(pWnd, TRUE, wFlags);
+       MENU_ExitTracking(pWnd, menu, TRUE, wFlags);
 
        if (menu->hWnd)
        {
