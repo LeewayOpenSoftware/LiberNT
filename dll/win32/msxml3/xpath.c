@@ -187,6 +187,9 @@ enum xpath_op
     XPATH_OP_ALL,
     XPATH_OP_ICMP,
     XPATH_OP_IEQUAL,
+#ifdef __REACTOS__
+    XPATH_OP_METHOD,
+#endif
 };
 
 struct xpath_parser_context;
@@ -245,6 +248,14 @@ struct xpath_parser_context
         size_t capacity;
         struct domnode **nodes;
     } namespaces;
+#ifdef __REACTOS__
+    struct
+    {
+        size_t count;
+        size_t capacity;
+        struct domnode **nodes;
+    } method_results;
+#endif
 };
 
 /* XSLPattern uses 0-based indexing */
@@ -511,6 +522,9 @@ static void xpath_debug_dump_step_op(const struct xpath_comp_expr *comp, int idx
         case XPATH_OP_FILTER: MESSAGE("FILTER"); break;
         case XPATH_OP_NOT: MESSAGE("NOT"); break;
         case XPATH_OP_ALL: MESSAGE("ALL"); break;
+#ifdef __REACTOS__
+        case XPATH_OP_METHOD: MESSAGE("METHOD"); break;
+#endif
         default:
         MESSAGE("UNKNOWN %d\n", op->op); return;
     }
@@ -708,6 +722,11 @@ static void xpath_free_parser_context(struct xpath_parser_context *ctxt)
     if (ctxt->comp)
         xpath_free_comp_expr(ctxt->comp);
     free(ctxt->namespaces.nodes);
+#ifdef __REACTOS__
+    for (size_t i = 0; i < ctxt->method_results.count; ++i)
+        domnode_release(ctxt->method_results.nodes[i]);
+    free(ctxt->method_results.nodes);
+#endif
     free(ctxt);
 }
 
@@ -5565,6 +5584,67 @@ static int xpath_comp_op_eval(struct xpath_parser_context *ctxt, struct xpath_st
 
             xpath_builtin_not(ctxt, 1);
             break;
+#ifdef __REACTOS__
+        case XPATH_OP_METHOD:
+            {
+                struct domnode *oldnode = ctxt->context->node, *node, *result;
+                int oldcs = ctxt->context->contextSize, oldpp = ctxt->context->proximityPosition;
+                struct xpath_nodeset *results;
+                struct xpath_object *obj;
+                WCHAR *str;
+
+                total += xpath_comp_op_eval(ctxt, &comp->steps.values[op->ch1]);
+                if (ctxt->error != XPATH_EXPRESSION_OK) return 0;
+
+                if (!(obj = xpath_pop_value(ctxt)) || obj->type != _XPATH_NODESET)
+                {
+                    xpath_object_release(ctxt->context, obj);
+                    xpath_parser_context_set_error(ctxt, XPATH_INVALID_TYPE);
+                    return 0;
+                }
+
+                if (!(results = xpath_create_nodeset(ctxt, NULL)))
+                {
+                    xpath_object_release(ctxt->context, obj);
+                    return 0;
+                }
+
+                ctxt->context->contextSize = obj->nodesetval ? obj->nodesetval->count : 0;
+                for (int i = 0; obj->nodesetval && i < obj->nodesetval->count; ++i)
+                {
+                    node = obj->nodesetval->nodes[i];
+                    ctxt->context->node = node;
+                    ctxt->context->proximityPosition = i + 1;
+
+                    total += xpath_comp_op_eval(ctxt, &comp->steps.values[op->ch2]);
+                    if (ctxt->error != XPATH_EXPRESSION_OK) break;
+
+                    if (!(str = xpath_pop_string(ctxt))) break;
+
+                    if (!xpath_array_reserve(ctxt, (void **)&ctxt->method_results.nodes, &ctxt->method_results.capacity,
+                            ctxt->method_results.count + 1, sizeof(*ctxt->method_results.nodes))
+                            || FAILED(domnode_create(NODE_TEXT, NULL, 0, NULL, 0, node->owner ? node->owner : node, &result)))
+                    {
+                        free(str);
+                        xpath_parser_context_set_error(ctxt, XPATH_MEMORY_ERROR);
+                        break;
+                    }
+
+                    result->data = SysAllocString(str);
+                    free(str);
+                    ctxt->method_results.nodes[ctxt->method_results.count++] = domnode_addref(result);
+                    xpath_nodeset_add_unique(ctxt, results, result);
+                }
+
+                ctxt->context->node = oldnode;
+                ctxt->context->contextSize = oldcs;
+                ctxt->context->proximityPosition = oldpp;
+                xpath_object_release(ctxt->context, obj);
+
+                xpath_push_value(ctxt, xpath_wrap_nodeset(ctxt, results));
+                break;
+            }
+#endif
         case XPATH_OP_ICMP:
             total += xpath_comp_op_eval(ctxt, &comp->steps.values[op->ch1]);
             if (ctxt->error != XPATH_EXPRESSION_OK) return 0;
@@ -6034,7 +6114,11 @@ static void xpath_builtin_number(struct xpath_parser_context *ctxt, int nargs)
 
 static void xpath_arg_cast_to_boolean(struct xpath_parser_context *ctxt)
 {
+#ifdef __REACTOS__
+    if (ctxt->value && ctxt->value->type != _XPATH_BOOLEAN)
+#else
     if (ctxt->value && ctxt->value->type != _XPATH_NUMBER)
+#endif
         xpath_builtin_boolean(ctxt, 1);
 }
 
@@ -7383,7 +7467,15 @@ static void xslpattern_compile_relative_location_path(struct xpath_parser_contex
             }
             else
             {
+#ifdef __REACTOS__
+                int op1 = ctxt->comp->last;
+
                 xslpattern_compile_function_call(ctxt);
+                if (ctxt->error == XPATH_EXPRESSION_OK)
+                    xpath_push_binary_step(ctxt, XPATH_OP_METHOD, op1, ctxt->comp->last, 0, 0);
+#else
+                xslpattern_compile_function_call(ctxt);
+#endif
             }
             free(name);
         }
@@ -7844,6 +7936,24 @@ static void xslpattern_builtin_node_name(struct xpath_parser_context *ctxt, int 
     }
 }
 
+#ifdef __REACTOS__
+static void xslpattern_builtin_value(struct xpath_parser_context *ctxt, int nargs)
+{
+    struct xpath_object *ret;
+    BSTR text = NULL;
+
+    if (!xpath_builtin_check_stack(ctxt, nargs, 0))
+        return;
+
+    if (FAILED(node_get_text(ctxt->context->node, &text)))
+        return xpath_parser_context_set_error(ctxt, XPATH_INVALID_OPERAND);
+
+    ret = xpath_new_string(ctxt, text ? text : L"");
+    SysFreeString(text);
+    xpath_push_value(ctxt, ret);
+}
+#endif
+
 static void xpath_register_xpath_functions(struct xpath_context *ctxt)
 {
     xpath_register_func(ctxt, L"boolean", xpath_builtin_boolean);
@@ -7881,6 +7991,9 @@ static void xpath_register_xslpattern_functions(struct xpath_context *ctxt)
     xpath_register_func(ctxt, L"end", xslpattern_builtin_end);
     xpath_register_func(ctxt, L"nodeType", xslpattern_builtin_node_type);
     xpath_register_func(ctxt, L"nodeName", xslpattern_builtin_node_name);
+#ifdef __REACTOS__
+    xpath_register_func(ctxt, L"value", xslpattern_builtin_value);
+#endif
 }
 
 struct xpath_context * xpath_create_context(bool xpath, struct domnode *node)
