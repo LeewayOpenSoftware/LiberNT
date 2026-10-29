@@ -1711,6 +1711,9 @@ IntTranslateKbdMessage(LPMSG lpMsg,
 
     if (lpMsg->wParam == VK_PACKET)
     {
+        if (!pti->wchInjected)
+            return FALSE;
+
         NewMsg.message = (lpMsg->message == WM_KEYDOWN) ? WM_CHAR : WM_SYSCHAR;
         NewMsg.wParam = pti->wchInjected;
         NewMsg.lParam = lpMsg->lParam;
