@@ -11,6 +11,8 @@
 #include <win32k.h>
 DBG_DEFAULT_CHANNEL(UserMsgQ);
 
+#define HWMSG_TRANSFERRED 1
+
 #define MESSAGE_QUEUE_INCREMENT 2
 
 /* GLOBALS *******************************************************************/
@@ -92,6 +94,31 @@ IntTopLevelWindowFromPoint(INT x, INT y)
 
     /* Window has not been found */
     return pwndDesktop;
+}
+
+static PWND FASTCALL
+IntInputWindowFromPoint(PWND pWnd, INT x, INT y)
+{
+    PWND pwndChild;
+
+    while (!(pWnd->style & WS_MINIMIZE) && RECTL_bPointInRect(&pWnd->rcClient, x, y))
+    {
+        for (pwndChild = pWnd->spwndChild; pwndChild; pwndChild = pwndChild->spwndNext)
+        {
+            if (pwndChild->state2 & WNDS2_INDESTROY || pwndChild->state & WNDS_DESTROYED)
+                continue;
+            if (!(pwndChild->style & WS_VISIBLE) || (pwndChild->style & WS_DISABLED))
+                continue;
+            if ((pwndChild->ExStyle & (WS_EX_LAYERED|WS_EX_TRANSPARENT)) == (WS_EX_LAYERED|WS_EX_TRANSPARENT))
+                continue;
+            if (IntPtInWindow(pwndChild, x, y))
+                break;
+        }
+        if (!pwndChild)
+            break;
+        pWnd = pwndChild;
+    }
+    return pWnd;
 }
 
 PCURICON_OBJECT
@@ -696,6 +723,8 @@ co_MsqInsertMouseMessage(MSG* Msg, DWORD flags, ULONG_PTR dwExtraInfo, BOOL Hook
    else
    {
        pwnd = IntTopLevelWindowFromPoint(Msg->pt.x, Msg->pt.y);
+       if (pwnd && pwnd != pwndDesktop)
+           pwnd = IntInputWindowFromPoint(pwnd, Msg->pt.x, Msg->pt.y);
        if (pwnd) Msg->hwnd = UserHMGetHandle(pwnd);
    }
 
@@ -714,13 +743,7 @@ co_MsqInsertMouseMessage(MSG* Msg, DWORD flags, ULONG_PTR dwExtraInfo, BOOL Hook
           return;
        }
 
-       // Check to see if this is attached.
-       if ( pti != MessageQueue->ptiMouse &&
-            MessageQueue->cThreads > 1 )
-       {
-          // Set the send pti to the message queue mouse pti.
-          pti = MessageQueue->ptiMouse;
-       }
+       MessageQueue->ptiMouse = pti;
 
        if (Msg->message == WM_MOUSEMOVE)
        {
@@ -1642,7 +1665,7 @@ IntTrackMouseMove(PWND pwndTrack, PDESKTOP pDesk, PMSG msg, USHORT hittest)
    }
 }
 
-BOOL co_IntProcessMouseMessage(MSG* msg, BOOL* RemoveMessages, BOOL* NotForUs, LONG_PTR ExtraInfo, UINT first, UINT last, PWND pwndFilter)
+BOOL co_IntProcessMouseMessage(MSG* msg, BOOL* RemoveMessages, BOOL* NotForUs, LONG_PTR ExtraInfo, UINT first, UINT last, PWND pwndFilter, PTHREADINFO* pptiTransfer)
 {
     MSG clk_msg;
     POINT pt;
@@ -1691,8 +1714,15 @@ BOOL co_IntProcessMouseMessage(MSG* msg, BOOL* RemoveMessages, BOOL* NotForUs, L
     // Null window or not the same "Hardware" message queue.
     if (pwndMsg == NULL || pwndMsg->head.pti->MessageQueue != MessageQueue)
     {
-        // Crossing a boundary, so set cursor. See default message queue cursor.
-        IntSystemSetCursor(SYSTEMCUR(ARROW));
+        if (pwndMsg && !(pwndMsg->head.pti->TIF_flags & TIF_INCLEANUP))
+        {
+            *pptiTransfer = pwndMsg->head.pti;
+        }
+        else
+        {
+            // Crossing a boundary, so set cursor. See default message queue cursor.
+            IntSystemSetCursor(SYSTEMCUR(ARROW));
+        }
         /* Remove and ignore the message */
         *RemoveMessages = TRUE;
         return FALSE;
@@ -2074,11 +2104,11 @@ Exit:
     return Ret;
 }
 
-BOOL co_IntProcessHardwareMessage(MSG* Msg, BOOL* RemoveMessages, BOOL* NotForUs, LONG_PTR ExtraInfo, UINT first, UINT last, PWND pwndFilter)
+BOOL co_IntProcessHardwareMessage(MSG* Msg, BOOL* RemoveMessages, BOOL* NotForUs, LONG_PTR ExtraInfo, UINT first, UINT last, PWND pwndFilter, PTHREADINFO* pptiTransfer)
 {
     if ( IS_MOUSE_MESSAGE(Msg->message))
     {
-        return co_IntProcessMouseMessage(Msg, RemoveMessages, NotForUs, ExtraInfo, first, last, pwndFilter);
+        return co_IntProcessMouseMessage(Msg, RemoveMessages, NotForUs, ExtraInfo, first, last, pwndFilter, pptiTransfer);
     }
     else if ( IS_KBD_MESSAGE(Msg->message))
     {
@@ -2127,14 +2157,15 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
    BOOL AcceptMessage, NotForUs, RemoveMsg;
    PUSER_MESSAGE CurrentMessage;
    PLIST_ENTRY ListHead;
-   MSG msg;
+   MSG msg, msgOrig;
    ULONG_PTR idSave;
-   DWORD QS_Flags;
+   DWORD QS_Flags, dwQEvent;
    LONG_PTR ExtraInfo;
    MSG clk_msg;
    BOOL Ret = FALSE;
    BOOL TookSysLock = FALSE;
    ULONGLONG MessageId;
+   PTHREADINFO ptiTransfer;
    PUSER_MESSAGE_QUEUE MessageQueue = pti->MessageQueue;
    INPUT_MESSAGE_SOURCE Source = { IMDT_UNAVAILABLE, IMO_UNAVAILABLE };
 
@@ -2188,15 +2219,18 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
          ExtraInfo = CurrentMessage->ExtraInfo;
          QS_Flags = CurrentMessage->QS_Flags;
          Source = CurrentMessage->Source;
+         dwQEvent = CurrentMessage->dwQEvent;
          clk_msg = MessageQueue->msgDblClk;
 
          NotForUs = FALSE;
          RemoveMsg = Remove;
+         ptiTransfer = NULL;
+         msgOrig = msg;
 
          MessageId = CurrentMessage->Id;
 
          UpdateKeyStateFromMsg(MessageQueue, &msg);
-         AcceptMessage = co_IntProcessHardwareMessage(&msg, &RemoveMsg, &NotForUs, ExtraInfo, MsgFilterLow, MsgFilterHigh, Window);
+         AcceptMessage = co_IntProcessHardwareMessage(&msg, &RemoveMsg, &NotForUs, ExtraInfo, MsgFilterLow, MsgFilterHigh, Window, &ptiTransfer);
 
          if (pti->MessageQueue != MessageQueue)
          {
@@ -2226,6 +2260,8 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
              {
                 MsqDestroyMessage(CurrentMessage);
                 ClearMsgBitsMask(pti, QS_Flags);
+                if (ptiTransfer && dwQEvent != HWMSG_TRANSFERRED)
+                   MsqPostMessageEx(ptiTransfer, &msgOrig, TRUE, QS_Flags, HWMSG_TRANSFERRED, ExtraInfo, &Source);
              }
          }
 
