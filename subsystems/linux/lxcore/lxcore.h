@@ -263,6 +263,7 @@ struct _LX_FILE
     PSTR MountsRoot;
     BOOLEAN MountsFull;
     BOOLEAN MountsRead;
+    PSTR SynthRelative;
 };
 
 typedef enum _LX_FS_KIND

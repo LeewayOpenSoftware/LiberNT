@@ -4499,6 +4499,20 @@ LxSynthDirStat(
     _In_ PLX_FILE File,
     _Out_ PLX_STAT Stat)
 {
+    PLX_THREAD Thread = LxCurrentThread();
+
+    if ((Thread != NULL) && (File->Mount != NULL) && (File->SynthRelative != NULL))
+    {
+        LX_NODE Node;
+
+        RtlZeroMemory(&Node, sizeof(Node));
+        Node.Path = File->Path;
+        Node.Mount = File->Mount;
+        Node.Relative = File->SynthRelative;
+        if (LxSynthStat(Thread->Process, &Node, Stat) == 0)
+            return 0;
+    }
+
     RtlZeroMemory(Stat, sizeof(*Stat));
     Stat->Mode = LX_S_IFDIR | File->Mode;
     Stat->Nlink = 2;
@@ -5348,7 +5362,9 @@ LxSynthOpen(
         }
 
         File = LxFileAlloc(&LxSynthDirOps, LX_O_RDONLY | (Flags & (LX_O_NONBLOCK | LX_O_PATH)), LX_S_IFDIR);
-        if (File == NULL)
+        if (File != NULL)
+            File->SynthRelative = LxStrDup(Node->Relative);
+        if ((File == NULL) || (File->SynthRelative == NULL))
         {
             Error = -LX_ENOMEM;
             goto Exit;

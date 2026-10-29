@@ -430,6 +430,7 @@ LxFileDereference(
     if (File->MountsNs != NULL)
         LxNsDereference(File->MountsNs);
     LxFree(File->MountsRoot);
+    LxFree(File->SynthRelative);
     LxMemfdDereference(File->Memfd);
     if (File->Handle != NULL)
         ZwClose(File->Handle);
