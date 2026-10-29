@@ -2677,6 +2677,67 @@ LxFileBasePath(
 }
 
 static
+PSTR
+LxFileLookupBase(
+    _In_ PLX_PROCESS Process,
+    _In_ PLX_FILE File,
+    _Out_opt_ PBOOLEAN Foreign)
+{
+    PLX_NS Ns = LxProcessNs(Process, LxNsMnt);
+    PLX_MOUNT Origin = File->Mount, Match = NULL;
+    PSTR Path = LxFileBasePath(File), Rebased = NULL;
+    PCSTR OriginRoot, Rest;
+    PLIST_ENTRY Entry;
+    BOOLEAN Found = FALSE;
+    SIZE_T Length;
+
+    if (Foreign != NULL)
+        *Foreign = FALSE;
+    if ((Path == NULL) || (Origin == NULL) || (Origin->Ns == NULL) || (Ns == NULL) || (Origin->Ns == Ns))
+        return Path;
+    Length = (strcmp(Origin->Target, "/") == 0) ? 0 : strlen(Origin->Target);
+    if ((strncmp(Path, Origin->Target, Length) != 0) || ((Path[Length] != '\0') && (Path[Length] != '/')))
+        return Path;
+    Rest = Path + Length;
+    OriginRoot = (Origin->Root != NULL) ? Origin->Root : "/";
+
+    ExAcquireFastMutex(&Ns->Instance->Lock);
+    for (Entry = Ns->Mnt.Mounts.Flink; Entry != &Ns->Mnt.Mounts; Entry = Entry->Flink)
+    {
+        PLX_MOUNT Mount = CONTAINING_RECORD(Entry, LX_MOUNT, Link);
+
+        if ((Mount->Kind != Origin->Kind) || (Mount->Dev != Origin->Dev) || (Mount->Tmpfs != Origin->Tmpfs) ||
+            (strcmp((Mount->Root != NULL) ? Mount->Root : "/", OriginRoot) != 0))
+        {
+            continue;
+        }
+        Found = TRUE;
+        if (strcmp(Mount->Target, Origin->Target) == 0)
+        {
+            Match = NULL;
+            break;
+        }
+        if (Match == NULL)
+            Match = Mount;
+    }
+    if ((Foreign != NULL) && !Found)
+        *Foreign = TRUE;
+    if (Match != NULL)
+    {
+        if (strcmp(Match->Target, "/") == 0)
+            Rebased = LxStrDup((Rest[0] != '\0') ? Rest : "/");
+        else
+            Rebased = LxStrPrintf("%s%s", Match->Target, Rest);
+    }
+    ExReleaseFastMutex(&Ns->Instance->Lock);
+
+    if (Rebased == NULL)
+        return Path;
+    LxFree(Path);
+    return Rebased;
+}
+
+static
 LONG
 LxLookupWalk(
     _In_ PLX_PROCESS Process,
@@ -2737,7 +2798,7 @@ LxLookupWalk(
             LxFree(ProcRoot);
             return -LX_ENOTDIR;
         }
-        Current = LxFileBasePath(File);
+        Current = LxFileLookupBase(Process, File, NULL);
         LxFileDereference(File);
     }
     if (Current == NULL)
@@ -3277,7 +3338,7 @@ LxLookupCacheKey(
             if (File == NULL)
                 return NULL;
             Base = ((File->Type == LX_S_IFDIR) && (File->Path != NULL) && (File->Path[0] == '/')) ?
-                   LxFileBasePath(File) : NULL;
+                   LxFileLookupBase(Process, File, NULL) : NULL;
             LxFileDereference(File);
         }
         if (Base == NULL)
@@ -3297,8 +3358,9 @@ LxLookupCacheKey(
     return Key;
 }
 
+static
 LONG
-LxLookup(
+LxLookupIn(
     _In_ PLX_PROCESS Process,
     _In_ LONG DirFd,
     _In_ PCSTR Path,
@@ -3400,6 +3462,58 @@ LxLookup(
     }
 
     return LxLookupWalk(Process, DirFd, Path, Flags, Node, &Synthetic);
+}
+
+static
+PLX_NS
+LxLookupDirNamespace(
+    _In_ PLX_PROCESS Process,
+    _In_ LONG DirFd)
+{
+    PLX_FILE File = LxFdGet(Process, DirFd);
+    PLX_NS Ns = NULL;
+    BOOLEAN Foreign = FALSE;
+    PSTR Base;
+
+    if (File == NULL)
+        return NULL;
+    if ((File->Type == LX_S_IFDIR) && (File->Path != NULL) && (File->Path[0] == '/'))
+    {
+        Base = LxFileLookupBase(Process, File, &Foreign);
+        LxFree(Base);
+        if (Foreign)
+        {
+            Ns = File->Mount->Ns;
+            LxNsReference(Ns);
+        }
+    }
+    LxFileDereference(File);
+    return Ns;
+}
+
+LONG
+LxLookup(
+    _In_ PLX_PROCESS Process,
+    _In_ LONG DirFd,
+    _In_ PCSTR Path,
+    _In_ ULONG Flags,
+    _Out_ PLX_NODE Node)
+{
+    PLX_THREAD Thread = LxCurrentThread();
+    PLX_NS Detour = NULL, Saved;
+    LONG Error;
+
+    if ((Path[0] != '/') && (DirFd != LX_AT_FDCWD) && (Thread != NULL) && (Thread->Process == Process))
+        Detour = LxLookupDirNamespace(Process, DirFd);
+    if (Detour == NULL)
+        return LxLookupIn(Process, DirFd, Path, Flags, Node);
+
+    Saved = Thread->NsOverride[LxNsMnt];
+    Thread->NsOverride[LxNsMnt] = Detour;
+    Error = LxLookupIn(Process, DirFd, Path, Flags, Node);
+    Thread->NsOverride[LxNsMnt] = Saved;
+    LxNsDereference(Detour);
+    return Error;
 }
 
 static
