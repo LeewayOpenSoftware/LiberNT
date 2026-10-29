@@ -1699,7 +1699,14 @@ static DWORD WAVE_mciInfo(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_INFO_PARMSW l
     } else {
 	switch (dwFlags & ~(MCI_WAIT|MCI_NOTIFY)) {
         case MCI_INFO_PRODUCT: str = L"Wine's audio player"; break;
+#ifdef __REACTOS__
+	case MCI_INFO_FILE:
+	    if (!wmw->lpFileName || !wmw->lpFileName[0]) ret = MCIERR_NONAPPLICABLE_FUNCTION;
+	    str = wmw->lpFileName;
+	    break;
+#else
 	case MCI_INFO_FILE:    str = wmw->lpFileName; break;
+#endif
         case MCI_WAVE_INPUT:   str = L"Wine Wave In"; break;
         case MCI_WAVE_OUTPUT:  str = L"Wine Wave Out"; break;
 	default:
