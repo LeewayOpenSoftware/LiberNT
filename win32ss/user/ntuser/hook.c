@@ -1297,6 +1297,9 @@ co_HOOK_CallHooks( INT HookId,
        UserDerefObjectCo(Hook);
        IntDereferenceThreadInfo(pti);
        ObDereferenceObject(pti->pEThread);
+
+       if (Result)
+          goto Exit;
     }
 
     if ( Global )
