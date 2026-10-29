@@ -1896,9 +1896,6 @@ CURSORICON_LoadFromFileW(
     if(!entry)
         goto end;
 
-    /* Fix dimensions */
-    if(!cxDesired) cxDesired = entry->bWidth;
-    if(!cyDesired) cyDesired = entry->bHeight;
     cursorData.cx = cxDesired;
     cursorData.cy = cyDesired;
     /* A bit of preparation */
