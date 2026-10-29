@@ -87,17 +87,18 @@ struct KernelModeMapping
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        __try
+        _SEH2_TRY
         {
             MmProbeAndLockPages(
                 mdl.get(),
                 UserMode,
                 AccessMode);
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
         {
-            return GetExceptionCode();
+            _SEH2_YIELD(return _SEH2_GetExceptionCode());
         }
+        _SEH2_END;
 
         auto cleanup = wil::scope_exit([&mdl]()
         {

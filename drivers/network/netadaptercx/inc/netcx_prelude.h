@@ -9,6 +9,7 @@
 
 #include <ntifs.h>
 #include <ntintsafe.h>
+#include <pseh/pseh2.h>
 
 #define NETCX_ADAPTER_2
 #include <ndis.h>

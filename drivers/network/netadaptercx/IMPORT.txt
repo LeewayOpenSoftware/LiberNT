@@ -20,6 +20,10 @@ LiberNT changes:
   netcx/adapter/nxadapter.cpp: null pointers converted with static_cast
   rtl/inc/kptr.h: sized pool allocators declared before the templates that call them
   netcx/adapter/nxadapter.cpp: callback address passed to MmIsDriverVerifyingByAddress converted to a data pointer explicitly
+  netcx/translator/nxtxxlat.hpp: GetTxDemuxProperty declared without the class qualification
+  netcx/translator/nxrxxlat.cpp: frame type taken from the NBL info pointer through ULONG_PTR
+  netcx/adapter/nxadapter.cpp: DMA address mask built with a ULL literal
+  netcx/inc/private/usermodemapping.hpp, usermodememorycopy.hpp, kernelmodemapping.hpp, netcx/bm/ibuffervector.cpp: structured exception handling written with the PSEH macros
 LiberNT files:
   inc/, lib/: private headers and libraries the public sources do not include; layouts and
     values follow the NetAdapterCx and ndis 10.0.22621 x64 public symbols

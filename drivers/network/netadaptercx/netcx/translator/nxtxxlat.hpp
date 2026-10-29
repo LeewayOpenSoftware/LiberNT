@@ -106,7 +106,7 @@ public:
     );
 
     NET_CLIENT_QUEUE_TX_DEMUX_PROPERTY const *
-    NxTxXlat::GetTxDemuxProperty(
+    GetTxDemuxProperty(
         NET_CLIENT_QUEUE_TX_DEMUX_TYPE Type
     ) const;
 

@@ -797,7 +797,7 @@ NxRxXlat::EcIndicateNblsToNdis()
         if (! packet->Ignore &&
             TransferDataBufferFromNetPacketToNbl(counters, packet, context.NetBufferList, pr->OSReserved0))
         {
-            frameTypes.AddValue(reinterpret_cast<USHORT>(context.NetBufferList->NetBufferListInfo[NetBufferListFrameType]));
+            frameTypes.AddValue(static_cast<USHORT>(reinterpret_cast<ULONG_PTR>(context.NetBufferList->NetBufferListInfo[NetBufferListFrameType])));
 
             PKTMON_LOG_NBL_NDIS(
                 const_cast<PKTMON_EDGE_CONTEXT *>(m_pktmonLowerEdgeContext),

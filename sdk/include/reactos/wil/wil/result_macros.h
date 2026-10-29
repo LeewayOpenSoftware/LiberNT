@@ -63,7 +63,7 @@
 //*****************************************************************************
 
 #ifdef RESULT_DEBUG
-#if defined(__clang__) && defined(_WIN32)
+#if (defined(__clang__) && defined(_WIN32)) || !defined(_MSC_VER)
 // Clang currently mis-handles '__annotation' for 32-bit - https://bugs.llvm.org/show_bug.cgi?id=41890
 #define __WI_ASSERT_FAIL_ANNOTATION(msg) (void)0
 #else

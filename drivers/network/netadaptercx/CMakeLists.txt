@@ -62,7 +62,7 @@ target_include_directories(netadaptercx BEFORE PRIVATE
     ${REACTOS_SOURCE_DIR}/sdk/include/reactos/wil
     ${REACTOS_SOURCE_DIR}/sdk/include/ddk/netcx/kmdf/adapter/2.6
     ${REACTOS_SOURCE_DIR}/sdk/include/psdk/netcx/shared/1.0)
-target_include_directories(netadaptercx AFTER PRIVATE ${NETCX_TMH_DIR})
+target_include_directories(netadaptercx AFTER PRIVATE ${NETCX_TMH_DIR} ${REACTOS_SOURCE_DIR}/sdk/include/c++)
 
 target_compile_definitions(netadaptercx PRIVATE
     NETCX_KMDF=1

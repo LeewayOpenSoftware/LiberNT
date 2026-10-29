@@ -2211,7 +2211,7 @@ NxAdapter::GetDatapathCapabilities(
             dmaAdapter,
             &adapterInfo);
 
-        auto const maximumDmaLogicalAddress = (1UI64 << adapterInfo.V1.DmaAddressWidth) - 1;
+        auto const maximumDmaLogicalAddress = (1ULL << adapterInfo.V1.DmaAddressWidth) - 1;
         auto const maximumDriverLogicalAddress = txCap.DmaCapabilities->MaximumPhysicalAddress.QuadPart > 0
             ? static_cast<UINT64>(txCap.DmaCapabilities->MaximumPhysicalAddress.QuadPart)
             : 0xffffffffffffffff;

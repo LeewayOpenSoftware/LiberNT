@@ -102,7 +102,7 @@ struct UserModeMapping
 
         T * userModeAddress{ nullptr };
 
-        __try
+        _SEH2_TRY
         {
             userModeAddress = static_cast<T *>(
                 MmMapLockedPagesSpecifyCache(
@@ -113,10 +113,11 @@ struct UserModeMapping
                     FALSE,
                     NormalPagePriority | MdlMappingNoExecute));
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
         {
-            return GetExceptionCode();
+            _SEH2_YIELD(return _SEH2_GetExceptionCode());
         }
+        _SEH2_END;
 
         if (userModeAddress == nullptr)
         {

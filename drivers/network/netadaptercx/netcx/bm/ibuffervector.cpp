@@ -87,7 +87,7 @@ IBufferVector::MapToUserModeAddressSpace(
 
         void *umVirtualAddress = nullptr;
 
-        __try
+        _SEH2_TRY
         {
             umVirtualAddress = MmMapLockedPagesSpecifyCache(
                 mdl,
@@ -97,10 +97,11 @@ IBufferVector::MapToUserModeAddressSpace(
                 FALSE,
                 NormalPagePriority | MdlMappingNoExecute);
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
         {
             break;
         }
+        _SEH2_END;
 
         if (umVirtualAddress == nullptr)
         {

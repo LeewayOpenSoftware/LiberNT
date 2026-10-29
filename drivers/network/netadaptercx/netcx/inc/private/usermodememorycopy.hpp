@@ -16,17 +16,18 @@ public:
         _In_ SIZE_T Size
     )
     {
-        __try
+        _SEH2_TRY
         {
             ProbeForRead(
                 UserModeBuffer,
                 Size,
                 sizeof(UCHAR));
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
         {
-            return STATUS_INVALID_PARAMETER;
+            _SEH2_YIELD(return STATUS_INVALID_PARAMETER);
         }
+        _SEH2_END;
 
         if (Size == 0)
         {
@@ -39,17 +40,18 @@ public:
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        __try
+        _SEH2_TRY
         {
             RtlCopyMemory(
                 bufferCopy.get(),
                 UserModeBuffer,
                 Size);
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+        _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
         {
-            return STATUS_INVALID_PARAMETER;
+            _SEH2_YIELD(return STATUS_INVALID_PARAMETER);
         }
+        _SEH2_END;
 
         m_allocatedBuffer = wistd::move(bufferCopy);
         return STATUS_SUCCESS;
