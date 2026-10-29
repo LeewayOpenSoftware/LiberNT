@@ -758,6 +758,8 @@ BOOLEAN ReconfigureAdapter(PRECONFIGURE_CONTEXT Context)
 
     Context->Adapter->CompletingReset = FALSE;
 
+    Interface->TransmitLinkSpeed = Adapter->LinkSpeed;
+
     if (Context->State == LAN_STATE_STARTED)
     {
         /* Get maximum link speed */
@@ -1470,6 +1472,8 @@ BOOLEAN BindAdapter(
     IF->Wireless = BindParameters->PhysicalMediumType == NdisPhysicalMediumWirelessLan ||
                    BindParameters->PhysicalMediumType == NdisPhysicalMediumWirelessWan ||
                    BindParameters->PhysicalMediumType == NdisPhysicalMediumNative802_11;
+    IF->HalfDuplex = BindParameters->MediaDuplexState == MediaDuplexStateHalf;
+    IF->TransmitLinkSpeed = BindParameters->XmitLinkSpeed;
 
     /*
      * Query per-adapter configuration from the registry

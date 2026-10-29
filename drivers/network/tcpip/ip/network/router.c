@@ -33,14 +33,15 @@ IPAutomaticMetric(
         {2000000000ULL, 25}, {500000000, 30}, {200000000, 35}, {150000000, 40}, {80000000, 45}, {50000000, 50},
         {20000000, 55}, {10000000, 60}, {4000000, 65}, {2000000, 70}, {500000, 75}, {200000, 80}
     };
-    ULONG64 Speed = (ULONG64)Interface->Speed * 100;
+    ULONG64 Speed = Interface->TransmitLinkSpeed;
     UINT i;
 
     if (Interface == Loopback)
         return 75;
+    if (Interface->Wireless || Interface->HalfDuplex)
+        Speed /= 2;
     if (Interface->Wireless)
     {
-        Speed /= 2;
         for (i = 0; i < RTL_NUMBER_OF(Wireless); i++)
         {
             if (Speed >= Wireless[i].Speed)

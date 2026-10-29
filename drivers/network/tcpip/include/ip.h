@@ -177,7 +177,9 @@ typedef struct _IP_INTERFACE {
     PVOID TCPContext;             /* TCP Content for this interface */
     SEND_RECV_STATS Stats;        /* Send/Receive statistics */
     BOOLEAN Wireless;
+    BOOLEAN HalfDuplex;
     ULONG PhysicalMedium;
+    ULONG64 TransmitLinkSpeed;
     BOOLEAN ManualMetric;
     UINT  InterfaceMetric;
     BOOLEAN Forwarding;
