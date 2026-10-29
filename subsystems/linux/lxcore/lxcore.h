@@ -697,6 +697,7 @@ typedef struct _LX_EXEC_REQUEST
     BOOLEAN RuntimeDir;
     BOOLEAN SearchPath;
     BOOLEAN Vfork;
+    PLX_THREAD Origin;
     ULONG Uid;
     ULONG Gid;
     ULONG GroupCount;

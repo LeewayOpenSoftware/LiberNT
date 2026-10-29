@@ -28,16 +28,32 @@ static PDEVICE_OBJECT LxDeviceObject;
 
 static
 VOID
+LxPtraceVforkResumed(
+    _Inout_ PLX_THREAD Resumed,
+    _Inout_ PKTRAP_FRAME TrapFrame,
+    _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame)
+{
+    ULONG VforkPid = Resumed->PtraceVforkPid;
+
+    Resumed->PtraceVforkPid = 0;
+    if (VforkPid != 0)
+    {
+        LxPtraceEvent(Resumed, TrapFrame, ExceptionFrame, LX_PTRACE_EVENT_VFORK, VforkPid, TRUE);
+        LxPtraceEvent(Resumed, TrapFrame, ExceptionFrame, LX_PTRACE_EVENT_VFORK_DONE, VforkPid, TRUE);
+    }
+}
+
+static
+VOID
 NTAPI
 LxPicoSystemCall(
     _Inout_ PKTRAP_FRAME TrapFrame,
     _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame)
 {
     PLX_THREAD Base = PsPicoGetThreadContext(PsGetCurrentThread());
-    PLX_THREAD Resumed;
+    PLX_THREAD Caller, Resumed;
     LX_CALL Call;
     LONG64 Result, Raw;
-    ULONG VforkPid;
 
     Base->InKernel++;
     RtlZeroMemory(&Call, sizeof(Call));
@@ -47,8 +63,11 @@ LxPicoSystemCall(
     Call.ExceptionFrame = ExceptionFrame;
     LxArchGetSyscall(TrapFrame, &Call.Number, Call.Args);
 
+    Caller = Call.Thread;
     Result = LxSysCall(&Call);
     Call.Thread = LxThreadOf(PsGetCurrentThread());
+    if (Call.Thread != Caller)
+        LxPtraceVforkResumed(Call.Thread, TrapFrame, ExceptionFrame);
     Raw = Result;
     if ((Result == -LX_ERESTARTSYS) || (Result == -LX_ERESTARTNOINTR) || (Result == -LX_ERESTARTNOHAND))
     {
@@ -78,13 +97,7 @@ LxPicoSystemCall(
     if (LxVforkFinish(TrapFrame, ExceptionFrame))
     {
         Resumed = LxThreadOf(PsGetCurrentThread());
-        VforkPid = Resumed->PtraceVforkPid;
-        Resumed->PtraceVforkPid = 0;
-        if (VforkPid != 0)
-        {
-            LxPtraceEvent(Resumed, TrapFrame, ExceptionFrame, LX_PTRACE_EVENT_VFORK, VforkPid, TRUE);
-            LxPtraceEvent(Resumed, TrapFrame, ExceptionFrame, LX_PTRACE_EVENT_VFORK_DONE, VforkPid, TRUE);
-        }
+        LxPtraceVforkResumed(Resumed, TrapFrame, ExceptionFrame);
         if (Resumed->PtraceWork & LX_PTW_SYSCALL)
             LxPtraceSyscallExit(Resumed, TrapFrame, ExceptionFrame, 0);
         LxSignalCheckPending(Resumed, TrapFrame, ExceptionFrame);
@@ -207,6 +220,7 @@ LxPicoThreadStart(
         if (Vfork && !NT_SUCCESS(Status) && (Status != STATUS_UNSUCCESSFUL))
         {
             InterlockedCompareExchange((PLONG)&Thread->Process->NtPid, 0, (LONG)HandleToUlong(PsGetCurrentProcessId()));
+            LxPtraceTransfer(Thread, Request->Origin);
             KeSetEvent(&Request->Done, IO_NO_INCREMENT, FALSE);
             ZwTerminateProcess(NtCurrentProcess(), Status);
             PsPicoTerminateCurrentThread(Status);

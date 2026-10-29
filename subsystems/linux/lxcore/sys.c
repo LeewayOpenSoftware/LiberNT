@@ -2471,6 +2471,7 @@ LxForkProcess(
         LxThreadAttach(Thread);
         Thread->VforkParent = Call->Thread;
         Call->Thread->Vfork = Thread;
+        /* FIXME: PTRACE_EVENT_VFORK waits until the parent gets its thread back; Linux stops the parent first. */
         Call->Thread->PtraceVforkPid = (Event != 0) ? Pid : 0;
         LxArchSetThreadPointer(Call->TrapFrame, Thread->Tls);
         if (Thread->SetChildTid != 0)
@@ -2608,6 +2609,7 @@ LxVforkExec(
     LxPtraceTransfer(Borrowed, Thread);
     KeInitializeEvent(&Request->Done, NotificationEvent, FALSE);
     Request->Vfork = TRUE;
+    Request->Origin = Borrowed;
     Thread->Exec = Request;
 
     LxThreadDetach(Borrowed);
@@ -2700,6 +2702,7 @@ LxSharedVmExec(
     LxPtraceTransfer(Current, Thread);
     KeInitializeEvent(&Request->Done, NotificationEvent, FALSE);
     Request->Vfork = TRUE;
+    Request->Origin = Current;
     Thread->Exec = Request;
 
     LxThreadDetach(Current);
