@@ -257,8 +257,7 @@ PIP_INTERFACE IPCreateInterface(
     TcpipInitializeSpinLock(&IF->Lock);
     ExInitializeRundownProtection(&IF->Rundown);
 
-    IF->TCPContext = ExAllocatePool
-	( NonPagedPool, sizeof(struct netif));
+    IF->TCPContext = ExAllocatePoolZero(NonPagedPool, sizeof(struct netif), IP_INTERFACE_TAG);
     if (!IF->TCPContext) {
         ExFreePoolWithTag(IF, IP_INTERFACE_TAG);
         return NULL;
