@@ -64,6 +64,63 @@ Ndis6ReadInterfaceType(
     return (NET_IFTYPE)Value;
 }
 
+static
+BOOLEAN
+Ndis6ReadAdapterKeyword(
+    _In_ HANDLE DriverKey,
+    _In_ PCWSTR Name,
+    _Out_ PULONG Value)
+{
+    union
+    {
+        KEY_VALUE_PARTIAL_INFORMATION Information;
+        UCHAR Buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data) + sizeof(ULONG)];
+    } Query;
+    UNICODE_STRING ValueName;
+    ULONG ResultLength;
+    NTSTATUS Status;
+
+    RtlInitUnicodeString(&ValueName, Name);
+    Status = ZwQueryValueKey(DriverKey, &ValueName, KeyValuePartialInformation, &Query, sizeof(Query), &ResultLength);
+    if (!NT_SUCCESS(Status) || Query.Information.Type != REG_DWORD || Query.Information.DataLength != sizeof(ULONG))
+        return FALSE;
+
+    RtlCopyMemory(Value, Query.Information.Data, sizeof(ULONG));
+    return TRUE;
+}
+
+VOID
+Ndis6ApplyInfInterfaceKeywords(
+    _In_ PDEVICE_OBJECT Pdo,
+    _Inout_ PNDIS_MINIPORT_ADAPTER_GENERAL_ATTRIBUTES General)
+{
+    HANDLE DriverKey;
+    ULONG Value;
+
+    if (Pdo == NULL || KeGetCurrentIrql() != PASSIVE_LEVEL)
+        return;
+
+    if (!NT_SUCCESS(IoOpenDeviceRegistryKey(Pdo, PLUGPLAY_REGKEY_DRIVER, KEY_QUERY_VALUE, &DriverKey)))
+        return;
+
+    if (Ndis6ReadAdapterKeyword(DriverKey, L"*MediaType", &Value))
+        General->MediaType = (NDIS_MEDIUM)Value;
+    if (Ndis6ReadAdapterKeyword(DriverKey, L"*PhysicalMediaType", &Value))
+        General->PhysicalMediumType = (NDIS_PHYSICAL_MEDIUM)Value;
+    if (Ndis6ReadAdapterKeyword(DriverKey, L"*IfType", &Value))
+        General->IfType = (NET_IFTYPE)Value;
+    if (Ndis6ReadAdapterKeyword(DriverKey, L"*IfConnectorPresent", &Value))
+        General->IfConnectorPresent = Value != 0;
+    if (Ndis6ReadAdapterKeyword(DriverKey, L"*AccessType", &Value))
+        General->AccessType = (NET_IF_ACCESS_TYPE)Value;
+    if (Ndis6ReadAdapterKeyword(DriverKey, L"*ConnectionType", &Value))
+        General->ConnectionType = (NET_IF_CONNECTION_TYPE)Value;
+    if (Ndis6ReadAdapterKeyword(DriverKey, L"*DirectionType", &Value))
+        General->DirectionType = (NET_IF_DIRECTION_TYPE)Value;
+
+    ZwClose(DriverKey);
+}
+
 BOOLEAN
 Ndis6HasMandatoryKeywords(
     _In_ PDEVICE_OBJECT Pdo)

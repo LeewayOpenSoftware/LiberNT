@@ -608,6 +608,11 @@ BOOLEAN
 Ndis6HasMandatoryKeywords(
     _In_ PDEVICE_OBJECT Pdo);
 
+VOID
+Ndis6ApplyInfInterfaceKeywords(
+    _In_ PDEVICE_OBJECT Pdo,
+    _Inout_ PNDIS_MINIPORT_ADAPTER_GENERAL_ATTRIBUTES General);
+
 NDIS_STATUS
 Ndis6CallMiniportInitializeEx(
     _In_ PLOGICAL_ADAPTER       Adapter);

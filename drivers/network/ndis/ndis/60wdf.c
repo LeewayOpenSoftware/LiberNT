@@ -120,10 +120,14 @@ Ndis6WdfBuildCompleteAddParameters(
 {
     PNDIS6_ADAPTER_EXT Ext = NDIS6_EXT(Adapter);
     PUNICODE_STRING Name = &Adapter->NdisMiniportBlock.MiniportName;
+    NDIS_MINIPORT_ADAPTER_GENERAL_ATTRIBUTES Keywords;
     UNICODE_STRING GuidString;
     USHORT Index;
 
     RtlZeroMemory(Parameters, sizeof(*Parameters));
+    RtlZeroMemory(&Keywords, sizeof(Keywords));
+    Keywords.MediaType = NdisMedium802_3;
+    Ndis6ApplyInfInterfaceKeywords(Adapter->NdisMiniportBlock.PhysicalDeviceObject, &Keywords);
 
     /* The canonical miniport name is \Device\{xxxxxxxx-....}. Feed the
      * per-interface GUID back to NetAdapterCx when that form is present. */
@@ -143,7 +147,7 @@ Ndis6WdfBuildCompleteAddParameters(
     }
 
     Parameters->NetLuid = Ext->NetLuid;
-    Parameters->MediaType = NdisMedium802_3;
+    Parameters->MediaType = Keywords.MediaType;
     Parameters->BaseName = *Name;
     for (Index = 0; Index < Name->Length / sizeof(WCHAR); Index++)
     {

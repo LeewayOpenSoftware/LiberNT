@@ -786,12 +786,15 @@ NdisMSetMiniportAttributes(
             NewGen.RecvScaleCapabilities = NULL;
             NewGen.PowerManagementCapabilitiesEx = NULL;
 
+            if (Ext->IsWdfManaged)
+                Ndis6ApplyInfInterfaceKeywords(Adapter->NdisMiniportBlock.PhysicalDeviceObject, &NewGen);
+
             OldOidList = Ext->GeneralAttrs.SupportedOidList;
             Ext->GeneralAttrs = NewGen;
             Ext->GeneralAttrsValid = TRUE;
-            Adapter->NdisMiniportBlock.MediaType = Gen->MediaType;
-            Adapter->NdisMiniportBlock.MacOptions = Gen->MacOptions;
-            if (Gen->MediaType == NdisMedium802_3)
+            Adapter->NdisMiniportBlock.MediaType = NewGen.MediaType;
+            Adapter->NdisMiniportBlock.MacOptions = NewGen.MacOptions;
+            if (NewGen.MediaType == NdisMedium802_3)
                 Adapter->MediumHeaderSize = 14;
             if (OldOidList != NULL)
                 ExFreePoolWithTag(OldOidList, NDIS6_ATTR_TAG);
