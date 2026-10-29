@@ -1,0 +1,4 @@
+
+add_executable(netcxtest netcxtest.c)
+set_module_type(netcxtest win32cui UNICODE)
+add_importlibs(netcxtest iphlpapi setupapi newdev ws2_32 msvcrt kernel32 ntdll)
