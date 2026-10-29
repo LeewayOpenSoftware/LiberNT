@@ -1153,6 +1153,63 @@ static int LISTVIEW_GetThemedItemState(const LISTVIEW_INFO *infoPtr, UINT uItemS
         return LISS_HOT;
     return 0;
 }
+
+/* Win11-style translucent rubber-band (marquee) selection: a 1px solid border plus an
+ * alpha-blended fill, instead of the classic XOR DrawFocusRect. Real Windows docs tie this to
+ * LVS_EX_DOUBLEBUFFER; mirror that, and ALSO turn it on whenever the window is explicitly themed
+ * as "Explorer" (CDefView always is, but deliberately runs without LVS_EX_DOUBLEBUFFER --
+ * CORE-19818) so Explorer/the desktop get it without needing that flag. Any other ListView (no
+ * double buffer, no Explorer theme) keeps the exact old behavior, unchanged. */
+static void LISTVIEW_DrawMarquee(const LISTVIEW_INFO *infoPtr, HDC hdc)
+{
+    HTHEME theme = GetWindowTheme(infoPtr->hwndSelf);
+    BOOL themed = theme && IsThemePartDefined(theme, LVP_LISTITEM, 0);
+    RECT rect = infoPtr->marqueeDrawRect;
+    int width = rect.right - rect.left, height = rect.bottom - rect.top;
+    COLORREF fillColor, borderColor;
+    HDC hdcMem;
+    HPEN hPen, hOldPen;
+    HGDIOBJ hOldBrush;
+
+    if (!(infoPtr->dwLvExStyle & LVS_EX_DOUBLEBUFFER) && !themed)
+    {
+        DrawFocusRect(hdc, &rect);
+        return;
+    }
+    if (width <= 0 || height <= 0)
+        return;
+
+    if (!themed || FAILED(GetThemeColor(theme, LVP_LISTITEM, LISS_SELECTED, TMT_FILLCOLOR, &fillColor)))
+        fillColor = GetSysColor(COLOR_HIGHLIGHT);
+    if (!themed || FAILED(GetThemeColor(theme, LVP_LISTITEM, LISS_SELECTED, TMT_BORDERCOLOR, &borderColor)))
+        borderColor = GetSysColor(COLOR_HIGHLIGHT);
+
+    hdcMem = CreateCompatibleDC(hdc);
+    if (hdcMem)
+    {
+        HBITMAP hbmMem = CreateCompatibleBitmap(hdc, width, height);
+        if (hbmMem)
+        {
+            BLENDFUNCTION blend = { AC_SRC_OVER, 0, 90, 0 }; /* ~35% opacity fill */
+            HGDIOBJ hbmOld = SelectObject(hdcMem, hbmMem);
+            hOldBrush = SelectObject(hdcMem, CreateSolidBrush(fillColor));
+            PatBlt(hdcMem, 0, 0, width, height, PATCOPY);
+            DeleteObject(SelectObject(hdcMem, hOldBrush));
+            AlphaBlend(hdc, rect.left, rect.top, width, height, hdcMem, 0, 0, width, height, blend);
+            SelectObject(hdcMem, hbmOld);
+            DeleteObject(hbmMem);
+        }
+        DeleteDC(hdcMem);
+    }
+
+    hPen = CreatePen(PS_SOLID, 1, borderColor);
+    hOldPen = SelectObject(hdc, hPen);
+    hOldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
+    SelectObject(hdc, hOldBrush);
+    SelectObject(hdc, hOldPen);
+    DeleteObject(hPen);
+}
 #endif
 
 static void prepaint_setup (const LISTVIEW_INFO *infoPtr, HDC hdc, const NMLVCUSTOMDRAW *cd, BOOL SubItem)
@@ -1853,9 +1910,51 @@ static inline BOOL LISTVIEW_GetItemW(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpL
     return LISTVIEW_GetItemT(infoPtr, lpLVItem, TRUE);
 }
 
+/* With the Explorer item theme the selection state is already shown by the themed fill and
+ * border; an XOR focus rectangle would invert that border, so it is replaced by
+ * LISTVIEW_DrawThemedFocus (a solid 1px border, only for a focused item that is not selected). */
+static inline BOOL LISTVIEW_ItemThemed(const LISTVIEW_INFO *infoPtr)
+{
+#if __WINE_COMCTL32_VERSION == 6
+    HTHEME theme = GetWindowTheme(infoPtr->hwndSelf);
+    return theme && IsThemePartDefined(theme, LVP_LISTITEM, 0);
+#else
+    return FALSE;
+#endif
+}
+
+static void LISTVIEW_DrawThemedFocus(const LISTVIEW_INFO *infoPtr, HDC hdc, const RECT *rc)
+{
+#if __WINE_COMCTL32_VERSION == 6
+    COLORREF color;
+    HPEN hPen, hOldPen;
+    HGDIOBJ hOldBrush;
+
+    if (!infoPtr->bFocus || infoPtr->nFocusedItem < 0 || IsRectEmpty(rc)) return;
+    if (SendMessageW(infoPtr->hwndSelf, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS) return;
+    if (LISTVIEW_GetItemState(infoPtr, infoPtr->nFocusedItem, LVIS_SELECTED)) return;
+    if (FAILED(GetThemeColor(GetWindowTheme(infoPtr->hwndSelf), LVP_LISTITEM, LISS_HOT,
+                             TMT_BORDERCOLOR, &color)))
+        color = GetSysColor(COLOR_HIGHLIGHT);
+
+    hPen = CreatePen(PS_SOLID, 1, color);
+    hOldPen = SelectObject(hdc, hPen);
+    hOldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    Rectangle(hdc, rc->left, rc->top, rc->right, rc->bottom);
+    SelectObject(hdc, hOldBrush);
+    SelectObject(hdc, hOldPen);
+    DeleteObject(hPen);
+#endif
+}
+
 /* used to handle collapse main item column case */
 static inline BOOL LISTVIEW_DrawFocusRect(const LISTVIEW_INFO *infoPtr, HDC hdc)
 {
+    if (LISTVIEW_ItemThemed(infoPtr))
+    {
+        LISTVIEW_DrawThemedFocus(infoPtr, hdc, &infoPtr->rcFocus);
+        return FALSE;
+    }
     return (infoPtr->rcFocus.left < infoPtr->rcFocus.right) ?
             DrawFocusRect(hdc, &infoPtr->rcFocus) : FALSE;
 }
@@ -2326,6 +2425,11 @@ static void LISTVIEW_ShowFocusRect(const LISTVIEW_INFO *infoPtr, BOOL fShow)
     TRACE("fShow=%d, nItem=%d\n", fShow, infoPtr->nFocusedItem);
 
     if (infoPtr->nFocusedItem < 0) return;
+    if (LISTVIEW_ItemThemed(infoPtr))
+    {
+        LISTVIEW_InvalidateItem(infoPtr, infoPtr->nFocusedItem);
+        return;
+    }
 
     /* we need some gymnastics in ICON mode to handle large items */
     if (infoPtr->uView == LV_VIEW_ICON)
@@ -4982,8 +5086,19 @@ static void LISTVIEW_DrawItemPart(LISTVIEW_INFO *infoPtr, LVITEMW *item, const N
         }
         else
         {
+            RECT rcThemed = *background;
+
+            /* Icon, small icon and list views: one box around the icon and the label together. */
+            if (infoPtr->uView != LV_VIEW_DETAILS && !IsRectEmpty(&rcIcon))
+            {
+                RECT rcClip;
+
+                UnionRect(&rcThemed, &rcIcon, &rcLabel);
+                InflateRect(&rcThemed, 2, 2);
+                if (IntersectRect(&rcClip, &rcThemed, &rcBox)) rcThemed = rcClip;
+            }
             themedBg = SUCCEEDED(DrawThemeBackground(theme, nmlvcd->nmcd.hdc, LVP_LISTITEM,
-                                                     themeState, background, NULL));
+                                                     themeState, &rcThemed, NULL));
         }
     }
     if (!themedBg && nmlvcd->clrTextBk != CLR_NONE)
@@ -5085,6 +5200,9 @@ static void LISTVIEW_DrawItemPart(LISTVIEW_INFO *infoPtr, LVITEMW *item, const N
         rcLabel.bottom--;
 
     DrawTextW(nmlvcd->nmcd.hdc, item->pszText, -1, &rcLabel, format);
+
+    if (focus && infoPtr->uView == LV_VIEW_DETAILS && !item->iSubItem && LISTVIEW_ItemThemed(infoPtr))
+        LISTVIEW_DrawThemedFocus(infoPtr, nmlvcd->nmcd.hdc, focus);
 }
 
 /***
@@ -5630,7 +5748,11 @@ enddraw:
 
     /* Draw marquee rectangle if appropriate */
     if (infoPtr->bMarqueeSelect)
+#if __WINE_COMCTL32_VERSION == 6
+        LISTVIEW_DrawMarquee(infoPtr, hdc);
+#else
         DrawFocusRect(hdc, &infoPtr->marqueeDrawRect);
+#endif
 
     if (cdmode & CDRF_NOTIFYPOSTPAINT)
 	notify_postpaint(infoPtr, &nmlvcd);

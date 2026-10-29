@@ -39,6 +39,7 @@ TODO:
 #include <atlwin.h>
 #include <ui/rosctrls.h>
 #include <perhist.h>
+#include <uxtheme.h>
 #include <vssym32.h>
 #include <shdispid.h>
 #include <reactos/dwmsettings.h>
@@ -1678,6 +1679,13 @@ BOOL CDefView::CreateList()
 
     if (!m_ListView)
         return FALSE;
+
+    /* Theme the list items (LVP_LISTITEM: LISS_HOT/SELECTED/HOTSELECTED/SELECTEDNOTFOCUS) the
+     * same way real Explorer does, in every view including the desktop -- no separate code path
+     * needed, matching how Vista-11 draw the icon hover/selection highlight. No-ops under a
+     * theme with no ListView.ListItem part (e.g. Classic), falling back to the control's own
+     * classic drawing. */
+    SetWindowTheme(m_ListView, L"Explorer", NULL);
 
     m_ListView.SetExtendedListViewStyle(ListExStyle);
 
