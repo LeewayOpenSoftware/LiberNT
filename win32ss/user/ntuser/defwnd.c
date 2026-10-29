@@ -469,6 +469,19 @@ UserPaintCaption(PWND pWnd, INT Flags)
    return Ret;
 }
 
+VOID FASTCALL
+DefWndDestroySmallIcon2(PWND pWnd)
+{
+    HICON hIcon = UserRemoveProp(pWnd, AtomIconSmall2, TRUE);
+    PCURICON_OBJECT CurIcon;
+
+    if (hIcon && (CurIcon = UserGetCurIconObject(hIcon)))
+    {
+        IntDestroyCurIconObject(CurIcon);
+        UserDereferenceObject(CurIcon);
+    }
+}
+
 // WM_SETICON
 LRESULT FASTCALL
 DefWndSetIcon(PWND pWnd, WPARAM wParam, LPARAM lParam)
@@ -502,6 +515,24 @@ DefWndSetIcon(PWND pWnd, WPARAM wParam, LPARAM lParam)
     UserSetProp(pWnd, gpsi->atomIconProp, hIcon, TRUE);
     UserSetProp(pWnd, gpsi->atomIconSmProp, hIconSmall, TRUE);
 
+    if (wParam == ICON_BIG || wParam == ICON_SMALL)
+    {
+        DefWndDestroySmallIcon2(pWnd);
+        if (hIcon && !hIconSmall)
+        {
+            USER_REFERENCE_ENTRY Ref;
+            HANDLE hSmall2;
+
+            UserRefObjectCo(pWnd, &Ref);
+            hSmall2 = co_IntCopyImage(hIcon, IMAGE_ICON,
+                                      UserGetSystemMetrics(SM_CXSMICON),
+                                      UserGetSystemMetrics(SM_CYSMICON), 0);
+            if (hSmall2 && !(pWnd->state2 & WNDS2_INDESTROY))
+                UserSetProp(pWnd, AtomIconSmall2, hSmall2, TRUE);
+            UserDerefObjectCo(pWnd);
+        }
+    }
+
     if ((pWnd->style & WS_CAPTION ) == WS_CAPTION)
        UserPaintCaption(pWnd, DC_ICON);
 
@@ -529,8 +560,12 @@ DefWndGetIcon(PWND pWnd, WPARAM wParam, LPARAM lParam)
             hIconRet = UserGetProp(pWnd, gpsi->atomIconProp, TRUE);
             break;
         case ICON_SMALL:
+            hIconRet = UserGetProp(pWnd, gpsi->atomIconSmProp, TRUE);
+            break;
         case ICON_SMALL2:
             hIconRet = UserGetProp(pWnd, gpsi->atomIconSmProp, TRUE);
+            if (!hIconRet)
+                hIconRet = UserGetProp(pWnd, AtomIconSmall2, TRUE);
             break;
         DEFAULT_UNREACHABLE;
     }

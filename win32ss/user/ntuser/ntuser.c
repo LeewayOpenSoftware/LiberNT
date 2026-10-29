@@ -21,6 +21,7 @@ ATOM AtomMessage;       // Window Message atom.
 ATOM AtomWndObj;        // Window Object atom.
 ATOM AtomLayer;         // Window Layer atom.
 ATOM AtomFlashWndState; // Window Flash State atom.
+ATOM AtomIconSmall2;
 ATOM AtomDDETrack;      // Window DDE Tracking atom.
 ATOM AtomQOS;           // Window DDE Quality of Service atom.
 HINSTANCE hModClient = NULL;
@@ -195,6 +196,7 @@ InitUserAtoms(VOID)
     AtomWndObj = IntAddGlobalAtom(L"SysWNDO", TRUE);
     AtomLayer = IntAddGlobalAtom(L"SysLayer", TRUE);
     AtomFlashWndState = IntAddGlobalAtom(L"FlashWState", TRUE);
+    AtomIconSmall2 = IntAddGlobalAtom(L"SysICS2", TRUE);
 
     return STATUS_SUCCESS;
 }

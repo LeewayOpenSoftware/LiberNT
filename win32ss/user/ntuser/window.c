@@ -824,6 +824,8 @@ LRESULT co_UserFreeWindow(PWND Window,
    IntUnregisterSessionNotification(Window, TRUE);
    IntUnlinkWindow(Window);
 
+   DefWndDestroySmallIcon2(Window);
+
    if (Window->PropListItems)
    {
       UserRemoveWindowProps(Window);
