@@ -121,6 +121,20 @@ static DWORD PCM_GetFormatIndex(LPWAVEFORMATEX wfx)
     return 0xFFFFFFFF;
 }
 
+#ifdef __REACTOS__
+static BOOL PCM_IsSuggestableFormat(LPWAVEFORMATEX wfx)
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(PCM_Formats); i++) {
+        if (wfx->nChannels == PCM_Formats[i].nChannels &&
+            wfx->wBitsPerSample == PCM_Formats[i].nBits)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+#endif
 /* PCM Conversions:
  *
  * parameters:
@@ -1180,7 +1194,11 @@ static	LRESULT	PCM_FormatSuggest(PACMDRVFORMATSUGGEST adfs)
     /* some tests ... */
     if (adfs->cbwfxSrc < sizeof(PCMWAVEFORMAT) ||
         adfs->cbwfxDst < sizeof(PCMWAVEFORMAT) ||
+#ifdef __REACTOS__
+        !PCM_IsSuggestableFormat(adfs->pwfxSrc)) {
+#else
         PCM_GetFormatIndex(adfs->pwfxSrc) == 0xFFFFFFFF) {
+#endif
             WARN("not possible\n");
             return ACMERR_NOTPOSSIBLE;
     }
@@ -1208,7 +1226,11 @@ static	LRESULT	PCM_FormatSuggest(PACMDRVFORMATSUGGEST adfs)
         }
     }
     /* check if result is ok */
+#ifdef __REACTOS__
+    if (!PCM_IsSuggestableFormat(adfs->pwfxDst)) {
+#else
     if (PCM_GetFormatIndex(adfs->pwfxDst) == 0xFFFFFFFF) {
+#endif
         WARN("not possible\n");
         return ACMERR_NOTPOSSIBLE;
     }
