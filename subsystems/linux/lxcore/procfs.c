@@ -2319,6 +2319,131 @@ LxPagemapOpen(
 }
 
 static
+LONG64
+LxPidMemTransfer(
+    _In_ PLX_FILE File,
+    _In_ ULONG64 Buffer,
+    _In_ ULONG64 Length,
+    _Inout_opt_ PLONG64 Offset,
+    _In_ BOOLEAN Write)
+{
+    PLX_PROCESS Target = File->PidProcess;
+    ULONG64 Address = (ULONG64)((Offset != NULL) ? *Offset : File->Position), Done = 0;
+    PEPROCESS EProcess;
+    PUCHAR Page;
+    LONG64 Result = 0;
+
+    if ((Target == NULL) || Target->Exited)
+        return 0;
+    if (!NT_SUCCESS(PsLookupProcessByProcessId(ULongToHandle(Target->Mm->NtPid), &EProcess)))
+        return 0;
+    Page = LxAlloc(LX_PAGE_SIZE);
+    if (Page == NULL)
+    {
+        ObDereferenceObject(EProcess);
+        return -LX_ENOMEM;
+    }
+    while (Done < Length)
+    {
+        ULONG Size = (ULONG)min(Length - Done, LX_PAGE_SIZE - ((Address + Done) & (LX_PAGE_SIZE - 1)));
+
+        if (Write)
+        {
+            Result = LxCopyFromUser(Page, Buffer + Done, Size);
+            if (Result == 0)
+                Result = LxMmForceAccess(Target, EProcess, Address + Done, Page, Size, TRUE);
+        }
+        else
+        {
+            Result = LxMmForceAccess(Target, EProcess, Address + Done, Page, Size, FALSE);
+            if (Result == 0)
+                Result = LxCopyToUser(Buffer + Done, Page, Size);
+        }
+        if (Result != 0)
+            break;
+        Done += Size;
+    }
+    LxFree(Page);
+    ObDereferenceObject(EProcess);
+    if (Done == 0)
+        return Result;
+    if (Offset != NULL)
+        *Offset = (LONG64)(Address + Done);
+    else
+        File->Position = (LONG64)(Address + Done);
+    return (LONG64)Done;
+}
+
+static
+LONG64
+LxPidMemRead(
+    _In_ PLX_FILE File,
+    _In_ ULONG64 Buffer,
+    _In_ ULONG64 Length,
+    _Inout_opt_ PLONG64 Offset)
+{
+    return LxPidMemTransfer(File, Buffer, Length, Offset, FALSE);
+}
+
+static
+LONG64
+LxPidMemWrite(
+    _In_ PLX_FILE File,
+    _In_ ULONG64 Buffer,
+    _In_ ULONG64 Length,
+    _Inout_opt_ PLONG64 Offset)
+{
+    return LxPidMemTransfer(File, Buffer, Length, Offset, TRUE);
+}
+
+static
+LONG
+LxPidMemStat(
+    _In_ PLX_FILE File,
+    _Out_ PLX_STAT Stat)
+{
+    LxPagemapStat(File, Stat);
+    Stat->Mode = LX_S_IFREG | 0600;
+    return 0;
+}
+
+static const LX_FILE_OPS LxPidMemOps =
+{
+    LxPidMemRead, LxPidMemWrite, NULL, NULL, LxPidMemStat, LxPagemapSeek, NULL, NULL, NULL
+};
+
+static
+LONG
+LxPidMemOpen(
+    _In_ PLX_PROCESS Process,
+    _In_ ULONG Pid,
+    _In_ ULONG Flags,
+    _Out_ PLX_FILE *Result)
+{
+    PLX_PROCESS Target = LxProcessLookup(Process->Instance, Pid);
+    PLX_FILE File;
+
+    *Result = NULL;
+    if (Target == NULL)
+        return -LX_ESRCH;
+    if (LxPtraceAccessCheck(Process, Target) != 0)
+    {
+        LxProcessDereference(Target);
+        return -LX_EACCES;
+    }
+    File = LxFileAlloc(&LxPidMemOps, Flags & LX_O_ACCMODE, LX_S_IFREG);
+    if (File == NULL)
+    {
+        LxProcessDereference(Target);
+        return -LX_ENOMEM;
+    }
+    File->Mode = 0600;
+    File->PidProcess = Target;
+    *Result = File;
+    return 0;
+}
+
+static
 VOID
 LxGenPidPersonality(
     _In_ PLX_PROCESS Self,
@@ -2353,6 +2478,7 @@ static const LX_PID_ENTRY LxPidEntries[] =
     { "loginuid", LX_S_IFREG, 0644, "4294967295", NULL, LxWriteAccept },
     { "map_files", LX_S_IFDIR, 0500, NULL, NULL, NULL },
     { "maps", LX_S_IFREG, 0444, NULL, LxGenPidMaps, NULL },
+    { "mem", LX_S_IFREG, 0600, NULL, NULL, NULL },
     { "mountinfo", LX_S_IFREG, 0444, NULL, LxGenPidMountinfo, NULL },
     { "mounts", LX_S_IFREG, 0444, NULL, LxGenPidMounts, NULL },
     { "mountstats", LX_S_IFREG, 0400, "", NULL, NULL },
@@ -5843,9 +5969,12 @@ LxSynthOpen(
 
             case LxProcPidFile:
                 if ((Synth.Index < RTL_NUMBER_OF(LxPidEntries)) &&
-                    (strcmp(LxPidEntries[Synth.Index].Name, "pagemap") == 0))
+                    ((strcmp(LxPidEntries[Synth.Index].Name, "pagemap") == 0) ||
+                     (strcmp(LxPidEntries[Synth.Index].Name, "mem") == 0)))
                 {
-                    Error = LxPagemapOpen(Process, Synth.Pid, Flags, &File);
+                    Error = (LxPidEntries[Synth.Index].Name[0] == 'm') ?
+                            LxPidMemOpen(Process, Synth.Pid, Flags, &File) :
+                            LxPagemapOpen(Process, Synth.Pid, Flags, &File);
                     if (Error != 0)
                         goto Exit;
                     File->Ino = LxSynthIno(Node);

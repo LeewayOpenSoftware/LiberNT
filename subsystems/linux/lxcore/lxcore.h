@@ -1467,6 +1467,7 @@ BOOLEAN LxPtraceWaitTrapped(_In_ PLX_PROCESS Tracer, _In_ ULONG Type, _In_ ULONG
 ULONG LxPtraceTracerPid(_In_ PLX_PROCESS Viewer, _In_ PLX_THREAD Thread);
 BOOLEAN LxPtraceStopped(_In_ PLX_THREAD Thread);
 LONG LxPtraceSetPtracer(_In_ PLX_PROCESS Process, _In_ ULONG64 Value);
+LONG LxPtraceAccessCheck(_In_ PLX_PROCESS Caller, _In_ PLX_PROCESS Target);
 LONG LxYamaScopeValue(VOID);
 LONG LxYamaSetScope(_In_ PLX_PROCESS Process, _In_ ULONG Value);
 BOOLEAN LxPgrpOrphaned(_In_ PLX_INSTANCE Instance, _In_ ULONG Pgid, _In_opt_ PLX_PROCESS Ignored);

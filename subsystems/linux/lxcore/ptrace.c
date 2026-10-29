@@ -964,6 +964,14 @@ LxPtraceMayAttach(
 }
 
 LONG
+LxPtraceAccessCheck(
+    _In_ PLX_PROCESS Caller,
+    _In_ PLX_PROCESS Target)
+{
+    return (Caller->Mm == Target->Mm) ? 0 : LxPtraceMayAttach(Caller, Target);
+}
+
+LONG
 LxPtraceSetPtracer(
     _In_ PLX_PROCESS Process,
     _In_ ULONG64 Value)
