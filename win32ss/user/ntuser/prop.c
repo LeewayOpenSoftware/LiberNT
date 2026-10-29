@@ -21,7 +21,7 @@ IntGetProp(
     PLIST_ENTRY ListEntry;
     PPROPERTY Property;
     UINT i;
-    WORD SystemFlag = SystemProp ? PROPERTY_FLAG_SYSTEM : 0;
+    WORD SystemFlag = (SystemProp || IntIsPrivatePropertyAtom(Atom)) ? PROPERTY_FLAG_SYSTEM : 0;
 
     NT_ASSERT(UserIsEntered());
     ListEntry = Window->PropListHead.Flink;
@@ -101,7 +101,7 @@ UserSetProp(
             return FALSE;
         }
         Prop->Atom = Atom;
-        Prop->fs = SystemProp ? PROPERTY_FLAG_SYSTEM : 0;
+        Prop->fs = (SystemProp || IntIsPrivatePropertyAtom(Atom)) ? PROPERTY_FLAG_SYSTEM : 0;
         InsertTailList(&Window->PropListHead, &Prop->PropListEntry);
         Window->PropListItems++;
     }

@@ -29,6 +29,16 @@
 
 #include <user32.h>
 
+#ifndef WOW64_I386_RUNTIME
+static const WCHAR PrivatePropPrefixW[] = L"ReactOS.Dwm.";
+
+static BOOLEAN
+IsPrivatePropNameW(LPCWSTR Name)
+{
+    return !wcsncmp(Name, PrivatePropPrefixW, _countof(PrivatePropPrefixW) - 1);
+}
+#endif
+
 #define ATOM_BUFFER_SIZE 256
 
 /* INTERNAL FUNCTIONS ********************************************************/
@@ -392,7 +402,7 @@ GetPropW(HWND hWnd, LPCWSTR lpString)
    * using the 32-bit WND and PROPERTY layouts. */
   return NtUserGetProp(hWnd, Atom);
 #else
-  Prop = IntGetProp(hWnd, Atom, FALSE);
+  Prop = IntGetProp(hWnd, Atom, HIWORD(lpString) && IsPrivatePropNameW(lpString));
   if (Prop != NULL) Data = Prop->Data;
   return Data;
 #endif
