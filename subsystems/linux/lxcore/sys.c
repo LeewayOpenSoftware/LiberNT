@@ -82,12 +82,15 @@ LONG64
 LxSysCall(
     _Inout_ PLX_CALL Call)
 {
-    PLX_SYSCALL_ENTRY Entry = LxArchSyscallEntry(Call->Number);
+    PLX_SYSCALL_ENTRY Entry;
     ULONG Trace = Call->Process->Trace;
     LONG64 Start, Verdict;
 
-    if ((Call->Thread->SeccompMode != 0) && !LxSeccompCheck(Call, &Verdict))
+    if ((Call->Thread->PtraceWork & LX_PTW_SYSCALL) && !LxPtraceSyscallEntry(Call, &Verdict))
         return Verdict;
+    if ((Call->Thread->SeccompMode != 0) && !LxPtraceSeccompSuspended(Call->Thread) && !LxSeccompCheck(Call, &Verdict))
+        return Verdict;
+    Entry = LxArchSyscallEntry(Call->Number);
 
     if ((Entry != NULL) && (Entry->Handler != NULL))
     {
@@ -1989,6 +1992,9 @@ LX_SYSCALL(LxSysSetTidAddress)
 
 LX_SYSCALL(LxSysExit)
 {
+    Call->Thread->ExitCode = ((LONG)Call->Args[0] & 0xFF) << 8;
+    LxPtraceEvent(Call->Thread, Call->TrapFrame, Call->ExceptionFrame, LX_PTRACE_EVENT_EXIT, Call->Thread->ExitCode,
+                  FALSE);
     if (Call->Process->ThreadCount <= 1)
         LxProcessExitGroup(Call->Process, ((LONG)Call->Args[0] & 0xFF) << 8);
     if (Call->Thread->VforkExited)
@@ -1999,6 +2005,9 @@ LX_SYSCALL(LxSysExit)
 
 LX_SYSCALL(LxSysExitGroup)
 {
+    Call->Thread->ExitCode = ((LONG)Call->Args[0] & 0xFF) << 8;
+    LxPtraceEvent(Call->Thread, Call->TrapFrame, Call->ExceptionFrame, LX_PTRACE_EVENT_EXIT, Call->Thread->ExitCode,
+                  FALSE);
     LxProcessExitGroup(Call->Process, ((LONG)Call->Args[0] & 0xFF) << 8);
     return 0;
 }
@@ -2216,8 +2225,8 @@ LxCreateThread(
     CLIENT_ID ClientId;
     HANDLE Handle;
     NTSTATUS Status;
-    ULONG Tid;
-    LONG Error;
+    ULONG Tid, GlobalTid;
+    LONG Error, Event;
 
     if ((Request->Flags & (LX_CLONE_VM | LX_CLONE_SIGHAND)) != (LX_CLONE_VM | LX_CLONE_SIGHAND))
         return -LX_EINVAL;
@@ -2246,6 +2255,8 @@ LxCreateThread(
     if (Request->Flags & LX_CLONE_PARENT_SETTID)
         LxCopyToUser(Request->ParentTid, &Tid, sizeof(Tid));
 
+    GlobalTid = Thread->Tid;
+    Event = LxPtraceCloneChild(Call->Thread, Thread, Request->Flags, Request->ExitSignal);
     Status = PsPicoCreateThread(NtCurrentProcess(), Context, Thread, &Handle, &ClientId);
     if (!NT_SUCCESS(Status))
     {
@@ -2253,6 +2264,8 @@ LxCreateThread(
         return -LxStatusToErrno(Status);
     }
     ZwClose(Handle);
+    if (Event != 0)
+        LxPtraceEvent(Call->Thread, Call->TrapFrame, Call->ExceptionFrame, Event, GlobalTid, TRUE);
     return Tid;
 }
 
@@ -2273,7 +2286,7 @@ LxForkProcess(
     BOOLEAN Shared = ((Request->Flags & (LX_CLONE_VM | LX_CLONE_VFORK)) == LX_CLONE_VM);
     NTSTATUS Status;
     ULONG Pid, UserPid;
-    LONG Error;
+    LONG Error, Event;
 
     if (Request->Flags & (LX_CLONE_NEWNS | LX_CLONE_NEWUTS | LX_CLONE_NEWIPC | LX_CLONE_NEWUSER |
                           LX_CLONE_NEWPID | LX_CLONE_NEWNET | LX_CLONE_NEWCGROUP | LX_CLONE_NEWTIME))
@@ -2369,6 +2382,7 @@ LxForkProcess(
         Thread->ClearChildTid = Request->ChildTid;
     if (Request->Flags & LX_CLONE_CHILD_SETTID)
         Thread->SetChildTid = Request->ChildTid;
+    Event = LxPtraceCloneChild(Call->Thread, Thread, Request->Flags, Request->ExitSignal);
 
     if (Borrow)
     {
@@ -2457,6 +2471,7 @@ LxForkProcess(
         LxThreadAttach(Thread);
         Thread->VforkParent = Call->Thread;
         Call->Thread->Vfork = Thread;
+        Call->Thread->PtraceVforkPid = (Event != 0) ? Pid : 0;
         LxArchSetThreadPointer(Call->TrapFrame, Thread->Tls);
         if (Thread->SetChildTid != 0)
             LxCopyToUser(Thread->SetChildTid, &Thread->Tid, sizeof(Thread->Tid));
@@ -2486,8 +2501,13 @@ LxForkProcess(
     if (ProcessHandle != NULL)
         ZwClose(ProcessHandle);
 
+    if (Event != 0)
+        LxPtraceEvent(Call->Thread, Call->TrapFrame, Call->ExceptionFrame, Event, Pid, TRUE);
     if (Request->Flags & LX_CLONE_VFORK)
+    {
         KeWaitForSingleObject(&Child->VforkDone, UserRequest, KernelMode, FALSE, NULL);
+        LxPtraceEvent(Call->Thread, Call->TrapFrame, Call->ExceptionFrame, LX_PTRACE_EVENT_VFORK_DONE, Pid, TRUE);
+    }
 
     return UserPid;
 }
@@ -2585,6 +2605,7 @@ LxVforkExec(
     Thread->UserAffinity = Borrowed->UserAffinity;
     LxNsThreadInherit(Thread, Borrowed);
     LxSeccompInherit(Thread, Borrowed);
+    LxPtraceTransfer(Borrowed, Thread);
     KeInitializeEvent(&Request->Done, NotificationEvent, FALSE);
     Request->Vfork = TRUE;
     Thread->Exec = Request;
@@ -2616,6 +2637,7 @@ LxVforkExec(
         }
         if (EProcess != NULL)
             ObDereferenceObject(EProcess);
+        LxPtraceTransfer(Thread, Borrowed);
         LxThreadFree(Thread);
         Child->Mm = Owner;
         LxThreadAttach(Borrowed);
@@ -2675,6 +2697,7 @@ LxSharedVmExec(
     Thread->UserAffinity = Current->UserAffinity;
     LxNsThreadInherit(Thread, Current);
     LxSeccompInherit(Thread, Current);
+    LxPtraceTransfer(Current, Thread);
     KeInitializeEvent(&Request->Done, NotificationEvent, FALSE);
     Request->Vfork = TRUE;
     Thread->Exec = Request;
@@ -2702,6 +2725,7 @@ LxSharedVmExec(
     }
     else
     {
+        LxPtraceTransfer(Thread, Current);
         LxThreadFree(Thread);
         if (ProcessHandle == NULL)
             LxProcessDereference(Child);
@@ -2979,7 +3003,10 @@ LxExecCommon(
     {
         Status = LxExecImage(Call->Thread, &Request, Call->TrapFrame, Call->ExceptionFrame, &Errno);
         if (NT_SUCCESS(Status))
+        {
             Result = LX_SYSCALL_NO_RESULT;
+            LxPtraceExec(Call->Thread, Call->TrapFrame, Call->ExceptionFrame);
+        }
         else if (Status == STATUS_UNSUCCESSFUL)
             Result = LX_SIGSEGV;
         else
@@ -3068,6 +3095,7 @@ typedef struct _LX_WAIT_SELECTOR
     ULONG Id;
     PLX_PROCESS PidfdTarget;
     ULONG Options;
+    BOOLEAN Trapped;
 } LX_WAIT_SELECTOR, *PLX_WAIT_SELECTOR;
 
 static
@@ -3101,7 +3129,7 @@ LxWaitJobctlReport(
     BOOLEAN Found = FALSE;
     LONG Status = 0;
 
-    if (!(Options & (LX_WSTOPPED | LX_WCONTINUED)) || Child->Exited)
+    if (!(Options & (LX_WSTOPPED | LX_WCONTINUED)) || Child->Exited || LxPtraceTracedBy(Child, Selector->Process))
         return FALSE;
     ExAcquireFastMutex(&Child->Lock);
     if ((Options & LX_WSTOPPED) && (Child->JobctlFlags & LX_JOBCTL_STOPPED) && (Child->GroupExitCode != 0))
@@ -3150,6 +3178,15 @@ LxWaitReady(
         }
     }
     ExReleaseFastMutex(&Process->Lock);
+    if (!Ready)
+    {
+        ULONG Tid, Uid;
+        LONG Status;
+        BOOLEAN Trapped;
+
+        Ready = LxPtraceWaitFind(Process, Selector->Type, Selector->Id, Selector->PidfdTarget, Selector->Options, FALSE,
+                                 &Tid, &Status, &Uid, &Trapped, &Any);
+    }
     return Ready || !Any;
 }
 
@@ -3211,6 +3248,12 @@ LxWaitChild(
             *Uid = Reported->Uid[0];
             LxProcessUsage(Reported, NULL, ChildUsage);
             LxProcessDereference(Reported);
+            return 0;
+        }
+        if ((Found == NULL) &&
+            LxPtraceWaitFind(Process, Selector->Type, Selector->Id, Selector->PidfdTarget, Selector->Options, TRUE,
+                             FoundPid, WaitStatus, Uid, &Selector->Trapped, &Any))
+        {
             return 0;
         }
 
@@ -3384,7 +3427,12 @@ LX_SYSCALL(LxSysWaitid)
         Info.Signo = LX_SIGCHLD;
         Info.Child.Pid = (LONG)FoundPid;
         Info.Child.Uid = LxCredViewId(Call->Process, FALSE, Uid);
-        if ((Status & 0xFF) == 0x7F)
+        if (((Status & 0xFF) == 0x7F) && Selector.Trapped)
+        {
+            Info.Code = LX_CLD_TRAPPED;
+            Info.Child.Status = (Status >> 8) & 0xFFFF;
+        }
+        else if ((Status & 0xFF) == 0x7F)
         {
             Info.Code = LX_CLD_STOPPED;
             Info.Child.Status = (Status >> 8) & 0xFF;
@@ -3906,9 +3954,11 @@ LX_SYSCALL(LxSysPrctl)
         case LX_PR_GET_TID_ADDRESS:
             return LxCopyToUser(Arg, &Thread->ClearChildTid, sizeof(ULONG64));
 
+        case LX_PR_SET_PTRACER:
+            return LxPtraceSetPtracer(Process, Arg);
+
         case LX_PR_SET_THP_DISABLE:
         case LX_PR_GET_THP_DISABLE:
-        case 0x59616D61:
         case 0x53564D41:
             return 0;
 

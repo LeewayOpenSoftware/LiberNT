@@ -570,7 +570,6 @@ LxSeccompRun(
     return 0;
 }
 
-static
 ULONG
 LxSeccompAuditArch(VOID)
 {
@@ -807,10 +806,12 @@ LxSeccompNotify(
     return Continue;
 }
 
+static
 BOOLEAN
-LxSeccompCheck(
+LxSeccompCheckCommon(
     _Inout_ PLX_CALL Call,
-    _Out_ PLONG64 Result)
+    _Out_ PLONG64 Result,
+    _In_ BOOLEAN Recheck)
 {
     PLX_THREAD Thread = Call->Thread;
     PLX_SECCOMP_FILTER Filter, Current, Match = NULL;
@@ -872,11 +873,22 @@ LxSeccompCheck(
             LxSeccompLog(Call, 0, Action, Match->Log);
             return FALSE;
 
-        /* TODO: stop for a ptrace tracer on SECCOMP_RET_TRACE once ptrace exists; ENOSYS matches Linux without a tracer. */
         case LX_SECCOMP_RET_TRACE:
-            *Result = -LX_ENOSYS;
-            LxSeccompLog(Call, 0, Action, Match->Log);
-            return FALSE;
+            if (Recheck)
+                return TRUE;
+            if (!LxPtraceSeccomp(Call, Action & LX_SECCOMP_RET_DATA))
+            {
+                *Result = -LX_ENOSYS;
+                LxSeccompLog(Call, 0, Action, Match->Log);
+                return FALSE;
+            }
+            if (((((ULONG64)Thread->Pending | (ULONG64)Thread->Process->Pending) >> (LX_SIGKILL - 1)) & 1) ||
+                ((LONG)Call->Number < 0))
+            {
+                LxSeccompLog(Call, 0, Action, Match->Log);
+                return FALSE;
+            }
+            return LxSeccompCheckCommon(Call, Result, TRUE);
 
         case LX_SECCOMP_RET_USER_NOTIF:
             if (LxSeccompNotify(Call, Match, Data, Result))
@@ -910,6 +922,14 @@ LxSeccompCheck(
             LxSeccompKill(Call, LX_SIGSYS, TRUE);
             return FALSE;
     }
+}
+
+BOOLEAN
+LxSeccompCheck(
+    _Inout_ PLX_CALL Call,
+    _Out_ PLONG64 Result)
+{
+    return LxSeccompCheckCommon(Call, Result, FALSE);
 }
 
 static

@@ -1097,6 +1097,8 @@ LxGenPidStat(
             State = 'R';
         if ((State != 'Z') && Thread->Stopped && ((Synth->Tid != 0) || (Thread->Tid == Process->Pid)))
             State = 'T';
+        if ((State != 'Z') && LxPtraceStopped(Thread) && ((Synth->Tid != 0) || (Thread->Tid == Process->Pid)))
+            State = 't';
         if ((Synth->Tid != 0) && (Thread->EThread != NULL))
         {
             Target = Thread->EThread;
@@ -1155,6 +1157,8 @@ LxGenPidStatus(
     ULONG SeccompMode = 0, SeccompFilters = 0;
     LONG64 Spec = -LX_EINVAL;
     PCSTR SpecText;
+    ULONG TracerPid = 0;
+    BOOLEAN TraceStopped = FALSE;
     PLIST_ENTRY Entry;
     CHAR Comm[16], List[256];
     LONG Signal;
@@ -1183,6 +1187,8 @@ LxGenPidStatus(
             SeccompMode = Thread->SeccompMode;
             SeccompFilters = LxSeccompFilterCount(Thread);
             Spec = LxSpecCtrlGet(Thread, LX_PR_SPEC_STORE_BYPASS);
+            TracerPid = LxPtraceTracerPid(Self, Thread);
+            TraceStopped = LxPtraceStopped(Thread);
             break;
         }
     }
@@ -1196,13 +1202,15 @@ LxGenPidStatus(
 
     ProcNs = LxProcPidNs(Self, Synth);
     LxTextPrintf(Text,
-                 "Name:\t%s\nUmask:\t%04lo\nState:\t%s\nTgid:\t%lu\nNgid:\t0\nPid:\t%lu\nPPid:\t%lu\nTracerPid:\t0\n"
+                 "Name:\t%s\nUmask:\t%04lo\nState:\t%s\nTgid:\t%lu\nNgid:\t0\nPid:\t%lu\nPPid:\t%lu\nTracerPid:\t%lu\n"
                  "Uid:\t%lu\t%lu\t%lu\t%lu\nGid:\t%lu\t%lu\t%lu\t%lu\nFDSize:\t%lu\nGroups:\t",
                  Comm, Process->Umask,
-                 Process->Exited ? "Z (zombie)" : ((Process->JobctlFlags & LX_JOBCTL_STOPPED) ? "T (stopped)" : "S (sleeping)"),
+                 Process->Exited ? "Z (zombie)" :
+                 (TraceStopped ? "t (tracing stop)" :
+                  ((Process->JobctlFlags & LX_JOBCTL_STOPPED) ? "T (stopped)" : "S (sleeping)")),
                  LxPidNrIn(ProcNs, Process),
                  LxGlobalToNrIn(ProcNs, Synth->Tid ? Synth->Tid : Process->Pid),
-                 LxPidNsIsInit(Process) ? 0UL : LxGlobalToNrIn(ProcNs, Process->ParentPid),
+                 LxPidNsIsInit(Process) ? 0UL : LxGlobalToNrIn(ProcNs, Process->ParentPid), TracerPid,
                  LxCredViewId(Self, FALSE, Process->Uid[0]), LxCredViewId(Self, FALSE, Process->Uid[1]),
                  LxCredViewId(Self, FALSE, Process->Uid[2]), LxCredViewId(Self, FALSE, Process->Fsuid),
                  LxCredViewId(Self, TRUE, Process->Gid[0]), LxCredViewId(Self, TRUE, Process->Gid[1]),
@@ -2927,6 +2935,38 @@ LxWritePrintkDevkmsg(
 
 static
 VOID
+LxGenYamaScope(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    UNREFERENCED_PARAMETER(Self);
+    UNREFERENCED_PARAMETER(Synth);
+    LxTextPrintf(Text, "%ld\n", LxYamaScopeValue());
+}
+
+static
+LONG
+LxWriteYamaScope(
+    _In_ PLX_FILE File,
+    _In_reads_bytes_(Length) PCSTR Data,
+    _In_ ULONG Length)
+{
+    PLX_THREAD Current = LxCurrentThread();
+    ULONG Value;
+    LONG Error;
+
+    UNREFERENCED_PARAMETER(File);
+    if (Current == NULL)
+        return -LX_ESRCH;
+    if (Length == 0)
+        return 0;
+    Error = LxParseWrittenNumber(Data, Length, &Value);
+    return (Error != 0) ? Error : LxYamaSetScope(Current->Process, Value);
+}
+
+static
+VOID
 LxGenSeccompActions(
     _In_ PLX_PROCESS Self,
     _In_ PLX_SYNTH Synth,
@@ -3176,6 +3216,7 @@ static const LX_TABLE_ENTRY LxProcSysTable[] =
     { "kernel/sysrq", 0644, "176\n", NULL, LxWriteAccept },
     { "kernel/tainted", 0644, NULL, LxGenTainted, LxWriteTainted },
     { "kernel/threads-max", 0644, "63429\n", NULL, LxWriteAccept },
+    { "kernel/yama/ptrace_scope", 0644, NULL, LxGenYamaScope, LxWriteYamaScope },
     { "kernel/unprivileged_bpf_disabled", 0644, "2\n", NULL, LxWriteAccept },
     { "kernel/version", 0444, LX_KERNEL_UTS_VERSION "\n", NULL, NULL },
     { "lxcore/trace", 0200, "", NULL, LxWriteTrace },

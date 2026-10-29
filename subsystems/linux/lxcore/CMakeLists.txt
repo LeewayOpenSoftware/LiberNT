@@ -22,6 +22,7 @@ list(APPEND SOURCE
     pipe.c
     poll.c
     process.c
+    ptrace.c
     procfs.c
     seccomp.c
     signal.c

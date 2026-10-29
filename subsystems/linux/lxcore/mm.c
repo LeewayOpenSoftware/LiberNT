@@ -3562,6 +3562,80 @@ LxMmPrepareRemote(
     return (Result == -LX_ENXIO) ? -LX_EFAULT : ((Result < 0) ? Result : 0);
 }
 
+LONG
+LxMmForceAccess(
+    _In_ PLX_PROCESS Process,
+    _In_ PEPROCESS EProcess,
+    _In_ ULONG64 Address,
+    _Inout_updates_bytes_(Length) PVOID Buffer,
+    _In_ ULONG Length,
+    _In_ BOOLEAN Write)
+{
+    MEMORY_BASIC_INFORMATION Information;
+    KAPC_STATE ApcState;
+    PUCHAR Data = Buffer;
+    ULONG Done = 0;
+    LONG Error = 0;
+
+    Process = Process->Mm;
+    KeStackAttachProcess((PKPROCESS)EProcess, &ApcState);
+    LxMmLock(Process);
+    while ((Error == 0) && (Done < Length))
+    {
+        ULONG64 Cursor = Address + Done, Page = LX_ALIGN_DOWN(Cursor, LX_PAGE_SIZE);
+        ULONG Chunk = (ULONG)min((ULONG64)(Length - Done), Page + LX_PAGE_SIZE - Cursor);
+        PLX_VMA Vma = LxVmaFind(Process, Cursor);
+        BOOLEAN Cow, Changed = FALSE;
+
+        if ((Vma == NULL) || (Write && (Vma->Flags & (LX_MAP_SHARED | LX_VMA_HUGETLB)) && !(Vma->Prot & LX_PROT_WRITE)) ||
+            (LxMmPopulate(Process, Page, Page + LX_PAGE_SIZE, LX_PROT_READ, FALSE) < 0) ||
+            !NT_SUCCESS(LxVmQuery(Page, &Information)))
+        {
+            Error = -LX_EIO;
+            break;
+        }
+        Cow = LxVmaIsCow(Vma);
+        if (Write && !LxNtAllows(Information.Protect, LX_PROT_WRITE))
+        {
+            if (Cow)
+            {
+                Vma->Flags |= LX_VMA_DIRTY;
+                LxMmViewAllow(Process, Vma, PAGE_WRITECOPY);
+            }
+            Changed = NT_SUCCESS(LxVmProtectRange(Page, Page + LX_PAGE_SIZE, Cow ? PAGE_WRITECOPY : PAGE_READWRITE));
+            Error = Changed ? 0 : -LX_EIO;
+        }
+        else if (!Write && !LxNtAllows(Information.Protect, LX_PROT_READ))
+        {
+            Changed = NT_SUCCESS(LxVmProtectRange(Page, Page + LX_PAGE_SIZE, PAGE_READONLY));
+            Error = Changed ? 0 : -LX_EIO;
+        }
+        if (Error == 0)
+        {
+            _SEH2_TRY
+            {
+                if (Write)
+                    RtlCopyMemory((PVOID)(ULONG_PTR)Cursor, Data + Done, Chunk);
+                else
+                    RtlCopyMemory(Data + Done, (PVOID)(ULONG_PTR)Cursor, Chunk);
+            }
+            _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER)
+            {
+                Error = -LX_EIO;
+            }
+            _SEH2_END;
+        }
+        if (Changed)
+            LxVmProtectRange(Page, Page + LX_PAGE_SIZE, LxVmaNtProtect(Vma));
+        if (Write && (Error == 0) && (Vma->Prot & LX_PROT_EXEC))
+            LxVmFlushCode(Page, LX_PAGE_SIZE);
+        Done += Chunk;
+    }
+    LxMmUnlock(Process);
+    KeUnstackDetachProcess(&ApcState);
+    return Error;
+}
+
 static
 BOOLEAN
 LxMadviseKnown(

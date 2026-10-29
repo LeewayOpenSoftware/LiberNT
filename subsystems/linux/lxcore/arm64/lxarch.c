@@ -396,11 +396,157 @@ LxArchApplySpeculation(
         TrapFrame->Spsr |= 0x1000ULL;
 }
 
+#define LX_A64_PSTATE_RES0 (0xFFFFFFFF00000000ULL | 0x0C000000ULL | 0x00C00000ULL | 0x001FE000ULL | 0x20ULL)
+#define LX_A64_PSTATE_MODE  0x1FULL
+#define LX_A64_PSTATE_DAIF  0x3C0ULL
+
+LONG
+LxArchPtraceGetRegset(
+    _In_ PCONTEXT Context,
+    _In_ ULONG64 Tls,
+    _In_ LONG SyscallNr,
+    _In_ ULONG Type,
+    _Out_writes_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer,
+    _Out_ PULONG Size,
+    _Out_ PULONG Unit)
+{
+    PULONG64 Registers = (PULONG64)Buffer;
+    PULONG Words = (PULONG)Buffer;
+    ULONG Index;
+
+    RtlZeroMemory(Buffer, LX_PTRACE_REGSET_MAX);
+    switch (Type)
+    {
+        case LX_NT_PRSTATUS:
+            for (Index = 0; Index < 29; Index++)
+                Registers[Index] = Context->X[Index];
+            Registers[29] = Context->Fp;
+            Registers[30] = Context->Lr;
+            Registers[31] = Context->Sp;
+            Registers[32] = Context->Pc;
+            Registers[33] = Context->Cpsr & ~(LX_A64_PSTATE_RES0 | LX_A64_PSTATE_MODE | LX_A64_PSTATE_DAIF);
+            *Size = 34 * sizeof(ULONG64);
+            *Unit = sizeof(ULONG64);
+            return 0;
+
+        case LX_NT_PRFPREG:
+            RtlCopyMemory(Buffer, Context->V, sizeof(Context->V));
+            Words[128] = Context->Fpsr;
+            Words[129] = Context->Fpcr;
+            *Size = 132 * sizeof(ULONG);
+            *Unit = sizeof(ULONG);
+            return 0;
+
+        case LX_NT_ARM_TLS:
+            Registers[0] = Tls;
+            *Size = 2 * sizeof(ULONG64);
+            *Unit = sizeof(ULONG64);
+            return 0;
+
+        /* TODO: report and program the hardware breakpoint and watchpoint slots once the kernel arms them for EL0. */
+        case LX_NT_ARM_HW_BREAK:
+        case LX_NT_ARM_HW_WATCH:
+            Words[0] = (ULONG)(ARM64_READ_SYSREG(S3_0_C0_C5_0) & 0xF) << 8;
+            *Size = 66 * sizeof(ULONG);
+            *Unit = sizeof(ULONG);
+            return 0;
+
+        case LX_NT_ARM_SYSTEM_CALL:
+            Words[0] = (ULONG)SyscallNr;
+            *Size = sizeof(LONG);
+            *Unit = sizeof(LONG);
+            return 0;
+
+        default:
+            return -LX_EINVAL;
+    }
+}
+
+LONG
+LxArchPtraceSetRegset(
+    _Inout_ PCONTEXT Context,
+    _Inout_ PULONG64 Tls,
+    _Inout_ PLONG SyscallNr,
+    _In_ ULONG Type,
+    _In_reads_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer)
+{
+    PULONG64 Registers = (PULONG64)Buffer;
+    PULONG Words = (PULONG)Buffer;
+    ULONG64 Pstate;
+    ULONG Index;
+
+    switch (Type)
+    {
+        case LX_NT_PRSTATUS:
+            Pstate = Registers[33] & ~LX_A64_PSTATE_RES0;
+            if ((Pstate & (LX_A64_PSTATE_MODE | LX_A64_PSTATE_DAIF)) != 0)
+                return -LX_EINVAL;
+            for (Index = 0; Index < 29; Index++)
+                Context->X[Index] = Registers[Index];
+            Context->Fp = Registers[29];
+            Context->Lr = Registers[30];
+            Context->Sp = Registers[31];
+            Context->Pc = Registers[32];
+            Context->Cpsr = (ULONG)((Context->Cpsr & (LX_A64_PSTATE_RES0 | LX_A64_PSTATE_MODE | LX_A64_PSTATE_DAIF)) |
+                                    Pstate);
+            return 0;
+
+        case LX_NT_PRFPREG:
+            RtlCopyMemory(Context->V, Buffer, sizeof(Context->V));
+            Context->Fpsr = Words[128];
+            Context->Fpcr = Words[129];
+            return 0;
+
+        case LX_NT_ARM_TLS:
+            *Tls = Registers[0];
+            return 0;
+
+        case LX_NT_ARM_HW_BREAK:
+        case LX_NT_ARM_HW_WATCH:
+            return -LX_ENOSPC;
+
+        case LX_NT_ARM_SYSTEM_CALL:
+            *SyscallNr = (LONG)Words[0];
+            return 0;
+
+        default:
+            return -LX_EINVAL;
+    }
+}
+
+BOOLEAN
+LxArchPtraceSingleStep(
+    _Inout_ PCONTEXT Context,
+    _In_ BOOLEAN Enable)
+{
+    if (Enable)
+        Context->Cpsr |= 0x200000;
+    else
+        Context->Cpsr &= ~0x200000;
+    return TRUE;
+}
+
 BOOLEAN
 LxArchPersonalityAllowed(
     _In_ ULONG Personality)
 {
     return (Personality & 0xFF) != LX_PER_LINUX32;
+}
+
+LONG
+LxArchPtraceSyscallNumber(
+    _In_ PKTRAP_FRAME TrapFrame,
+    _In_ LONG Recorded)
+{
+    UNREFERENCED_PARAMETER(TrapFrame);
+    return Recorded;
+}
+
+LONG64
+LxArchPtraceSyscallReturn(
+    _In_ PCONTEXT Context)
+{
+    return (LONG64)Context->X0;
 }
 
 VOID

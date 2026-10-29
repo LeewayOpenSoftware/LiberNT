@@ -91,6 +91,7 @@ typedef struct _LX_RATELIMIT
 } LX_RATELIMIT, *PLX_RATELIMIT;
 typedef struct _LX_PROCESS LX_PROCESS, *PLX_PROCESS;
 typedef struct _LX_THREAD LX_THREAD, *PLX_THREAD;
+typedef struct _LX_PTRACE LX_PTRACE, *PLX_PTRACE;
 typedef struct _LX_SECCOMP_FILTER LX_SECCOMP_FILTER, *PLX_SECCOMP_FILTER;
 typedef struct _LX_INSTANCE LX_INSTANCE, *PLX_INSTANCE;
 typedef struct _LX_MOUNT LX_MOUNT, *PLX_MOUNT;
@@ -642,6 +643,9 @@ struct _LX_PROCESS
     ULONG GroupStopCount;
     volatile LONG ContinueGeneration;
     KEVENT ContinueEvent;
+    LIST_ENTRY Tracees;
+    LONG64 Ptracer;
+    volatile LONG Traced;
     ULONG Personality;
 };
 
@@ -723,6 +727,46 @@ struct _LX_THREAD
     UCHAR SpecSsb;
     volatile BOOLEAN JobctlStop;
     volatile BOOLEAN Stopped;
+    PLX_PTRACE Ptrace;
+    volatile LONG PtraceWork;
+    LONG ExitCode;
+    ULONG PtraceVforkPid;
+};
+
+#define LX_PTRACE_REGSET_MAX 528
+#define LX_PTW_SYSCALL  0x01
+#define LX_PTW_TRAP     0x02
+
+struct _LX_PTRACE
+{
+    LIST_ENTRY Link;
+    volatile LONG RefCount;
+    PLX_PROCESS Tracer;
+    PLX_PROCESS Process;
+    PLX_THREAD Thread;
+    ULONG Tid;
+    ULONG Options;
+    BOOLEAN Seized;
+    BOOLEAN Stopped;
+    BOOLEAN Exited;
+    BOOLEAN Listening;
+    BOOLEAN ContextDirty;
+    BOOLEAN HasSiginfo;
+    BOOLEAN SingleStep;
+    UCHAR SyscallOp;
+    LONG Report;
+    LONG ExitStatus;
+    LONG ResumeSignal;
+    LONG SyscallNr;
+    ULONG SeccompData;
+    ULONG64 Message;
+    ULONG64 SyscallArgs[6];
+    LONG64 SyscallRet;
+    ULONG64 Tls;
+    PCONTEXT Context;
+    LX_SIGINFO Siginfo;
+    volatile LONG Generation;
+    KEVENT Resume;
 };
 
 typedef struct _LX_CALL
@@ -1358,6 +1402,8 @@ LONG64 LxMmMapSection(_In_ PLX_PROCESS Process, _In_ PVOID Section, _In_ ULONG64
 LONG64 LxMmMapHugeSection(_In_ PLX_PROCESS Process, _In_ PLX_FILE File, _In_ ULONG64 Address, _In_ ULONG64 Length, _In_ ULONG Prot, _In_ BOOLEAN Remap);
 LONG LxMmDetachSection(_In_ PLX_PROCESS Process, _In_ ULONG64 Address);
 LONG LxMmPrepareRemote(_In_ PLX_PROCESS Process, _In_ PEPROCESS EProcess, _In_ ULONG64 Address, _In_ ULONG64 Length, _In_ BOOLEAN Write);
+LONG LxMmForceAccess(_In_ PLX_PROCESS Process, _In_ PEPROCESS EProcess, _In_ ULONG64 Address,
+                     _Inout_updates_bytes_(Length) PVOID Buffer, _In_ ULONG Length, _In_ BOOLEAN Write);
 VOID LxIpcShmVmaOpen(_In_ PVOID Section);
 VOID LxIpcShmVmaClose(_In_ PVOID Section);
 VOID LxIpcProcessExit(_In_ PLX_PROCESS Process);
@@ -1388,6 +1434,41 @@ VOID LxThreadAttach(_In_ PLX_THREAD Thread);
 BOOLEAN LxThreadDetach(_In_ PLX_THREAD Thread);
 BOOLEAN LxSignalIgnoredByDefault(_In_ LONG Signal);
 BOOLEAN LxSignalStopsByDefault(_In_ LONG Signal);
+VOID LxSignalWakeThread(_In_ PLX_PROCESS Process, _In_ ULONG Tid);
+VOID LxSignalForce(_In_ PLX_THREAD Thread, _In_ LONG Signal, _In_ PLX_SIGINFO Info);
+ULONG LxSeccompAuditArch(VOID);
+VOID LxPtraceInitialize(VOID);
+BOOLEAN LxPtraceEventEnabled(_In_ PLX_THREAD Thread, _In_ LONG Event);
+BOOLEAN LxPtraceEvent(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame,
+                      _In_ LONG Event, _In_ ULONG64 Message, _In_ BOOLEAN MessageIsTid);
+BOOLEAN LxPtraceSyscallEntry(_Inout_ PLX_CALL Call, _Out_ PLONG64 Result);
+VOID LxPtraceSyscallExit(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame,
+                         _In_ LONG64 Result);
+BOOLEAN LxPtraceSeccomp(_Inout_ PLX_CALL Call, _In_ ULONG Data);
+LONG LxPtraceSignal(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame,
+                    _In_ LONG Signal, _Inout_ PLX_SIGINFO Info);
+BOOLEAN LxPtraceGroupStop(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame,
+                          _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame, _In_ LONG Signal, _In_ LONG Generation);
+VOID LxPtraceTrap(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame);
+LONG LxPtraceCloneChild(_In_ PLX_THREAD Parent, _In_ PLX_THREAD Child, _In_ ULONG64 Flags, _In_ ULONG ExitSignal);
+VOID LxPtraceExec(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame, _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame);
+VOID LxPtraceRelease(_In_ PLX_THREAD Thread);
+VOID LxPtraceTransfer(_In_ PLX_THREAD From, _In_ PLX_THREAD To);
+BOOLEAN LxPtraceStepping(_In_ PLX_THREAD Thread);
+BOOLEAN LxPtraceSeccompSuspended(_In_ PLX_THREAD Thread);
+VOID LxPtraceThreadExit(_In_ PLX_THREAD Thread);
+VOID LxPtraceTracerExit(_In_ PLX_PROCESS Tracer);
+BOOLEAN LxPtraceTracedBy(_In_ PLX_PROCESS Process, _In_ PLX_PROCESS Tracer);
+BOOLEAN LxPtraceWaitFind(_In_ PLX_PROCESS Tracer, _In_ ULONG Type, _In_ ULONG Id, _In_opt_ PLX_PROCESS PidfdTarget,
+                         _In_ ULONG Options, _In_ BOOLEAN Consume, _Out_ PULONG Tid, _Out_ PLONG Status, _Out_ PULONG Uid,
+                         _Out_ PBOOLEAN Trapped, _Inout_ PBOOLEAN Any);
+BOOLEAN LxPtraceWaitTrapped(_In_ PLX_PROCESS Tracer, _In_ ULONG Type, _In_ ULONG Id, _In_opt_ PLX_PROCESS PidfdTarget,
+                            _In_ ULONG Options);
+ULONG LxPtraceTracerPid(_In_ PLX_PROCESS Viewer, _In_ PLX_THREAD Thread);
+BOOLEAN LxPtraceStopped(_In_ PLX_THREAD Thread);
+LONG LxPtraceSetPtracer(_In_ PLX_PROCESS Process, _In_ ULONG64 Value);
+LONG LxYamaScopeValue(VOID);
+LONG LxYamaSetScope(_In_ PLX_PROCESS Process, _In_ ULONG Value);
 BOOLEAN LxPgrpOrphaned(_In_ PLX_INSTANCE Instance, _In_ ULONG Pgid, _In_opt_ PLX_PROCESS Ignored);
 VOID LxJobctlOrphanCheck(_In_ PLX_PROCESS Process, _In_opt_ PLX_PROCESS Father);
 ULONG64 LxSignalDequeue(_In_ PLX_THREAD Thread, _In_ ULONG64 Mask, _Out_ PLX_SIGINFO Info);
@@ -1407,7 +1488,14 @@ LONG LxCoreSetPattern(_In_reads_bytes_(Length) PCSTR Data, _In_ ULONG Length);
 ULONG64 LxArchHwcap(VOID);
 ULONG64 LxArchHwcap2(VOID);
 LONG LxArchSpecStoreBypassMode(VOID);
+LONG LxArchPtraceGetRegset(_In_ PCONTEXT Context, _In_ ULONG64 Tls, _In_ LONG SyscallNr, _In_ ULONG Type,
+                           _Out_writes_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer, _Out_ PULONG Size, _Out_ PULONG Unit);
+LONG LxArchPtraceSetRegset(_Inout_ PCONTEXT Context, _Inout_ PULONG64 Tls, _Inout_ PLONG SyscallNr, _In_ ULONG Type,
+                           _In_reads_bytes_(LX_PTRACE_REGSET_MAX) PUCHAR Buffer);
+LONG LxArchPtraceSyscallNumber(_In_ PKTRAP_FRAME TrapFrame, _In_ LONG Recorded);
+LONG64 LxArchPtraceSyscallReturn(_In_ PCONTEXT Context);
 BOOLEAN LxArchPersonalityAllowed(_In_ ULONG Personality);
+BOOLEAN LxArchPtraceSingleStep(_Inout_ PCONTEXT Context, _In_ BOOLEAN Enable);
 VOID LxArchApplySpeculation(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame);
 LONG64 LxSpecCtrlGet(_In_ PLX_THREAD Thread, _In_ ULONG64 Which);
 LONG64 LxSpecCtrlSet(_Inout_ PLX_THREAD Thread, _In_ ULONG64 Which, _In_ ULONG64 Control);

@@ -494,6 +494,7 @@ typedef struct _LX_SCHED_ATTR
 #define LX_BUS_ADRERR       2
 #define LX_BUS_MCEERR_AR    4
 #define LX_TRAP_BRKPT       1
+#define LX_TRAP_TRACE       2
 #define LX_FPE_INTDIV       1
 #define LX_CLD_EXITED       1
 #define LX_CLD_KILLED       2
@@ -1399,6 +1400,99 @@ C_ASSERT(sizeof(LX_FLOCK) == 32);
 #define LX_PR_GET_PDEATHSIG         2
 #define LX_PR_GET_DUMPABLE          3
 #define LX_PR_SET_DUMPABLE          4
+#define LX_PTRACE_TRACEME               0
+#define LX_PTRACE_PEEKTEXT              1
+#define LX_PTRACE_PEEKDATA              2
+#define LX_PTRACE_PEEKUSR               3
+#define LX_PTRACE_POKETEXT              4
+#define LX_PTRACE_POKEDATA              5
+#define LX_PTRACE_POKEUSR               6
+#define LX_PTRACE_CONT                  7
+#define LX_PTRACE_KILL                  8
+#define LX_PTRACE_SINGLESTEP            9
+#define LX_PTRACE_ATTACH                16
+#define LX_PTRACE_DETACH                17
+#define LX_PTRACE_SYSCALL               24
+#define LX_PTRACE_SETOPTIONS            0x4200
+#define LX_PTRACE_GETEVENTMSG           0x4201
+#define LX_PTRACE_GETSIGINFO            0x4202
+#define LX_PTRACE_SETSIGINFO            0x4203
+#define LX_PTRACE_GETREGSET             0x4204
+#define LX_PTRACE_SETREGSET             0x4205
+#define LX_PTRACE_SEIZE                 0x4206
+#define LX_PTRACE_INTERRUPT             0x4207
+#define LX_PTRACE_LISTEN                0x4208
+#define LX_PTRACE_PEEKSIGINFO           0x4209
+#define LX_PTRACE_GETSIGMASK            0x420A
+#define LX_PTRACE_SETSIGMASK            0x420B
+#define LX_PTRACE_GET_SYSCALL_INFO      0x420E
+#define LX_PTRACE_GET_RSEQ_CONFIGURATION 0x420F
+#define LX_PTRACE_O_TRACESYSGOOD        0x00000001
+#define LX_PTRACE_O_TRACEFORK           0x00000002
+#define LX_PTRACE_O_TRACEVFORK          0x00000004
+#define LX_PTRACE_O_TRACECLONE          0x00000008
+#define LX_PTRACE_O_TRACEEXEC           0x00000010
+#define LX_PTRACE_O_TRACEVFORKDONE      0x00000020
+#define LX_PTRACE_O_TRACEEXIT           0x00000040
+#define LX_PTRACE_O_TRACESECCOMP        0x00000080
+#define LX_PTRACE_O_EXITKILL            0x00100000
+#define LX_PTRACE_O_SUSPEND_SECCOMP     0x00200000
+#define LX_PTRACE_O_MASK                (0x000000FF | LX_PTRACE_O_EXITKILL | LX_PTRACE_O_SUSPEND_SECCOMP)
+#define LX_PTRACE_EVENT_FORK            1
+#define LX_PTRACE_EVENT_VFORK           2
+#define LX_PTRACE_EVENT_CLONE           3
+#define LX_PTRACE_EVENT_EXEC            4
+#define LX_PTRACE_EVENT_VFORK_DONE      5
+#define LX_PTRACE_EVENT_EXIT            6
+#define LX_PTRACE_EVENT_SECCOMP         7
+#define LX_PTRACE_EVENT_STOP            128
+#define LX_PTRACE_SYSCALL_INFO_NONE     0
+#define LX_PTRACE_SYSCALL_INFO_ENTRY    1
+#define LX_PTRACE_SYSCALL_INFO_EXIT     2
+#define LX_PTRACE_SYSCALL_INFO_SECCOMP  3
+#define LX_PTRACE_PEEKSIGINFO_SHARED    1
+#define LX_NT_PRSTATUS                  1
+#define LX_NT_PRFPREG                   2
+#define LX_NT_ARM_TLS                   0x401
+#define LX_NT_ARM_HW_BREAK              0x402
+#define LX_NT_ARM_HW_WATCH              0x403
+#define LX_NT_ARM_SYSTEM_CALL           0x404
+#define LX_PR_SET_PTRACER               0x59616D61
+#define LX_PR_SET_PTRACER_ANY           ((ULONG64)-1)
+
+typedef struct _LX_PTRACE_SYSCALL_INFO
+{
+    UCHAR Op;
+    UCHAR Pad[3];
+    ULONG Arch;
+    ULONG64 InstructionPointer;
+    ULONG64 StackPointer;
+    union
+    {
+        struct
+        {
+            ULONG64 Nr;
+            ULONG64 Args[6];
+            ULONG RetData;
+        } Entry;
+        struct
+        {
+            LONG64 Rval;
+            UCHAR IsError;
+        } Exit;
+    };
+} LX_PTRACE_SYSCALL_INFO, *PLX_PTRACE_SYSCALL_INFO;
+
+C_ASSERT(FIELD_OFFSET(LX_PTRACE_SYSCALL_INFO, Entry.Args) == 32);
+C_ASSERT(sizeof(LX_PTRACE_SYSCALL_INFO) == 88);
+
+typedef struct _LX_PTRACE_PEEKSIGINFO_ARGS
+{
+    ULONG64 Off;
+    ULONG Flags;
+    LONG Nr;
+} LX_PTRACE_PEEKSIGINFO_ARGS, *PLX_PTRACE_PEEKSIGINFO_ARGS;
+
 #define LX_PER_LINUX32              0x0008
 #define LX_PER_CLEAR_ON_SETID       0x00740000
 #define LX_PR_GET_KEEPCAPS          7

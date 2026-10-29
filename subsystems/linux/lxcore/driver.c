@@ -34,8 +34,10 @@ LxPicoSystemCall(
     _Inout_opt_ PKEXCEPTION_FRAME ExceptionFrame)
 {
     PLX_THREAD Base = PsPicoGetThreadContext(PsGetCurrentThread());
+    PLX_THREAD Resumed;
     LX_CALL Call;
-    LONG64 Result;
+    LONG64 Result, Raw;
+    ULONG VforkPid;
 
     Base->InKernel++;
     RtlZeroMemory(&Call, sizeof(Call));
@@ -47,6 +49,7 @@ LxPicoSystemCall(
 
     Result = LxSysCall(&Call);
     Call.Thread = LxThreadOf(PsGetCurrentThread());
+    Raw = Result;
     if ((Result == -LX_ERESTARTSYS) || (Result == -LX_ERESTARTNOINTR) || (Result == -LX_ERESTARTNOHAND))
     {
         Call.Thread->Restart = Result;
@@ -54,12 +57,38 @@ LxPicoSystemCall(
         Result = -LX_EINTR;
     }
     if (Result != LX_SYSCALL_NO_RESULT)
+        LxArchSetSyscallResult(TrapFrame, Raw);
+    if ((Call.Thread->PtraceWork & LX_PTW_SYSCALL) && !Call.Thread->VforkExited)
+        LxPtraceSyscallExit(Call.Thread, TrapFrame, ExceptionFrame, (Raw == LX_SYSCALL_NO_RESULT) ? 0 : Raw);
+    if (!Call.Thread->VforkExited && LxPtraceStepping(Call.Thread))
+    {
+        LX_SIGINFO Info;
+
+        RtlZeroMemory(&Info, sizeof(Info));
+        Info.Signo = LX_SIGTRAP;
+        Info.Code = LX_TRAP_TRACE;
+        Info.Address = LxArchGetUserPc(TrapFrame);
+        LxSignalForce(Call.Thread, LX_SIGTRAP, &Info);
+    }
+    if ((Result != LX_SYSCALL_NO_RESULT) && (Raw != Result))
         LxArchSetSyscallResult(TrapFrame, Result);
 
     if (!Call.Thread->VforkExited)
         LxSignalCheckPending(Call.Thread, TrapFrame, ExceptionFrame);
     if (LxVforkFinish(TrapFrame, ExceptionFrame))
-        LxSignalCheckPending(LxThreadOf(PsGetCurrentThread()), TrapFrame, ExceptionFrame);
+    {
+        Resumed = LxThreadOf(PsGetCurrentThread());
+        VforkPid = Resumed->PtraceVforkPid;
+        Resumed->PtraceVforkPid = 0;
+        if (VforkPid != 0)
+        {
+            LxPtraceEvent(Resumed, TrapFrame, ExceptionFrame, LX_PTRACE_EVENT_VFORK, VforkPid, TRUE);
+            LxPtraceEvent(Resumed, TrapFrame, ExceptionFrame, LX_PTRACE_EVENT_VFORK_DONE, VforkPid, TRUE);
+        }
+        if (Resumed->PtraceWork & LX_PTW_SYSCALL)
+            LxPtraceSyscallExit(Resumed, TrapFrame, ExceptionFrame, 0);
+        LxSignalCheckPending(Resumed, TrapFrame, ExceptionFrame);
+    }
     LxArchApplySpeculation(LxThreadOf(PsGetCurrentThread()), TrapFrame);
     Base->InKernel--;
 }
@@ -107,6 +136,11 @@ LxPicoDispatchFault(
                    (ULONG64)ExceptionRecord->ExceptionInformation[1] :
                    (ULONG64)(ULONG_PTR)ExceptionRecord->ExceptionAddress;
 
+    if (Thread->Ptrace != NULL)
+    {
+        LxSignalForce(Thread, Signal, &Info);
+        return TRUE;
+    }
     if (LxSignalDeliverFault(Thread, TrapFrame, ExceptionFrame, Signal, &Info))
         return TRUE;
 
@@ -180,6 +214,9 @@ LxPicoThreadStart(
         KeSetEvent(&Request->Done, IO_NO_INCREMENT, FALSE);
         if (!NT_SUCCESS(Status))
             LxProcessExitGroup(Thread->Process, Vfork ? LX_SIGSEGV : (127 << 8));
+        LxPtraceExec(Thread, TrapFrame, ExceptionFrame);
+        if (Thread->PtraceWork & LX_PTW_SYSCALL)
+            LxPtraceSyscallExit(Thread, TrapFrame, ExceptionFrame, 0);
         LxArchApplySpeculation(Thread, TrapFrame);
         return;
     }
@@ -188,7 +225,7 @@ LxPicoThreadStart(
     LxArchSetThreadPointer(TrapFrame, Thread->Tls);
     if (Thread->SetChildTid != 0)
         LxCopyToUser(Thread->SetChildTid, &Thread->Tid, sizeof(Thread->Tid));
-    if (Thread->JobctlStop)
+    if (Thread->JobctlStop || (Thread->Ptrace != NULL))
         LxSignalCheckPending(Thread, TrapFrame, ExceptionFrame);
     LxArchApplySpeculation(Thread, TrapFrame);
 }
@@ -207,6 +244,7 @@ LxPicoThreadExit(
     if (Thread == NULL)
         return;
 
+    LxPtraceThreadExit(Thread);
     LxVforkAbandon(Thread);
     LxFutexExitRobustList(Thread);
     if (Thread->ClearChildTid != 0)
@@ -976,6 +1014,7 @@ DriverEntry(
     InitializeListHead(&LxInstanceList);
     ExInitializeFastMutex(&LxInstanceListLock);
     LxKlogInitialize();
+    LxPtraceInitialize();
     KeInitializeEvent(&LxInstanceCreateLock, SynchronizationEvent, TRUE);
     LxPipeInitialize();
     LxVcacheInitialize();

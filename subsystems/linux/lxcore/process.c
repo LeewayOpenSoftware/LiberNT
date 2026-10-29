@@ -324,6 +324,7 @@ LxProcessCreate(
     Process->Instance = Instance;
     InitializeListHead(&Process->GlobalLink);
     InitializeListHead(&Process->Children);
+    InitializeListHead(&Process->Tracees);
     InitializeListHead(&Process->Threads);
     InitializeListHead(&Process->Timers);
     InitializeListHead(&Process->Vmas);
@@ -579,6 +580,7 @@ LxThreadFree(
 {
     PLX_PROCESS Process = Thread->Process;
 
+    LxPtraceRelease(Thread);
     if (Thread->SignalRetry != NULL)
         ExDeleteTimer(Thread->SignalRetry, TRUE, TRUE, NULL);
     LxNsThreadRelease(Thread);
@@ -968,6 +970,7 @@ LxProcessExited(
 
     LxProcessExitStatus(Process, (ExitStatus & 0xFF) << 8);
     Process->ExitTime = (LONG64)KeQueryInterruptTime();
+    LxPtraceTracerExit(Process);
     if (Process->RealTimer != NULL)
         ExCancelTimer(Process->RealTimer->Timer, NULL);
     LxPosixTimersRelease(Process, FALSE);
@@ -1067,8 +1070,10 @@ LxSignalFromException(
             *Code = LX_ILL_ILLOPC;
             return LX_SIGILL;
         case STATUS_BREAKPOINT:
-        case STATUS_SINGLE_STEP:
             *Code = LX_TRAP_BRKPT;
+            return LX_SIGTRAP;
+        case STATUS_SINGLE_STEP:
+            *Code = LX_TRAP_TRACE;
             return LX_SIGTRAP;
         case STATUS_DATATYPE_MISALIGNMENT:
         case STATUS_IN_PAGE_ERROR:
