@@ -731,6 +731,8 @@ IoInitSystem(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
         return FALSE;
     }
 
+    KdInitializeBootLog(LoaderBlock);
+
     /* Let internal KD file providers open their targets against the final boot-volume path. */
 #ifndef _WINKD_
     KdSystemRootAvailable();

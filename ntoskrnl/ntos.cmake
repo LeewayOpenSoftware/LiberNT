@@ -169,6 +169,7 @@ list(APPEND SOURCE
     ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kddump.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdinit.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdlock.c
+    ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdlog.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdprint.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/kd64/kdtrap.c
     ${REACTOS_SOURCE_DIR}/ntoskrnl/ke/apc.c
