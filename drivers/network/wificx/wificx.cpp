@@ -32,6 +32,9 @@ typedef void (NTAPI *PFN_NETADAPTEREXTENSIONINITSETOIDREQUESTPREPROCESSCALLBACK)
 typedef void (NTAPI *PFN_NETADAPTERDISPATCHPREPROCESSEDOIDREQUEST)(PNET_DRIVER_GLOBALS, NETADAPTER, NDIS_OID_REQUEST *, WDFCONTEXT);
 typedef void (NTAPI *PFN_NETADAPTERCOMPLETEOIDREQUEST)(PNET_DRIVER_GLOBALS, NETADAPTER, NDIS_OID_REQUEST *, NDIS_STATUS);
 typedef NDIS_HANDLE (NTAPI *PFN_NETADAPTERWDMGETNDISHANDLE)(PNET_DRIVER_GLOBALS, NETADAPTER);
+typedef UINT8 (NTAPI *PFN_NETTXQUEUEGETDEMUXWMMINFO)(PNET_DRIVER_GLOBALS, NETPACKETQUEUE);
+typedef void (NTAPI *PFN_NETTXQUEUEGETDEMUXPEERADDRESSV2)(PNET_DRIVER_GLOBALS, NETPACKETQUEUE, NET_EUI48_ADDRESS *);
+typedef void (NTAPI *PFN_NETADAPTERWIFIPEER)(PNET_DRIVER_GLOBALS, NETADAPTER, const NET_EUI48_ADDRESS *);
 
 #define WX_TAG 'xCiW'
 #define WX_COMMAND_TIMEOUT_MS 5000
@@ -1272,10 +1275,21 @@ WxAdapterInitAddTxDemux(
     _In_ NETADAPTER_INIT *Adapter,
     _In_ CONST WIFI_ADAPTER_TX_DEMUX *Demux)
 {
+    NET_ADAPTER_TX_DEMUX NetDemux;
+
     UNREFERENCED_PARAMETER(DriverGlobals);
-    UNREFERENCED_PARAMETER(Adapter);
-    UNREFERENCED_PARAMETER(Demux);
-    /* TODO: peer and WMM transmit demultiplexing */
+
+    if (Adapter == NULL || Demux == NULL || Demux->Range == 0 ||
+        (Demux->Type != WifiAdapterTxDemuxTypePeerAddress && Demux->Type != WifiAdapterTxDemuxTypeWmmInfo))
+    {
+        return;
+    }
+
+    RtlZeroMemory(&NetDemux, sizeof(NetDemux));
+    NetDemux.Size = sizeof(NetDemux);
+    NetDemux.Type = (NET_ADAPTER_TX_DEMUX_TYPE)Demux->Type;
+    NetDemux.Range = Demux->Range;
+    ((PFN_NETADAPTERINITADDTXDEMUX)NetFunctions[NetAdapterInitAddTxDemuxTableIndex])(NetDriverGlobals, Adapter, &NetDemux);
 }
 
 static
@@ -1288,9 +1302,10 @@ WxTxQueueGetDemuxPeerAddress(
     NET_EUI48_ADDRESS Address;
 
     UNREFERENCED_PARAMETER(DriverGlobals);
-    UNREFERENCED_PARAMETER(Queue);
+
     RtlZeroMemory(&Address, sizeof(Address));
-    /* TODO: peer and WMM transmit demultiplexing */
+    ((PFN_NETTXQUEUEGETDEMUXPEERADDRESSV2)NetFunctions[NetTxQueueGetDemuxPeerAddressV2TableIndex])(
+        NetDriverGlobals, Queue, &Address);
     return Address;
 }
 
@@ -1302,9 +1317,7 @@ WxTxQueueGetDemuxWmmInfo(
     _In_ NETPACKETQUEUE Queue)
 {
     UNREFERENCED_PARAMETER(DriverGlobals);
-    UNREFERENCED_PARAMETER(Queue);
-    /* TODO: peer and WMM transmit demultiplexing */
-    return 0;
+    return ((PFN_NETTXQUEUEGETDEMUXWMMINFO)NetFunctions[NetTxQueueGetDemuxWmmInfoTableIndex])(NetDriverGlobals, Queue);
 }
 
 static
@@ -1316,9 +1329,7 @@ WxAdapterAddPeer(
     _In_ CONST NET_EUI48_ADDRESS *Address)
 {
     UNREFERENCED_PARAMETER(DriverGlobals);
-    UNREFERENCED_PARAMETER(Adapter);
-    UNREFERENCED_PARAMETER(Address);
-    /* TODO: peer and WMM transmit demultiplexing */
+    ((PFN_NETADAPTERWIFIPEER)NetFunctions[NetAdapterWifiAddPeerTableIndex])(NetDriverGlobals, Adapter, Address);
 }
 
 static
@@ -1330,9 +1341,7 @@ WxAdapterRemovePeer(
     _In_ CONST NET_EUI48_ADDRESS *Address)
 {
     UNREFERENCED_PARAMETER(DriverGlobals);
-    UNREFERENCED_PARAMETER(Adapter);
-    UNREFERENCED_PARAMETER(Address);
-    /* TODO: peer and WMM transmit demultiplexing */
+    ((PFN_NETADAPTERWIFIPEER)NetFunctions[NetAdapterWifiRemovePeerTableIndex])(NetDriverGlobals, Adapter, Address);
 }
 
 static
