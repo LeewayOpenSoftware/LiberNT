@@ -1081,7 +1081,7 @@ IntDefWindowProc(
 
             if (UserGetKeyState(VK_SHIFT) & 0x8000)
             {
-               co_IntSendMessage(UserHMGetHandle(Wnd), WM_CONTEXTMENU, (WPARAM)UserHMGetHandle(Wnd), MAKELPARAM(-1, -1));
+               co_IntSendMessage(UserHMGetHandle(Wnd), WM_CONTEXTMENU, (WPARAM)UserHMGetHandle(Wnd), -1);
             }
          }
          if (g_bWindowSnapEnabled && (IS_KEY_DOWN(gafAsyncKeyState, VK_LWIN) || IS_KEY_DOWN(gafAsyncKeyState, VK_RWIN)))
@@ -1200,7 +1200,7 @@ IntDefWindowProc(
             else if( wParam == VK_F10 )
             {
                 if (UserGetKeyState(VK_SHIFT) & 0x8000)
-                    co_IntSendMessage( UserHMGetHandle(Wnd), WM_CONTEXTMENU, (WPARAM)UserHMGetHandle(Wnd), MAKELPARAM(-1, -1) );
+                    co_IntSendMessage( UserHMGetHandle(Wnd), WM_CONTEXTMENU, (WPARAM)UserHMGetHandle(Wnd), -1 );
                 pti->MessageQueue->QF_flags |= QF_FF10STATUS; //iF10Key = 1;
             }
             else if( wParam == VK_ESCAPE && (UserGetKeyState(VK_SHIFT) & 0x8000))
