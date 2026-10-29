@@ -104,6 +104,7 @@ struct reactos_stream
     HANDLE user_pin;
     HANDLE io_handle;
     HANDLE event;
+    BOOL owns_event;
     HANDLE rt_event;
     HANDLE stop_event;
     HANDLE render_wake_event;
@@ -2865,6 +2866,8 @@ static NTSTATUS reactos_release_stream(struct release_stream_params *params)
     stream->magic = 0;
     if (stream->stop_event)
         CloseHandle(stream->stop_event);
+    if (stream->owns_event)
+        CloseHandle(stream->event);
     DeleteCriticalSection(&stream->lock);
     free(stream->buffer);
     free(stream->device_buffer);
@@ -4057,6 +4060,7 @@ static NTSTATUS reactos_get_position(struct get_position_params *params)
 static NTSTATUS reactos_set_event_handle(struct set_event_handle_params *params)
 {
     struct reactos_stream *stream = stream_from_handle(params->stream);
+    HANDLE event;
 
     if (!stream)
     {
@@ -4064,7 +4068,17 @@ static NTSTATUS reactos_set_event_handle(struct set_event_handle_params *params)
         return STATUS_SUCCESS;
     }
 
-    stream->event = params->event;
+    if (DuplicateHandle(GetCurrentProcess(), params->event, GetCurrentProcess(), &event, 0, FALSE, DUPLICATE_SAME_ACCESS))
+    {
+        if (stream->owns_event)
+            CloseHandle(stream->event);
+        stream->event = event;
+        stream->owns_event = TRUE;
+    }
+    else
+    {
+        stream->event = params->event;
+    }
     params->result = S_OK;
     return STATUS_SUCCESS;
 }
