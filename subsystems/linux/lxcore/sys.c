@@ -541,7 +541,7 @@ LxProcessVm(
         Result = -LX_EPERM;
         goto Exit;
     }
-    if (!NT_SUCCESS(PsLookupProcessByProcessId(ULongToHandle(Target->NtPid), &EProcess)))
+    if (!NT_SUCCESS(PsLookupProcessByProcessId(ULongToHandle(Target->Mm->NtPid), &EProcess)))
     {
         EProcess = NULL;
         Result = -LX_ESRCH;
