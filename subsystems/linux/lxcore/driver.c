@@ -549,6 +549,20 @@ LxInstallTty(
 }
 
 static
+VOID
+LxInitRootName(
+    _Out_ PUNICODE_STRING RootNt,
+    _In_ PVOID Buffer,
+    _In_ ULONG Length)
+{
+    RootNt->Buffer = Buffer;
+    RootNt->Length = (USHORT)Length;
+    while ((RootNt->Length > 2 * sizeof(WCHAR)) && (RootNt->Buffer[RootNt->Length / sizeof(WCHAR) - 1] == L'\\'))
+        RootNt->Length -= sizeof(WCHAR);
+    RootNt->MaximumLength = RootNt->Length;
+}
+
+static
 NTSTATUS
 LxIoctlCreateProcess(
     _Inout_ PIRP Irp,
@@ -605,11 +619,7 @@ LxIoctlCreateProcess(
     if ((In->Flags & LX_CREATE_JOIN) && (In->Flags & (LX_CREATE_BOOT | LX_CREATE_NEW_INSTANCE)))
         return STATUS_INVALID_PARAMETER;
 
-    RootNt.Buffer = (PWCHAR)Root;
-    RootNt.Length = (USHORT)In->RootLength;
-    while ((RootNt.Length > 2 * sizeof(WCHAR)) && (RootNt.Buffer[RootNt.Length / sizeof(WCHAR) - 1] == L'\\'))
-        RootNt.Length -= sizeof(WCHAR);
-    RootNt.MaximumLength = RootNt.Length;
+    LxInitRootName(&RootNt, Root, In->RootLength);
 
     KeWaitForSingleObject(&LxInstanceCreateLock, Executive, KernelMode, FALSE, NULL);
     Instance = LxInstanceFind(&RootNt);
@@ -935,6 +945,36 @@ LxDispatchReadWrite(
 
 static
 NTSTATUS
+LxIoctlQueryInstance(
+    _Inout_ PIRP Irp,
+    _In_ PIO_STACK_LOCATION Stack)
+{
+    ULONG InLength = Stack->Parameters.DeviceIoControl.InputBufferLength;
+    PLX_QUERY_INSTANCE_OUT Out = Irp->AssociatedIrp.SystemBuffer;
+    UNICODE_STRING RootNt;
+    PLX_INSTANCE Instance;
+    ULONG Flags = 0;
+
+    if ((InLength < 2 * sizeof(WCHAR)) || (InLength & 1) || (InLength > 32767 * sizeof(WCHAR)) ||
+        (Stack->Parameters.DeviceIoControl.OutputBufferLength < sizeof(*Out)))
+    {
+        return STATUS_INVALID_PARAMETER;
+    }
+    LxInitRootName(&RootNt, Irp->AssociatedIrp.SystemBuffer, InLength);
+    Instance = LxInstanceFind(&RootNt);
+    if (Instance != NULL)
+    {
+        if (!Instance->ShuttingDown)
+            Flags = LX_INSTANCE_RUNNING | (Instance->Booted ? LX_INSTANCE_BOOTED : 0);
+        LxInstanceDereference(Instance);
+    }
+    Out->Flags = Flags;
+    Irp->IoStatus.Information = sizeof(*Out);
+    return STATUS_SUCCESS;
+}
+
+static
+NTSTATUS
 LxIoctlPtyResize(
     _Inout_ PIRP Irp,
     _In_ PIO_STACK_LOCATION Stack)
@@ -974,6 +1014,10 @@ LxDispatchDeviceControl(
 
         case IOCTL_LX_PTY_RESIZE:
             Status = LxIoctlPtyResize(Irp, Stack);
+            break;
+
+        case IOCTL_LX_QUERY_INSTANCE:
+            Status = LxIoctlQueryInstance(Irp, Stack);
             break;
 
         default:
