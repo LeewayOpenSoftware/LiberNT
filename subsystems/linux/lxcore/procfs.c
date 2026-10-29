@@ -1151,6 +1151,8 @@ LxGenPidStatus(
     PLX_NS ProcNs;
     ULONG64 Ignored = 0, Caught = 0, Blocked = 0, Affinity = LxSchedActiveMask();
     ULONG SeccompMode = 0, SeccompFilters = 0;
+    LONG64 Spec = -LX_EINVAL;
+    PCSTR SpecText;
     PLIST_ENTRY Entry;
     CHAR Comm[16], List[256];
     LONG Signal;
@@ -1178,6 +1180,7 @@ LxGenPidStatus(
             Affinity &= Thread->Affinity;
             SeccompMode = Thread->SeccompMode;
             SeccompFilters = LxSeccompFilterCount(Thread);
+            Spec = LxSpecCtrlGet(Thread, LX_PR_SPEC_STORE_BYPASS);
             break;
         }
     }
@@ -1263,16 +1266,40 @@ LxGenPidStatus(
     LxTextPrintf(Text,
                  "CoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffff\nThreads:\t%ld\nSigQ:\t0/63429\n",
                  Process->Exited ? 1L : (LONG)Process->ThreadCount);
+    switch (Spec)
+    {
+        case -LX_EINVAL:
+            SpecText = "unknown";
+            break;
+        case LX_PR_SPEC_NOT_AFFECTED:
+            SpecText = "not vulnerable";
+            break;
+        case LX_PR_SPEC_PRCTL | LX_PR_SPEC_FORCE_DISABLE:
+            SpecText = "thread force mitigated";
+            break;
+        case LX_PR_SPEC_PRCTL | LX_PR_SPEC_DISABLE:
+            SpecText = "thread mitigated";
+            break;
+        case LX_PR_SPEC_PRCTL | LX_PR_SPEC_ENABLE:
+            SpecText = "thread vulnerable";
+            break;
+        case LX_PR_SPEC_DISABLE:
+            SpecText = "globally mitigated";
+            break;
+        default:
+            SpecText = "vulnerable";
+            break;
+    }
     LxTextPrintf(Text,
                  "SigPnd:\t%016llx\nShdPnd:\t%016llx\nSigBlk:\t%016llx\nSigIgn:\t%016llx\nSigCgt:\t%016llx\n"
                  "CapInh:\t%016llx\nCapPrm:\t%016llx\nCapEff:\t%016llx\nCapBnd:\t%016llx\nCapAmb:\t%016llx\n"
-                 "NoNewPrivs:\t%u\nSeccomp:\t%lu\nSeccomp_filters:\t%lu\nSpeculation_Store_Bypass:\tthread vulnerable\n"
+                 "NoNewPrivs:\t%u\nSeccomp:\t%lu\nSeccomp_filters:\t%lu\nSpeculation_Store_Bypass:\t%s\n"
                  "SpeculationIndirectBranch:\tunknown\nCpus_allowed:\t%llx\nCpus_allowed_list:\t%s\n"
                  "Mems_allowed:\t1\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t0\nnonvoluntary_ctxt_switches:\t0\n",
                  0ULL, (ULONG64)Process->Pending, Blocked, Ignored, Caught, Process->CapInheritable,
                  Process->CapPermitted, Process->CapEffective,
                  Process->CapBounding, Process->CapAmbient, Process->NoNewPrivs ? 1U : 0U, SeccompMode, SeccompFilters,
-                 Affinity, List);
+                 SpecText, Affinity, List);
     LxProcessDereference(Process);
 }
 

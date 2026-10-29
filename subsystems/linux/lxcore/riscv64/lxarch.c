@@ -326,6 +326,21 @@ LxArchRestartSyscall(
     TrapFrame->Context.Pc -= 4;
 }
 
+LONG
+LxArchSpecStoreBypassMode(VOID)
+{
+    return LX_SPEC_MODE_UNSUPPORTED;
+}
+
+VOID
+LxArchApplySpeculation(
+    _In_ PLX_THREAD Thread,
+    _Inout_ PKTRAP_FRAME TrapFrame)
+{
+    UNREFERENCED_PARAMETER(Thread);
+    UNREFERENCED_PARAMETER(TrapFrame);
+}
+
 VOID
 LxArchClassifyFault(
     _In_ PEXCEPTION_RECORD ExceptionRecord,

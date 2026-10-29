@@ -1418,6 +1418,15 @@ C_ASSERT(sizeof(LX_FLOCK) == 32);
 #define LX_PR_SET_THP_DISABLE       41
 #define LX_PR_GET_THP_DISABLE       42
 #define LX_PR_CAP_AMBIENT           47
+#define LX_PR_GET_SPECULATION_CTRL  52
+#define LX_PR_SET_SPECULATION_CTRL  53
+#define LX_PR_SPEC_STORE_BYPASS     0
+#define LX_PR_SPEC_NOT_AFFECTED     0
+#define LX_PR_SPEC_PRCTL            0x01
+#define LX_PR_SPEC_ENABLE           0x02
+#define LX_PR_SPEC_DISABLE          0x04
+#define LX_PR_SPEC_FORCE_DISABLE    0x08
+#define LX_PR_SPEC_DISABLE_NOEXEC   0x10
 
 #define LX_REBOOT_MAGIC1            0xFEE1DEAD
 #define LX_REBOOT_MAGIC2            672274793

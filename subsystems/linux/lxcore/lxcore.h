@@ -38,6 +38,13 @@
 #define LX_MMAP_MIN_ADDR    0x10000ULL
 #define LX_MMAP_GAP         (128ULL * 1024 * 1024)
 #define LX_VMA_HUGETLB      0x00020000
+#define LX_SPEC_MODE_UNSUPPORTED (-1)
+#define LX_SPEC_MODE_UNAFFECTED  0
+#define LX_SPEC_MODE_DYNAMIC     1
+#define LX_SPEC_MODE_VULNERABLE  2
+#define LX_SPEC_SSB_DISABLE      0x01
+#define LX_SPEC_SSB_FORCE        0x02
+#define LX_SPEC_SSB_NOEXEC       0x04
 #define LX_VMA_DONTDUMP     0x00040000
 #define LX_VMA_TOUCHED      0x00080000
 #define LX_VMA_WIPEONFORK   0x00100000
@@ -705,6 +712,7 @@ struct _LX_THREAD
     volatile UCHAR SeccompMode;
     PLX_SECCOMP_FILTER Seccomp;
     PVOID volatile SeccompNotif;
+    UCHAR SpecSsb;
 };
 
 typedef struct _LX_CALL
@@ -1385,6 +1393,11 @@ VOID LxCoreGetPattern(_Out_writes_(Size) PSTR Buffer, _In_ ULONG Size);
 LONG LxCoreSetPattern(_In_reads_bytes_(Length) PCSTR Data, _In_ ULONG Length);
 ULONG64 LxArchHwcap(VOID);
 ULONG64 LxArchHwcap2(VOID);
+LONG LxArchSpecStoreBypassMode(VOID);
+VOID LxArchApplySpeculation(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame);
+LONG64 LxSpecCtrlGet(_In_ PLX_THREAD Thread, _In_ ULONG64 Which);
+LONG64 LxSpecCtrlSet(_Inout_ PLX_THREAD Thread, _In_ ULONG64 Which, _In_ ULONG64 Control);
+VOID LxSpecExec(_Inout_ PLX_THREAD Thread);
 PCSTR LxArchPlatform(VOID);
 VOID LxArchGetSyscall(_In_ PKTRAP_FRAME TrapFrame, _Out_ PULONG Number, _Out_writes_(6) PULONG64 Args);
 VOID LxArchSetSyscallResult(_Inout_ PKTRAP_FRAME TrapFrame, _In_ LONG64 Result);

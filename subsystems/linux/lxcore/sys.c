@@ -2237,6 +2237,7 @@ LxCreateThread(
     Tid = LxTidNr(Call->Process, Thread);
     Thread->Tls = (Request->Flags & LX_CLONE_SETTLS) ? Request->Tls : LxArchGetThreadPointer(Call->TrapFrame);
     Thread->SigMask = Call->Thread->SigMask;
+    Thread->SpecSsb = Call->Thread->SpecSsb;
     LxSchedInherit(Thread, Call->Thread);
     if (Request->Flags & LX_CLONE_CHILD_CLEARTID)
         Thread->ClearChildTid = Request->ChildTid;
@@ -2358,6 +2359,7 @@ LxForkProcess(
     UserPid = LxPidNr(Parent, Child);
     Thread->Tls = (Request->Flags & LX_CLONE_SETTLS) ? Request->Tls : LxArchGetThreadPointer(Call->TrapFrame);
     Thread->SigMask = Call->Thread->SigMask;
+    Thread->SpecSsb = Call->Thread->SpecSsb;
     LxSchedInherit(Thread, Call->Thread);
     LxSeccompInherit(Thread, Call->Thread);
     if ((Request->Flags & (LX_CLONE_VM | LX_CLONE_VFORK)) != LX_CLONE_VM)
@@ -2577,6 +2579,7 @@ LxVforkExec(
     Thread->Tid = Borrowed->Tid;
     RtlCopyMemory(Thread->NsTid, Borrowed->NsTid, sizeof(Thread->NsTid));
     Thread->SigMask = Borrowed->SigMask;
+    Thread->SpecSsb = Borrowed->SpecSsb;
     Thread->Sched = Borrowed->Sched;
     Thread->Affinity = Borrowed->Affinity;
     Thread->UserAffinity = Borrowed->UserAffinity;
@@ -2666,6 +2669,7 @@ LxSharedVmExec(
     Thread->Tid = Current->Tid;
     RtlCopyMemory(Thread->NsTid, Current->NsTid, sizeof(Thread->NsTid));
     Thread->SigMask = Current->SigMask;
+    Thread->SpecSsb = Current->SpecSsb;
     Thread->Sched = Current->Sched;
     Thread->Affinity = Current->Affinity;
     Thread->UserAffinity = Current->UserAffinity;
@@ -3599,6 +3603,75 @@ LxPrctlSetMm(
     return 0;
 }
 
+LONG64
+LxSpecCtrlGet(
+    _In_ PLX_THREAD Thread,
+    _In_ ULONG64 Which)
+{
+    LONG Mode = LxArchSpecStoreBypassMode();
+
+    if (Mode == LX_SPEC_MODE_UNSUPPORTED)
+        return -LX_EINVAL;
+    if (Which != LX_PR_SPEC_STORE_BYPASS)
+        return -LX_ENODEV;
+    if (Mode == LX_SPEC_MODE_UNAFFECTED)
+        return LX_PR_SPEC_NOT_AFFECTED;
+    if (Mode == LX_SPEC_MODE_VULNERABLE)
+        return LX_PR_SPEC_ENABLE;
+    if (Thread->SpecSsb & LX_SPEC_SSB_FORCE)
+        return LX_PR_SPEC_PRCTL | LX_PR_SPEC_FORCE_DISABLE;
+    if (Thread->SpecSsb & LX_SPEC_SSB_NOEXEC)
+        return LX_PR_SPEC_PRCTL | LX_PR_SPEC_DISABLE_NOEXEC;
+    if (Thread->SpecSsb & LX_SPEC_SSB_DISABLE)
+        return LX_PR_SPEC_PRCTL | LX_PR_SPEC_DISABLE;
+    return LX_PR_SPEC_PRCTL | LX_PR_SPEC_ENABLE;
+}
+
+LONG64
+LxSpecCtrlSet(
+    _Inout_ PLX_THREAD Thread,
+    _In_ ULONG64 Which,
+    _In_ ULONG64 Control)
+{
+    if (LxArchSpecStoreBypassMode() == LX_SPEC_MODE_UNSUPPORTED)
+        return -LX_EINVAL;
+    if (Which != LX_PR_SPEC_STORE_BYPASS)
+        return -LX_ENODEV;
+    switch (Control)
+    {
+        case LX_PR_SPEC_ENABLE:
+            if (Thread->SpecSsb & LX_SPEC_SSB_FORCE)
+                return -LX_EPERM;
+            Thread->SpecSsb &= ~(LX_SPEC_SSB_DISABLE | LX_SPEC_SSB_NOEXEC);
+            return 0;
+
+        case LX_PR_SPEC_FORCE_DISABLE:
+            Thread->SpecSsb = (Thread->SpecSsb & ~LX_SPEC_SSB_NOEXEC) | LX_SPEC_SSB_DISABLE | LX_SPEC_SSB_FORCE;
+            return 0;
+
+        case LX_PR_SPEC_DISABLE:
+            Thread->SpecSsb = (Thread->SpecSsb & ~LX_SPEC_SSB_NOEXEC) | LX_SPEC_SSB_DISABLE;
+            return 0;
+
+        case LX_PR_SPEC_DISABLE_NOEXEC:
+            if (Thread->SpecSsb & LX_SPEC_SSB_FORCE)
+                return -LX_EPERM;
+            Thread->SpecSsb |= LX_SPEC_SSB_DISABLE | LX_SPEC_SSB_NOEXEC;
+            return 0;
+
+        default:
+            return -LX_ERANGE;
+    }
+}
+
+VOID
+LxSpecExec(
+    _Inout_ PLX_THREAD Thread)
+{
+    if (Thread->SpecSsb & LX_SPEC_SSB_NOEXEC)
+        Thread->SpecSsb &= ~(LX_SPEC_SSB_DISABLE | LX_SPEC_SSB_NOEXEC);
+}
+
 LX_SYSCALL(LxSysPrctl)
 {
     PLX_PROCESS Process = Call->Process;
@@ -3756,6 +3829,16 @@ LX_SYSCALL(LxSysPrctl)
 
         case LX_PR_GET_NO_NEW_PRIVS:
             return Process->NoNewPrivs;
+
+        case LX_PR_GET_SPECULATION_CTRL:
+            if ((Call->Args[2] | Call->Args[3] | Call->Args[4]) != 0)
+                return -LX_EINVAL;
+            return LxSpecCtrlGet(Thread, Arg);
+
+        case LX_PR_SET_SPECULATION_CTRL:
+            if ((Call->Args[3] | Call->Args[4]) != 0)
+                return -LX_EINVAL;
+            return LxSpecCtrlSet(Thread, Arg, Call->Args[2]);
 
         case LX_PR_GET_TID_ADDRESS:
             return LxCopyToUser(Arg, &Thread->ClearChildTid, sizeof(ULONG64));

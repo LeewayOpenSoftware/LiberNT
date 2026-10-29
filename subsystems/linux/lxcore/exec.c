@@ -898,6 +898,7 @@ LxExecImage(
         LxProcessSetCommand(Process, Request->Args, Request->ArgLength, Request->Env, Request->EnvLength, ExecPath, Request->FileName);
         LxPosixTimersRelease(Process, TRUE);
         Process->Execed = TRUE;
+        LxSpecExec(Thread);
         RtlZeroMemory(&Thread->AltStack, sizeof(Thread->AltStack));
         Thread->AltStack.Flags = LX_SS_DISABLE;
         RtlCopyMemory(Thread->Comm, Process->Comm, sizeof(Thread->Comm));

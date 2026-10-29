@@ -350,6 +350,52 @@ LxArchEmulateInstruction(
     return TRUE;
 }
 
+LONG
+LxArchSpecStoreBypassMode(VOID)
+{
+    static const struct
+    {
+        UCHAR Implementer;
+        USHORT Part;
+    } Unaffected[] =
+    {
+        { 0x41, 0xD03 }, { 0x41, 0xD04 }, { 0x41, 0xD05 }, { 0x42, 0x100 }, { 0x51, 0x803 }, { 0x51, 0x805 },
+    };
+    static volatile LONG Cached = MINLONG;
+    ULONG64 Midr;
+    ULONG Index;
+    LONG Mode;
+
+    Mode = ReadNoFence(&Cached);
+    if (Mode != MINLONG)
+        return Mode;
+    Midr = ARM64_READ_SYSREG(MIDR_EL1);
+    Mode = (LX_ID_FIELD(LxArm64ReadIdRegister(4, 1), 4) != 0) ? LX_SPEC_MODE_DYNAMIC : LX_SPEC_MODE_VULNERABLE;
+    for (Index = 0; Index < RTL_NUMBER_OF(Unaffected); Index++)
+    {
+        if ((((Midr >> 24) & 0xFF) == Unaffected[Index].Implementer) &&
+            (((Midr >> 4) & 0xFFF) == Unaffected[Index].Part))
+        {
+            Mode = LX_SPEC_MODE_UNAFFECTED;
+        }
+    }
+    InterlockedExchange(&Cached, Mode);
+    return Mode;
+}
+
+VOID
+LxArchApplySpeculation(
+    _In_ PLX_THREAD Thread,
+    _Inout_ PKTRAP_FRAME TrapFrame)
+{
+    if (LxArchSpecStoreBypassMode() != LX_SPEC_MODE_DYNAMIC)
+        return;
+    if (Thread->SpecSsb & LX_SPEC_SSB_DISABLE)
+        TrapFrame->Spsr &= ~0x1000ULL;
+    else
+        TrapFrame->Spsr |= 0x1000ULL;
+}
+
 VOID
 LxArchClassifyFault(
     _In_ PEXCEPTION_RECORD ExceptionRecord,

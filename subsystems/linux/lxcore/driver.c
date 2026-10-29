@@ -60,6 +60,7 @@ LxPicoSystemCall(
         LxSignalCheckPending(Call.Thread, TrapFrame, ExceptionFrame);
     if (LxVforkFinish(TrapFrame, ExceptionFrame))
         LxSignalCheckPending(LxThreadOf(PsGetCurrentThread()), TrapFrame, ExceptionFrame);
+    LxArchApplySpeculation(LxThreadOf(PsGetCurrentThread()), TrapFrame);
     Base->InKernel--;
 }
 
@@ -141,6 +142,8 @@ LxPicoDispatchException(
     Thread = LxThreadOf(PsGetCurrentThread());
     if (Handled && !Thread->VforkExited)
         LxSignalCheckPending(Thread, TrapFrame, ExceptionFrame);
+    if (Handled)
+        LxArchApplySpeculation(LxThreadOf(PsGetCurrentThread()), TrapFrame);
     Base->InKernel--;
     return Handled;
 }
@@ -177,6 +180,7 @@ LxPicoThreadStart(
         KeSetEvent(&Request->Done, IO_NO_INCREMENT, FALSE);
         if (!NT_SUCCESS(Status))
             LxProcessExitGroup(Thread->Process, Vfork ? LX_SIGSEGV : (127 << 8));
+        LxArchApplySpeculation(Thread, TrapFrame);
         return;
     }
 
@@ -184,6 +188,7 @@ LxPicoThreadStart(
     LxArchSetThreadPointer(TrapFrame, Thread->Tls);
     if (Thread->SetChildTid != 0)
         LxCopyToUser(Thread->SetChildTid, &Thread->Tid, sizeof(Thread->Tid));
+    LxArchApplySpeculation(Thread, TrapFrame);
 }
 
 static
