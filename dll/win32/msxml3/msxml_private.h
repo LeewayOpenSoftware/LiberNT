@@ -609,6 +609,10 @@ extern HRESULT SAXXMLReader_create(MSXML_VERSION, void**);
 extern HRESULT SAXAttributes_create(MSXML_VERSION, void**);
 extern HRESULT XMLHTTPRequest_create(void **);
 extern HRESULT ServerXMLHTTP_create(void **);
+#ifdef __REACTOS__
+extern HRESULT XMLHTTPRequest_create_version(MSXML_VERSION, void **);
+extern HRESULT ServerXMLHTTP_create_version(MSXML_VERSION, void **);
+#endif
 extern HRESULT XSLTemplate_create(void**);
 extern HRESULT MXWriter_create(MSXML_VERSION, void**);
 extern HRESULT MXNamespaceManager_create(void**);
