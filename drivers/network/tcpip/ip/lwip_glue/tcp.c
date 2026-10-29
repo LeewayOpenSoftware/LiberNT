@@ -702,6 +702,7 @@ LibTCPSendCallback(void *arg)
     PTCP_PCB pcb = msg->Input.Send.Connection->SocketContext;
     ULONG SendLength;
     UCHAR SendFlags;
+    BOOLEAN Urgent, NoDelay = TRUE;
 
     ASSERT(msg);
 
@@ -747,6 +748,14 @@ LibTCPSendCallback(void *arg)
         goto done;
     }
 
+    Urgent = (SendFlags & TCP_WRITE_FLAG_URG) != 0;
+    if (Urgent)
+    {
+        NoDelay = tcp_nagle_disabled(pcb);
+        tcp_nagle_disable(pcb);
+        tcp_output(pcb);
+    }
+
     msg->Output.Send.Error = tcp_write(pcb,
                                        msg->Input.Send.Data,
                                        SendLength,
@@ -762,6 +771,9 @@ LibTCPSendCallback(void *arg)
         /* The queue is too long */
         msg->Output.Send.Error = ERR_INPROGRESS;
     }
+
+    if (Urgent && !NoDelay)
+        tcp_nagle_enable(pcb);
 
 done:
     return;
