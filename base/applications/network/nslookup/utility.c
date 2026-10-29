@@ -18,12 +18,13 @@ BOOL SendRequest( PCHAR pInBuffer,
     USHORT RequestID, ResponseID;
     BOOL bWait;
     SOCKET s;
-    SOCKADDR_IN RecAddr, RecAddr2, SendAddr;
-    int SendAddrLen = sizeof(SendAddr);
+    SOCKADDR_INET RecAddr, RecAddr2, SendAddr;
+    int SendAddrLen = sizeof(SendAddr), AddrLen;
+    DWORD Timeout = State.timeout * 1000;
 
-    RtlZeroMemory( &RecAddr, sizeof(SOCKADDR_IN) );
-    RtlZeroMemory( &RecAddr2, sizeof(SOCKADDR_IN) );
-    RtlZeroMemory( &SendAddr, sizeof(SOCKADDR_IN) );
+    RtlZeroMemory( &RecAddr, sizeof(RecAddr) );
+    RtlZeroMemory( &RecAddr2, sizeof(RecAddr2) );
+    RtlZeroMemory( &SendAddr, sizeof(SendAddr) );
 
     /* Pull the request ID from the buffer. */
     RequestID = ntohs( ((PSHORT)&pInBuffer[0])[0] );
@@ -31,24 +32,37 @@ BOOL SendRequest( PCHAR pInBuffer,
     /* If D2 flags is enabled, then display D2 information. */
     if( State.d2 ) PrintD2( pInBuffer, InBufferLength );
 
+    if( inet_pton( AF_INET6, State.DefaultServerAddress, &RecAddr.Ipv6.sin6_addr ) == 1 )
+        RecAddr.si_family = AF_INET6;
+    else
+        RecAddr.si_family = AF_INET;
+
     /* Create the sockets for both send and receive. */
-    s = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
+    s = socket( RecAddr.si_family, SOCK_DGRAM, IPPROTO_UDP );
 
     if (s == INVALID_SOCKET)
         return FALSE;
 
     /* Set up the structure to tell it where we are going. */
-    RecAddr.sin_family = AF_INET;
-    RecAddr.sin_port = htons( State.port );
-    RecAddr.sin_addr.s_addr = inet_addr( State.DefaultServerAddress );
+    if( RecAddr.si_family == AF_INET6 )
+    {
+        RecAddr.Ipv6.sin6_port = htons( State.port );
+        AddrLen = sizeof(SOCKADDR_IN6);
+    }
+    else
+    {
+        RecAddr.Ipv4.sin_port = htons( State.port );
+        RecAddr.Ipv4.sin_addr.s_addr = inet_addr( State.DefaultServerAddress );
+        AddrLen = sizeof(SOCKADDR_IN);
+    }
 
     /* Set up the structure to tell it what port to listen on. */
-    RecAddr2.sin_family = AF_INET;
-    RecAddr2.sin_port = htons( State.port );
-    RecAddr2.sin_addr.s_addr = htonl( INADDR_ANY );
+    RecAddr2.si_family = RecAddr.si_family;
+
+    setsockopt( s, SOL_SOCKET, SO_RCVTIMEO, (char*)&Timeout, sizeof(Timeout) );
 
     /* Bind the receive socket. */
-    bind( s, (SOCKADDR*)&RecAddr2, sizeof(RecAddr2) );
+    bind( s, (SOCKADDR*)&RecAddr2, AddrLen );
 
     /* Send the datagram to the DNS server. */
     j = sendto( s,
@@ -56,7 +70,7 @@ BOOL SendRequest( PCHAR pInBuffer,
                 InBufferLength,
                 0,
                 (SOCKADDR*)&RecAddr,
-                sizeof(RecAddr) );
+                AddrLen );
     if( j == SOCKET_ERROR )
     {
         switch( WSAGetLastError() )
@@ -249,101 +263,40 @@ BOOL SendRequest( PCHAR pInBuffer,
 
 void ReverseIP( PCHAR pIP, PCHAR pReturn )
 {
+    static const char Hex[] = "0123456789abcdef";
+    IN6_ADDR Address6;
+    IN_ADDR Address4;
     int i;
-    int j;
-    int k = 0;
 
     assert(pReturn != pIP);
 
-    j = strlen( pIP ) - 1;
-    i = j;
-
-    /* We have A.B.C.D
-       We will turn this into D.C.B.A and stick it in pReturn */
-
-    /* A */
-    for( ; i > 0; i -= 1 ) if( '.' == pIP[i] ) break;
-
-    if (j != i)
-        strncpy( &pReturn[k], &pIP[i + 1], (j - i) );
-    k += (j - i);
-
-    pReturn[k] = '.';
-    k += 1;
-
-    i -= 1;
-    j = i;
-
-    /* B */
-    for( ; i > 0; i -= 1 ) if( '.' == pIP[i] ) break;
-
-    if (j != i)
-        strncpy( &pReturn[k], &pIP[i + 1], (j - i) );
-    k += (j - i);
-
-    pReturn[k] = '.';
-    k += 1;
-
-    i -= 1;
-    j = i;
-
-    /* C */
-    for( ; i > 0; i -= 1 ) if( '.' == pIP[i] ) break;
-
-    if (j != i)
-        strncpy( &pReturn[k], &pIP[i + 1], (j - i) );
-    k += (j - i);
-
-    pReturn[k] = '.';
-    k += 1;
-
-    i -= 1;
-    j = i;
-
-    /* D */
-    for( ; i > 0; i -= 1 );
-
-    strncpy( &pReturn[k], &pIP[i], (j - i) + 1 );
-    k += (j - i) + 1;
-
-    pReturn[k] = '\0';
+    pReturn[0] = '\0';
+    if( inet_pton( AF_INET6, pIP, &Address6 ) == 1 )
+    {
+        for( i = 15; i >= 0; i -= 1 )
+        {
+            *pReturn++ = Hex[Address6.u.Byte[i] & 0x0F];
+            *pReturn++ = '.';
+            *pReturn++ = Hex[Address6.u.Byte[i] >> 4];
+            *pReturn++ = '.';
+        }
+        strcpy( pReturn, &ARPA6_SIG[1] );
+    }
+    else if( inet_pton( AF_INET, pIP, &Address4 ) == 1 )
+    {
+        sprintf( pReturn, "%u.%u.%u.%u%s", Address4.S_un.S_un_b.s_b4, Address4.S_un.S_un_b.s_b3,
+                 Address4.S_un.S_un_b.s_b2, Address4.S_un.S_un_b.s_b1, ARPA_SIG );
+    }
 }
 
 BOOL IsValidIP( PCHAR pInput )
 {
-    int i = 0, l = 0, b = 0, c = 1;
+    IN6_ADDR Address6;
+    IN_ADDR Address4;
 
-    /* Max length of an IP, e.g. 255.255.255.255, is 15 characters. */
-    l = strlen( pInput );
-    if( l > 15 ) return FALSE;
-
-    /* 'b' is the count of the current segment. It gets reset after seeing a
-       '.'. */
-    for( ; i < l; i += 1 )
-    {
-        if( '.' == pInput[i] )
-        {
-            if( !b ) return FALSE;
-            if( b > 3 ) return FALSE;
-
-            b = 0;
-            c += 1;
-        }
-        else
-        {
-            b += 1;
-
-            if( (pInput[i] < '0') || (pInput[i] > '9') ) return FALSE;
-        }
-    }
-
-    if( b > 3 ) return FALSE;
-
-    /* 'c' is the number of segments seen. If it's less than 4, then it's not
-       a valid IP. */
-    if( c < 4 ) return FALSE;
-
-    return TRUE;
+    if( strlen( pInput ) >= SERVER_ADDRESS_LENGTH ) return FALSE;
+    return inet_pton( AF_INET6, pInput, &Address6 ) == 1 ||
+           inet_pton( AF_INET, pInput, &Address4 ) == 1;
 }
 
 int ExtractName( PCHAR pBuffer, PCHAR pOutput, USHORT Offset, UCHAR Limit )
@@ -362,12 +315,12 @@ int ExtractName( PCHAR pBuffer, PCHAR pOutput, USHORT Offset, UCHAR Limit )
         i += 1;
         if( !m ) c += 1;
 
-        if( 0xC0 == l )
+        if( 0xC0 == (l & 0xC0) )
         {
             if( !m ) c += 1;
             m = 1;
             d += (255 - Limit);
-            i = pBuffer[i];
+            i = ((l & 0x3F) << 8) | (pBuffer[i] & 0xFF);
         }
         else
         {
