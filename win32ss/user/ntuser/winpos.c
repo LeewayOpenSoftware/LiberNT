@@ -1935,6 +1935,8 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
    BOOL PosChanged = FALSE;
    BOOL bComposited = FALSE;
    BOOL bCompositedPureMove = FALSE;
+   BOOL bExComposited = FALSE;
+   PWND pwndAncestor;
    UINT ZOrderFlags;
    PTHREADINFO pti = PsGetCurrentThreadWin32Thread();
 
@@ -2148,6 +2150,14 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
     * DceResetActiveDCEs so live redirected DCs rebind to the new backing. */
    IntCompositionOnWindowResize(Window);
    bComposited = (IntCompositionGetRedirectSurface(Window) != NULL);
+   for (pwndAncestor = Window->spwndParent; pwndAncestor; pwndAncestor = pwndAncestor->spwndParent)
+   {
+      if (pwndAncestor->ExStyle & WS_EX_COMPOSITED)
+      {
+         bExComposited = TRUE;
+         break;
+      }
+   }
 
    /* A pure move of a redirected top-level window changes only compositor
     * metadata. Its backing, DC surface, origin, and clip are unchanged. */
@@ -2235,7 +2245,8 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
           VisAfter != NULL &&
           !(WvrFlags & WVR_REDRAW) &&
           !(WinPos.flags & SWP_NOCOPYBITS) &&
-          !(Window->ExStyle & WS_EX_TRANSPARENT))
+          !(Window->ExStyle & WS_EX_TRANSPARENT) &&
+          !bExComposited)
       {
 
          /*
@@ -2470,7 +2481,7 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
                                OldWindowRect.top  - NewWindowRect.top);
 
              if (VisAfter != NULL)
-                RgnType = IntGdiCombineRgn(ExposedRgn, ExposedRgn, VisAfter, RGN_DIFF);
+                RgnType = IntGdiCombineRgn(ExposedRgn, ExposedRgn, VisAfter, bExComposited ? RGN_OR : RGN_DIFF);
 
              if (RgnType != ERROR && RgnType != NULLREGION)
              {
