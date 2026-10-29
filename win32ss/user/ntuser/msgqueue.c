@@ -409,6 +409,7 @@ IntMsqSetWakeMask(DWORD WakeMask)
                     FALSE);
          return MessageEventHandle;
       }
+      KeClearEvent(Win32Thread->pEventQueueServer);
    }
 
    IdlePing();
