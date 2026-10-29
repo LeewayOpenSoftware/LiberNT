@@ -1858,7 +1858,7 @@
 @ stdcall -arch=arm64 HalInitSystem() hal.HalInitSystem
 @ stdcall -arch=arm64 HalInitializeOnResume(ptr) hal.HalInitializeOnResume
 @ stdcall -arch=arm64 HalInitializeProcessor() hal.HalInitializeProcessor
-@ stdcall -arch=arm64 HalIsHyperThreadingEnabled() hal.HalIsHyperThreadingEnabled
+@ stdcall -arch=arm64,riscv64 HalIsHyperThreadingEnabled() hal.HalIsHyperThreadingEnabled
 @ stdcall -arch=arm64 HalProcessorIdle() hal.HalProcessorIdle
 @ stdcall -arch=arm64 HalQueryEnvironmentVariableInfoEx() hal.HalQueryEnvironmentVariableInfoEx
 @ stdcall -arch=arm64 HalQueryMaximumProcessorCount() hal.HalQueryMaximumProcessorCount
