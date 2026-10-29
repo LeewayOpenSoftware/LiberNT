@@ -36,6 +36,7 @@
 #define LX_BRK_RESERVE      (1024ULL * 1024 * 1024)
 #define LX_AUXV_WORDS       40
 #define LX_MMAP_MIN_ADDR    0x10000ULL
+#define LX_MMAP_GAP         (128ULL * 1024 * 1024)
 #define LX_VMA_HUGETLB      0x00020000
 #define LX_VMA_DONTDUMP     0x00040000
 #define LX_VMA_TOUCHED      0x00080000

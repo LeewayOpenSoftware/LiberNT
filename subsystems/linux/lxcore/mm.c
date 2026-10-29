@@ -119,6 +119,33 @@ LxVmAllocate(
 
 static
 NTSTATUS
+LxVmReserveUnmapped(
+    _Out_ PULONG64 Base,
+    _In_ ULONG64 Size)
+{
+    MEM_ADDRESS_REQUIREMENTS Requirements;
+    MEM_EXTENDED_PARAMETER Parameter;
+    PVOID Address = NULL;
+    SIZE_T RegionSize = (SIZE_T)Size;
+    NTSTATUS Status;
+
+    RtlZeroMemory(&Requirements, sizeof(Requirements));
+    Requirements.LowestStartingAddress = (PVOID)(ULONG_PTR)LX_MMAP_MIN_ADDR;
+    Requirements.HighestEndingAddress =
+        (PVOID)(ULONG_PTR)(LX_ALIGN_DOWN((ULONG64)(ULONG_PTR)MM_HIGHEST_USER_ADDRESS + 1 - LX_MMAP_GAP,
+                                         LX_ALLOC_GRANULARITY) - 1);
+    RtlZeroMemory(&Parameter, sizeof(Parameter));
+    Parameter.Type = MemExtendedParameterAddressRequirements;
+    Parameter.Pointer = &Requirements;
+    Status = ZwAllocateVirtualMemoryEx(NtCurrentProcess(), &Address, &RegionSize, MEM_RESERVE | MEM_TOP_DOWN,
+                                       PAGE_NOACCESS, &Parameter, 1);
+    if (NT_SUCCESS(Status))
+        *Base = (ULONG64)(ULONG_PTR)Address;
+    return Status;
+}
+
+static
+NTSTATUS
 LxVmFree(
     _In_ ULONG64 Base,
     _In_ ULONG64 Size,
@@ -2459,7 +2486,7 @@ LxMmMapView(
         {
             ULONG64 Probe = 0;
 
-            if (!NT_SUCCESS(LxVmAllocate(&Probe, Region, MEM_RESERVE, PAGE_NOACCESS)))
+            if (!NT_SUCCESS(LxVmReserveUnmapped(&Probe, Region)))
                 return -LX_ENOMEM;
             LxVmFree(Probe, 0, MEM_RELEASE);
             Base = (PVOID)(ULONG_PTR)Probe;
@@ -2563,6 +2590,16 @@ LxMmMapSection(
         Error = Remap ? LxMmUnmapRange(Process, Address, Address + Length) : -LX_EINVAL;
     if ((Error == 0) && (Address != 0) && !LxVmIsFree(Address, Address + Length))
         Error = -LX_EINVAL;
+    if ((Error == 0) && (Address == 0))
+    {
+        ULONG64 Probe = 0;
+
+        if (NT_SUCCESS(LxVmReserveUnmapped(&Probe, LX_ALIGN_UP(Length, LX_ALLOC_GRANULARITY))))
+        {
+            LxVmFree(Probe, 0, MEM_RELEASE);
+            Base = (PVOID)(ULONG_PTR)Probe;
+        }
+    }
     if (Error == 0)
     {
         SectionOffset.QuadPart = 0;
@@ -2659,11 +2696,8 @@ LxMmMapCow(
         else
         {
             Probe = 0;
-            if (!NT_SUCCESS(LxVmAllocate(&Probe, LX_ALIGN_UP(Delta + Length, LX_ALLOC_GRANULARITY), MEM_RESERVE,
-                                         PAGE_NOACCESS)))
-            {
+            if (!NT_SUCCESS(LxVmReserveUnmapped(&Probe, LX_ALIGN_UP(Delta + Length, LX_ALLOC_GRANULARITY))))
                 return -LX_ENOMEM;
-            }
             LxVmFree(Probe, 0, MEM_RELEASE);
             Base = Probe;
         }
@@ -2733,7 +2767,7 @@ LxMmFindHugeRange(
         *Base = Hint;
         return 0;
     }
-    if ((Length + PageSize < Length) || !NT_SUCCESS(LxVmAllocate(&Probe, Length + PageSize, MEM_RESERVE, PAGE_NOACCESS)))
+    if ((Length + PageSize < Length) || !NT_SUCCESS(LxVmReserveUnmapped(&Probe, Length + PageSize)))
         return -LX_ENOMEM;
     LxVmFree(Probe, 0, MEM_RELEASE);
     Aligned = LX_ALIGN_UP(Probe, PageSize);
@@ -3017,10 +3051,10 @@ LxMmMap(
         }
         if (Base == 0)
         {
-            if (NT_SUCCESS(LxVmAllocate(&Base,
-                                        LX_ALIGN_UP(Length, LX_ALLOC_GRANULARITY),
-                                        MEM_RESERVE | ((Flags & LX_VMA_STACK) ? MEM_TOP_DOWN : 0),
-                                        PAGE_NOACCESS)))
+            if ((Flags & LX_VMA_STACK) ?
+                NT_SUCCESS(LxVmAllocate(&Base, LX_ALIGN_UP(Length, LX_ALLOC_GRANULARITY), MEM_RESERVE | MEM_TOP_DOWN,
+                                        PAGE_NOACCESS)) :
+                NT_SUCCESS(LxVmReserveUnmapped(&Base, LX_ALIGN_UP(Length, LX_ALLOC_GRANULARITY))))
             {
                 Fresh = TRUE;
             }
@@ -4553,8 +4587,7 @@ LX_SYSCALL(LxSysMremap)
         Result = -LX_ENOMEM;
     }
     else if (Fixed ? (LxVmPlace(Process, Fixed, Fixed + NewLength, LX_PLACE_FRESH | LX_PLACE_SPLIT) != 0) :
-                     !NT_SUCCESS(LxVmAllocate(&New, LX_ALIGN_UP(NewLength, LX_ALLOC_GRANULARITY), MEM_RESERVE,
-                                              PAGE_NOACCESS)))
+                     !NT_SUCCESS(LxVmReserveUnmapped(&New, LX_ALIGN_UP(NewLength, LX_ALLOC_GRANULARITY))))
     {
         Result = -LX_ENOMEM;
     }
