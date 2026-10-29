@@ -1497,6 +1497,10 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 	case MCI_STATUS_LENGTH:
 	    if (!wmw->hFile) {
 		lpParms->dwReturn = 0;
+#ifdef __REACTOS__
+		if (wmw->lpFileName && !wmw->lpFileName[0])
+		    break;
+#endif
 		return MCIERR_UNSUPPORTED_FUNCTION;
 	    }
 	    /* only one track in file is currently handled, so don't take care of MCI_TRACK flag */
