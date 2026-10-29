@@ -3201,9 +3201,11 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
          }
 
       case SW_FORCEMINIMIZE:
-         IntForceMinimizeWindow(Wnd);
-         return WasVisible;
-
+         if (Wnd->head.pti != pti || (style & (WS_MINIMIZE | WS_VISIBLE)) != WS_VISIBLE)
+         {
+            IntForceMinimizeWindow(Wnd);
+            return WasVisible;
+         }
       case SW_SHOWMINNOACTIVE:
       case SW_SHOWMINIMIZED:
       case SW_MINIMIZE: /* CORE-15669: SW_MINIMIZE also shows */
@@ -3317,7 +3319,7 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
        Cmd != SW_SHOWNA &&
        Cmd != SW_SHOWMAXIMIZED &&
        Cmd != SW_SHOWMINIMIZED &&
-       !((Cmd == SW_MINIMIZE || Cmd == SW_SHOWMINNOACTIVE) && (Swp & SWP_STATECHANGED)) &&
+       !((Cmd == SW_MINIMIZE || Cmd == SW_SHOWMINNOACTIVE || Cmd == SW_FORCEMINIMIZE) && (Swp & SWP_STATECHANGED)) &&
        !((Cmd == SW_RESTORE || Cmd == SW_SHOWNORMAL || Cmd == SW_SHOWDEFAULT) && (Swp & SWP_STATECHANGED)))
    {
       //ERR("SWP Child No active and ZOrder\n");
