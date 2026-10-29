@@ -238,7 +238,7 @@ state_init(void *ipp)
 
 	if (AdapterFindInfo(ip))
 		AdapterFindInfo(ip)->ApipaWaitStart = 0;
-	add_timeout(ip->client->first_sending + 1, apipa_watch, ip);
+	add_timeout_ms(GetTickCount64() + 500, apipa_watch, ip);
 
 	/* Add an immediate timeout to cause the first DHCPDISCOVER packet
 	   to go out. */
@@ -635,7 +635,7 @@ set_dhcp_router_discovery(PDHCP_ADAPTER Adapter, BOOLEAN Enable)
     NtClose(File);
 }
 
-static time_t
+static ULONGLONG
 link_local_timeout(PDHCP_ADAPTER Adapter)
 {
     MIB_IPINTERFACE_ROW Row;
@@ -644,8 +644,8 @@ link_local_timeout(PDHCP_ADAPTER Adapter)
     Row.Family = AF_INET;
     Row.InterfaceIndex = Adapter->IfMib.dwIndex;
     if (GetIpInterfaceEntry(&Row) != NO_ERROR)
-        return DHCP_PANIC_TIMEOUT;
-    return (time_t)(Row.LinkLocalAddressTimeout / 1000);
+        return (ULONGLONG)DHCP_PANIC_TIMEOUT * 1000;
+    return Row.LinkLocalAddressTimeout;
 }
 
 static void
@@ -733,7 +733,7 @@ apipa_watch(void *ipp)
 {
     struct interface_info *ip = ipp;
     PDHCP_ADAPTER Adapter = AdapterFindInfo(ip);
-    time_t cur_time = GetMonotonicTime();
+    ULONGLONG cur_time = GetTickCount64(), next = cur_time + 500, deadline;
     BOOL Other;
 
     if (!Adapter || (Adapter->NteContext && !Adapter->ApipaAddress))
@@ -752,14 +752,28 @@ apipa_watch(void *ipp)
     else if (!Adapter->ApipaWaitStart)
         Adapter->ApipaWaitStart = cur_time;
 
-    if (!Adapter->NteContext && Adapter->ApipaWaitStart &&
-        cur_time - Adapter->ApipaWaitStart >= link_local_timeout(Adapter))
+    if (!Adapter->NteContext && Adapter->ApipaWaitStart)
     {
-        Adapter->ApipaDue = TRUE;
-        state_panic(ip);
-        Adapter->ApipaDue = FALSE;
+        deadline = Adapter->ApipaWaitStart + link_local_timeout(Adapter);
+        if (cur_time >= deadline)
+        {
+            Adapter->ApipaDue = TRUE;
+            state_panic(ip);
+            Adapter->ApipaDue = FALSE;
+        }
+        else if (deadline < next)
+            next = deadline;
     }
-    add_timeout(cur_time + 1, apipa_watch, ip);
+    add_timeout_ms(next, apipa_watch, ip);
+}
+
+void
+apipa_address_changed(unsigned int Index)
+{
+    PDHCP_ADAPTER Adapter = AdapterFindIndex(Index);
+
+    if (Adapter && (!Adapter->NteContext || Adapter->ApipaAddress))
+        add_timeout_ms(GetTickCount64(), apipa_watch, &Adapter->DhclientInfo);
 }
 
 void setup_adapter( PDHCP_ADAPTER Adapter, struct client_lease *new_lease ) {

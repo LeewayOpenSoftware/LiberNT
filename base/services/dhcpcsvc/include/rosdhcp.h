@@ -84,7 +84,7 @@ typedef struct _DHCP_ADAPTER
     SOCKADDR       Address;
     ULONG NteContext,NteInstance,NteNetmask;
     ULONG ApipaAttempt,ApipaAddress;
-    time_t ApipaWaitStart;
+    ULONGLONG ApipaWaitStart;
     BOOLEAN ApipaDue;
     struct interface_info DhclientInfo;
     struct client_state DhclientState;
@@ -108,6 +108,7 @@ DWORD Dhcp6ReleaseAdapter(PCWSTR AdapterName);
 void AdapterStop(VOID);
 HKEY FindAdapterKey(PDHCP_ADAPTER Adapter);
 void set_dhcp_router_discovery(PDHCP_ADAPTER Adapter, BOOLEAN Enable);
+void apipa_address_changed(unsigned int Index);
 DWORD LoadAlternateConfiguration(PDHCP_ADAPTER Adapter, HKEY AdapterKey);
 extern PDHCP_ADAPTER AdapterGetFirst(VOID);
 extern PDHCP_ADAPTER AdapterGetNext(PDHCP_ADAPTER);
