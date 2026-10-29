@@ -1522,9 +1522,10 @@ UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
         else
         {
             wVk = pKbdInput->wVk;
-            if (bInjected && (wVk & 0xFF) == VK_RSHIFT)
-                dwFlags |= KEYEVENTF_EXTENDEDKEY;
         }
+
+        if (bInjected && (wVk & 0xFF) == VK_RSHIFT)
+            dwFlags |= KEYEVENTF_EXTENDEDKEY;
 
         /* Remove all virtual key flags (KBDEXT, KBDMULTIVK, KBDSPECIAL, KBDNUMPAD) */
         wVk &= 0xFF;
