@@ -1237,7 +1237,7 @@ ProcessKeyEvent(WORD wVk, WORD wScanCode, DWORD dwFlags, BOOL bInjected, DWORD d
     }
 
     /* Call WH_KEYBOARD_LL hook */
-    if (co_CallLowLevelKeyboardHook((wVk == VK_SHIFT || wVk == VK_CONTROL || wVk == VK_MENU) ? IntFixVk(wVk, bExt) : wVk,
+    if (co_CallLowLevelKeyboardHook((wVk == VK_SHIFT || wVk == VK_CONTROL || wVk == VK_MENU) ? IntFixVk(wVk, wVk != VK_SHIFT && bExt) : wVk,
                                     wScanCode, dwFlags, bInjected, dwTime, dwExtraInfo, wSimpleVk, bIsSimpleDown))
     {
         ERR("Kbd msg dropped by WH_KEYBOARD_LL hook\n");
@@ -1485,6 +1485,8 @@ UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
         else
         {
             wVk = pKbdInput->wVk;
+            if (bInjected && (wVk & 0xFF) == VK_RSHIFT)
+                dwFlags |= KEYEVENTF_EXTENDEDKEY;
         }
 
         /* Remove all virtual key flags (KBDEXT, KBDMULTIVK, KBDSPECIAL, KBDNUMPAD) */
