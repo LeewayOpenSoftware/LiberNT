@@ -377,7 +377,16 @@ ExecuteJob(
     WaitForSingleObject(hRunMutex, INFINITE);
 
     SetJobState(JobId, DrvInstJobRunning, NULL);
+    DrvInstSnapshotDevice(DeviceInstanceId, NULL);
     State = RunWorker(DeviceInstanceId, !(Flags & DRVINST_F_SILENT), &Result);
+    if ((State == DrvInstJobFailed || State == DrvInstJobTimedOut) &&
+        Result.Problem != 0 &&
+        QueryDrvInstValue(DRVINST_REG_AUTOROLLBACK, 1) != 0 &&
+        DrvInstRollbackDevice(DeviceInstanceId) == ERROR_SUCCESS)
+    {
+        Result.Flags |= DRVINST_RF_ROLLEDBACK;
+        State = DrvInstJobRolledBack;
+    }
     SetJobState(JobId, State, &Result);
 
     ReleaseMutex(hRunMutex);
