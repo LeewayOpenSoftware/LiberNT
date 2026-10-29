@@ -1466,6 +1466,9 @@ BOOLEAN BindAdapter(
         return FALSE;
     }
 
+    IF->Wireless = BindParameters->PhysicalMediumType == NdisPhysicalMediumWirelessLan ||
+                   BindParameters->PhysicalMediumType == NdisPhysicalMediumNative802_11;
+
     /*
      * Query per-adapter configuration from the registry
      * In case anyone is curious:  there *is* an Ndis configuration api

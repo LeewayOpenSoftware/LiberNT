@@ -16,4 +16,6 @@
 
 PNEIGHBOR_CACHE_ENTRY RouteGetRouteToDestination(PIP_ADDRESS Destination);
 
+PNEIGHBOR_CACHE_ENTRY RouteGetRouteFromSource(PIP_ADDRESS Destination, PIP_INTERFACE SourceInterface);
+
 /* EOF */

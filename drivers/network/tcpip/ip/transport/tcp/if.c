@@ -127,7 +127,20 @@ TCPSendDataCallback(struct netif *netif, struct pbuf *p, const ip4_addr_t *dest)
 
     IPInitializePacket(&Packet, LocalAddress.Type);
 
-    if (!(NCE = RouteGetRouteToDestination(&RemoteAddress)))
+    {
+        PIP_INTERFACE SourceInterface = AddrLocateInterface(&LocalAddress);
+
+        if (SourceInterface)
+        {
+            NCE = RouteGetRouteFromSource(&RemoteAddress, SourceInterface);
+            IPDereferenceInterface(SourceInterface);
+        }
+        else
+        {
+            NCE = RouteGetRouteToDestination(&RemoteAddress);
+        }
+    }
+    if (!NCE)
     {
         return ERR_RTE;
     }
@@ -246,7 +259,7 @@ TCPRegisterInterface(PIP_INTERFACE IF)
 
         ip6_addr_set_allnodes_linklocal(&AllNodes);
         TCPMldMacFilter(Netif, &AllNodes, NETIF_ADD_MAC_FILTER);
-        netif_create_ip6_linklocal_address(Netif, 1);
+        LibIP6CreateLinkLocal(Netif);
         netif_set_ip6_autoconfig_enabled(Netif, 1);
     }
     else
@@ -266,7 +279,10 @@ VOID
 TCPUnregisterInterface(PIP_INTERFACE IF)
 {
     LibIP6ForgetNetif(IF->TCPContext);
+    LOCK_TCPIP_CORE();
+    LibIP6ConfigForgetNetif(IF->TCPContext);
     netif_remove(IF->TCPContext);
+    UNLOCK_TCPIP_CORE();
 }
 
 VOID

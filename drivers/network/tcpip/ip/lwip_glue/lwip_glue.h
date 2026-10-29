@@ -130,6 +130,23 @@ void        LibTCPSetKeepAlive(PTCP_PCB pcb, BOOLEAN Set);
 void        LibTcpSetKeepAliveValues(PTCP_PCB pcb, u32_t KeepAliveTime, u32_t KeepAliveInterval);
 void        LibTCPGetSocketStatus(PTCP_PCB pcb, PULONG State);
 
+struct lib_ip6_query
+{
+    ULONG TableId;
+    PUCHAR Buffer;
+    ULONG Length;
+    ULONG Count;
+    ULONG Needed;
+    struct _IP6_STATISTICS *Statistics;
+};
+
+struct _IP6_INTERFACE_ROW;
+struct _IP6_ADDRESS_SET;
+struct _IP6_ROUTE_SET;
+struct _IP6_INTERFACE_SET;
+struct _IP6_NEIGHBOR_SET;
+struct _IP6_BEST_ROUTE;
+
 /* IP functions */
 void LibIPInsertPacket(void *ifarg, const void *const data, const u32_t size);
 void LibIP6NoteMulticastDestination(struct netif *netif, const ip6_addr_t *Address);
@@ -137,6 +154,21 @@ void LibIP6ForgetNetif(struct netif *netif);
 void LibIPAddressToLwip(const IP_ADDRESS *Address, ip_addr_t *IpAddr);
 void LibIPAddressFromLwip(const ip_addr_t *IpAddr, PIP_ADDRESS Address);
 void LibIPInitialize(void);
+VOID LibIP6Emit(struct lib_ip6_query *Query, const VOID *Row, ULONG Size);
+BOOLEAN LibIP6NetifIsLoopback(struct netif *netif);
+VOID LibIP6ConfigInit(VOID);
+VOID LibIP6ConfigForgetNetif(struct netif *Netif);
+VOID LibIP6QueryConfigRoutes(struct lib_ip6_query *Query, struct netif *Netif);
+VOID LibIP6QueryDns(struct lib_ip6_query *Query);
+VOID LibIP6DescribeInterface(struct netif *Netif, struct _IP6_INTERFACE_ROW *Row);
+VOID LibIP6DescribeAddress(struct netif *Netif, const ip6_addr_t *Address, PULONG PrefixLength,
+                           PULONG PrefixOrigin, PULONG SuffixOrigin, PBOOLEAN SkipAsSource);
+NTSTATUS LibIP6SetAddress(struct _IP6_ADDRESS_SET *Request);
+NTSTATUS LibIP6SetRoute(struct _IP6_ROUTE_SET *Request);
+NTSTATUS LibIP6SetInterface(struct _IP6_INTERFACE_SET *Request);
+VOID LibIP6CreateLinkLocal(struct netif *Netif);
+NTSTATUS LibIP6SetNeighbor(struct _IP6_NEIGHBOR_SET *Request);
+NTSTATUS LibIP6GetBestRoute(struct _IP6_BEST_ROUTE *Request);
 void LibIPShutdown(void);
 
 #endif

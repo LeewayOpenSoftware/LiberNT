@@ -44,6 +44,48 @@ ProcessAutoMetric(
         return 50;
 }
 
+UINT
+IPAutomaticMetric(
+    _In_ PIP_INTERFACE Interface)
+{
+    static const struct { ULONG64 Speed; UINT Metric; } Wired[] =
+    {
+        {100000000000ULL, 5}, {40000000000ULL, 10}, {10000000000ULL, 15}, {2000000000ULL, 20},
+        {200000000, 25}, {80000000, 35}, {20000000, 45}, {4000000, 55}, {500000, 65}
+    }, Wireless[] =
+    {
+        {2000000000ULL, 25}, {500000000, 30}, {200000000, 35}, {150000000, 40}, {80000000, 45}, {50000000, 50},
+        {20000000, 55}, {10000000, 60}, {4000000, 65}, {2000000, 70}, {500000, 75}, {200000, 80}
+    };
+    ULONG64 Speed = (ULONG64)Interface->Speed * 100;
+    UINT i;
+
+    if (Interface == Loopback)
+        return 75;
+    if (Interface->Wireless)
+    {
+        for (i = 0; i < RTL_NUMBER_OF(Wireless); i++)
+        {
+            if (Speed >= Wireless[i].Speed)
+                return Wireless[i].Metric;
+        }
+        return 85;
+    }
+    for (i = 0; i < RTL_NUMBER_OF(Wired); i++)
+    {
+        if (Speed >= Wired[i].Speed)
+            return Wired[i].Metric;
+    }
+    return 75;
+}
+
+UINT
+IPInterfaceMetric(
+    _In_ PIP_INTERFACE Interface)
+{
+    return Interface->ManualMetric ? Interface->InterfaceMetric : IPAutomaticMetric(Interface);
+}
+
 
 VOID
 RouterDumpRoutes(VOID)
@@ -332,7 +374,7 @@ static PNEIGHBOR_CACHE_ENTRY RouterFindRoute(PIP_ADDRESS Destination, PIP_INTERF
     PLIST_ENTRY NextEntry;
     PFIB_ENTRY Current;
     UCHAR State;
-    UINT Length, BestLength = 0, MaskLength;
+    UINT Length, BestLength = 0, MaskLength, BestMetric = 0;
     PNEIGHBOR_CACHE_ENTRY NCE, BestNCE = NULL;
 
     TI_DbgPrint(DEBUG_ROUTER, ("Called. Destination (0x%X)\n", Destination));
@@ -357,13 +399,17 @@ static PNEIGHBOR_CACHE_ENTRY RouterFindRoute(PIP_ADDRESS Destination, PIP_INTERF
 
 	/* Routes through a disconnected interface stay configured, but are
 	 * inactive until its media connects again. */
-	if(Length >= MaskLength && (Length > BestLength || !BestNCE) &&
+	if(Length >= MaskLength &&
+           (!BestNCE || MaskLength > BestLength ||
+            (MaskLength == BestLength && Current->Metric + IPInterfaceMetric(NCE->Interface) < BestMetric)) &&
            ((!(State & NUD_STALE) && !(State & NUD_INCOMPLETE)) || !BestNCE) &&
            (!Interface || NCE->Interface == Interface) &&
+           (MaskLength || !NCE->Interface->DisableDefaultRoutes) &&
            IsInterfaceOperational(NCE->Interface)) {
 	    /* This seems to be a better router */
 	    BestNCE    = NCE;
-	    BestLength = Length;
+	    BestLength = MaskLength;
+	    BestMetric = Current->Metric + IPInterfaceMetric(NCE->Interface);
 	    TI_DbgPrint(DEBUG_ROUTER,("Route selected\n"));
 	}
 
@@ -414,6 +460,21 @@ PNEIGHBOR_CACHE_ENTRY RouteGetRouteOnInterface(PIP_ADDRESS Destination, PIP_INTE
     }
 
     return RouterFindRoute(Destination, Interface);
+}
+
+PNEIGHBOR_CACHE_ENTRY RouteGetRouteFromSource(PIP_ADDRESS Destination, PIP_INTERFACE SourceInterface)
+{
+    PIP_INTERFACE Owner;
+
+    if (SourceInterface->WeakHostSend || SourceInterface == Loopback)
+        return RouteGetRouteToDestination(Destination);
+    Owner = AddrLocateInterface(Destination);
+    if (Owner)
+    {
+        IPDereferenceInterface(Owner);
+        return RouteGetRouteToDestination(Destination);
+    }
+    return RouteGetRouteOnInterface(Destination, SourceInterface);
 }
 
 PNEIGHBOR_CACHE_ENTRY RouteGetMulticastRoute(PIP_ADDRESS Destination, ULONG Selector)

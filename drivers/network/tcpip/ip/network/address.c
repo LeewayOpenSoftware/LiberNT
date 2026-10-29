@@ -185,6 +185,7 @@ NTSTATUS AddrGetAddress(
                 Address->Type = IP_ADDRESS_V6;
                 RtlCopyMemory(Address->Address.IPv6Address, ValidAddr6->sin6_addr,
                               sizeof(Address->Address.IPv6Address));
+                Address->ScopeId = ValidAddr6->sin6_scope_id;
                 return STATUS_SUCCESS;
             }
             break;
@@ -222,6 +223,7 @@ NTSTATUS AddrBuildAddress(
       Address->Type = IP_ADDRESS_V6;
       RtlCopyMemory(Address->Address.IPv6Address, ValidAddr6->sin6_addr,
                     sizeof(Address->Address.IPv6Address));
+      Address->ScopeId = ValidAddr6->sin6_scope_id;
       *Port = ValidAddr6->sin6_port;
       return STATUS_SUCCESS;
   }
@@ -268,7 +270,7 @@ NTSTATUS AddrBuildTransportAddress(
         RtlCopyMemory(Ta6->Address[0].Address[0].sin6_addr,
                       Address->Address.IPv6Address,
                       sizeof(Ta6->Address[0].Address[0].sin6_addr));
-        Ta6->Address[0].Address[0].sin6_scope_id = 0;
+        Ta6->Address[0].Address[0].sin6_scope_id = Address->ScopeId;
     }
     else
     {

@@ -565,6 +565,8 @@ InfoIp6QueryTable(ULONG TableId, PVOID Buffer, ULONG Length, PULONG Information)
     case Ip6TableAddresses:
     case Ip6TableRoutes:
     case Ip6TableNeighbors:
+    case Ip6TableDnsServers:
+    case Ip6TableDnsSuffixes:
         Status = LibIP6QueryTable(TableId, Buffer, Length, &Count, &Needed, NULL);
         break;
 

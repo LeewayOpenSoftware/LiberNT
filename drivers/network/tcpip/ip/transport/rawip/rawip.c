@@ -264,7 +264,7 @@ NTSTATUS RawIPSendDatagram(
             return STATUS_INVALID_PARAMETER;
         }
 
-        NCE = RouteGetRouteOnInterface(&RemoteAddress, Interface);
+        NCE = RouteGetRouteFromSource(&RemoteAddress, Interface);
         IPDereferenceInterface(Interface);
         if (!NCE) {
             UnlockObject(AddrFile);

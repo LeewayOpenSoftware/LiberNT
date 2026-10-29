@@ -110,6 +110,48 @@ VOID NBFlushPacketQueue( PNEIGHBOR_CACHE_ENTRY NCE,
     }
 }
 
+static
+UINT
+NBProbeSeconds(PIP_INTERFACE Interface)
+{
+    return max((3 * Interface->RetransmitTime + 999) / 1000, 1);
+}
+
+static
+UINT
+NBReachableSeconds(PIP_INTERFACE Interface)
+{
+    return max(Interface->ReachableTime / 1000, 1);
+}
+
+static
+UINT
+NBEntryLifetime(PNEIGHBOR_CACHE_ENTRY NCE)
+{
+    if (NCE->State & NUD_INCOMPLETE)
+        return NBProbeSeconds(NCE->Interface);
+    return NBReachableSeconds(NCE->Interface) + NBProbeSeconds(NCE->Interface);
+}
+
+VOID NBFastTimeout(VOID)
+{
+    ULONGLONG Now = KeQueryInterruptTime();
+    PNEIGHBOR_CACHE_ENTRY NCE;
+    UINT i;
+
+    for (i = 0; i <= NB_HASHMASK; i++) {
+        TcpipAcquireSpinLockAtDpcLevel(&NeighborCache[i].Lock);
+        for (NCE = NeighborCache[i].Cache; NCE; NCE = NCE->Next) {
+            if ((NCE->State & NUD_PERMANENT) || !(NCE->State & (NUD_INCOMPLETE | NUD_STALE)) ||
+                Now < NCE->NextSolicit)
+                continue;
+            NBSendSolicit(NCE);
+            NCE->NextSolicit = Now + (ULONGLONG)NCE->Interface->RetransmitTime * 10000;
+        }
+        TcpipReleaseSpinLockFromDpcLevel(&NeighborCache[i].Lock);
+    }
+}
+
 VOID NBTimeout(VOID)
 /*
  * FUNCTION: Neighbor address cache timeout handler
@@ -130,8 +172,6 @@ VOID NBTimeout(VOID)
              (NCE = *PrevNCE) != NULL;) {
             if (NCE->State & NUD_INCOMPLETE)
             {
-                /* Solicit for an address */
-                NBSendSolicit(NCE);
                 if (NCE->EventTimer == 0)
                 {
                     NCE->EventCount++;
@@ -148,17 +188,16 @@ VOID NBTimeout(VOID)
                 ASSERT(!(NCE->State & NUD_PERMANENT));
                 NCE->EventCount++;
 
-                if ((NCE->EventCount > ARP_RATE &&
-                     NCE->EventCount % ARP_TIMEOUT_RETRANSMISSION == 0) ||
-                    (NCE->EventCount == ARP_RATE))
+                if (!(NCE->State & (NUD_INCOMPLETE | NUD_STALE)) &&
+                    NCE->EventCount >= NBReachableSeconds(NCE->Interface))
                 {
                     /* We haven't gotten a packet from them in
                      * EventCount seconds so we mark them as stale
                      * and solicit now */
                     NCE->State |= NUD_STALE;
-                    NBSendSolicit(NCE);
+                    NCE->NextSolicit = 0;
                 }
-                if (NCE->EventTimer - NCE->EventCount == 0) {
+                if (NCE->EventCount >= NBEntryLifetime(NCE)) {
                     /* Unlink and destroy the NCE */
                     *PrevNCE = NCE->Next;
 
@@ -391,6 +430,7 @@ PNEIGHBOR_CACHE_ENTRY NBAddNeighbor(
   NCE->State = State;
   NCE->EventTimer = EventTimer;
   NCE->EventCount = 0;
+  NCE->NextSolicit = KeQueryInterruptTime() + (ULONGLONG)Interface->RetransmitTime * 10000;
   InitializeListHead( &NCE->PacketQueue );
 
   TI_DbgPrint(MID_TRACE,("NCE: %x\n", NCE));
@@ -509,7 +549,10 @@ NBResetNeighborTimeout(PIP_ADDRESS Address)
          if (AddrIsEqual(Address, &NCE->Address))
          {
              if (!(NCE->State & NUD_INCOMPLETE))
+             {
                  NCE->EventCount = 0;
+                 NCE->State &= ~NUD_STALE;
+             }
              break;
          }
     }

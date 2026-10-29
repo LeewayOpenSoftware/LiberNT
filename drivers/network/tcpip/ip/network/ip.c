@@ -143,6 +143,15 @@ VOID NTAPI IPTimeoutDpcFn(PKDPC Dpc,
 }
 
 
+VOID NTAPI NeighborTimeoutDpcFn(PKDPC Dpc,
+                                PVOID DeferredContext,
+                                PVOID SystemArgument1,
+                                PVOID SystemArgument2)
+{
+    NBFastTimeout();
+}
+
+
 VOID IPDispatchProtocol(
     PIP_INTERFACE Interface,
     PIP_PACKET IPPacket)
@@ -220,6 +229,15 @@ PIP_INTERFACE IPCreateInterface(
     IF->HeaderSize = BindInfo->HeaderSize;
     IF->MinFrameSize = BindInfo->MinFrameSize;
     IF->MTU          = BindInfo->MTU;
+    IF->LinkMTU      = BindInfo->MTU;
+    IF->RetransmitTime = 1000;
+    IF->BaseReachableTime = 30000;
+    IF->ReachableTime = IF->BaseReachableTime / 2 + (ULONG)(Random() % IF->BaseReachableTime);
+    IF->DadTransmits = 3;
+    IF->RouterDiscoveryBehavior = 2;
+    IF->PathMtuDiscoveryTimeout = 600000;
+    IF->LinkLocalAddressTimeout = 6500;
+    IF->SitePrefixLength = 64;
     IF->Address       = BindInfo->Address;
     IF->AddressLength = BindInfo->AddressLength;
     IF->Transmit      = BindInfo->Transmit;

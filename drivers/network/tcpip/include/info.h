@@ -10,6 +10,27 @@
 NTSTATUS
 InfoIp6QueryTable(ULONG TableId, PVOID Buffer, ULONG Length, PULONG Information);
 
+struct _IP6_ADDRESS_SET;
+struct _IP6_ROUTE_SET;
+struct _IP6_INTERFACE_SET;
+struct _IP6_NEIGHBOR_SET;
+struct _IP6_BEST_ROUTE;
+
+NTSTATUS
+LibIP6SetAddress(struct _IP6_ADDRESS_SET *Request);
+
+NTSTATUS
+LibIP6SetRoute(struct _IP6_ROUTE_SET *Request);
+
+NTSTATUS
+LibIP6SetInterface(struct _IP6_INTERFACE_SET *Request);
+
+NTSTATUS
+LibIP6SetNeighbor(struct _IP6_NEIGHBOR_SET *Request);
+
+NTSTATUS
+LibIP6GetBestRoute(struct _IP6_BEST_ROUTE *Request);
+
 #include <tcpioctl.h>
 /* FIXME */
 #define DWORD ULONG

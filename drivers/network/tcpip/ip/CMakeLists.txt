@@ -5,6 +5,7 @@ endif()
 
 list(APPEND SOURCE
     lwip_glue/ip.c
+    lwip_glue/ip6cfg.c
     lwip_glue/memory.c
     lwip_glue/sys_arch.c
     lwip_glue/tcp.c

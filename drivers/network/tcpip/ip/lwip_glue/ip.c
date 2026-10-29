@@ -18,6 +18,7 @@
 #include <nldef.h>
 #include <tcpip_undoc.h>
 #include <psdk/ipexport.h>
+#include <lock.h>
 #include <chew.h>
 
 typedef struct netif* PNETIF;
@@ -36,7 +37,7 @@ LibIPInsertPacket(void *ifarg,
     ASSERT(data);
     ASSERT(size > 0);
 
-    p = pbuf_alloc(PBUF_RAW, size, PBUF_RAM);
+    p = pbuf_alloc(PBUF_LINK, size, PBUF_RAM);
     if (p)
     {
         ASSERT(p->tot_len == p->len);
@@ -48,6 +49,54 @@ LibIPInsertPacket(void *ifarg,
     }
 }
 
+static
+u8_t
+LibIP6ZoneFromScopeId(ULONG ScopeId)
+{
+    PLIST_ENTRY Entry;
+    KIRQL OldIrql;
+    u8_t Zone = NETIF_NO_INDEX;
+
+    TcpipAcquireSpinLock(&InterfaceListLock, &OldIrql);
+    for (Entry = InterfaceListHead.Flink; Entry != &InterfaceListHead; Entry = Entry->Flink)
+    {
+        PIP_INTERFACE IF = CONTAINING_RECORD(Entry, IP_INTERFACE, ListEntry);
+
+        if (IF->Index == ScopeId && IF->TCPContext)
+        {
+            Zone = netif_get_index((struct netif *)IF->TCPContext);
+            break;
+        }
+    }
+    TcpipReleaseSpinLock(&InterfaceListLock, OldIrql);
+
+    return Zone;
+}
+
+static
+ULONG
+LibIP6ScopeIdFromZone(u8_t Zone)
+{
+    PLIST_ENTRY Entry;
+    KIRQL OldIrql;
+    ULONG ScopeId = 0;
+
+    TcpipAcquireSpinLock(&InterfaceListLock, &OldIrql);
+    for (Entry = InterfaceListHead.Flink; Entry != &InterfaceListHead; Entry = Entry->Flink)
+    {
+        PIP_INTERFACE IF = CONTAINING_RECORD(Entry, IP_INTERFACE, ListEntry);
+
+        if (IF->TCPContext && netif_get_index((struct netif *)IF->TCPContext) == Zone)
+        {
+            ScopeId = IF->Index;
+            break;
+        }
+    }
+    TcpipReleaseSpinLock(&InterfaceListLock, OldIrql);
+
+    return ScopeId;
+}
+
 void
 LibIPAddressToLwip(const IP_ADDRESS *Address, ip_addr_t *IpAddr)
 {
@@ -56,6 +105,8 @@ LibIPAddressToLwip(const IP_ADDRESS *Address, ip_addr_t *IpAddr)
         IP_SET_TYPE(IpAddr, IPADDR_TYPE_V6);
         RtlCopyMemory(ip_2_ip6(IpAddr)->addr, Address->Address.IPv6Address, sizeof(ip_2_ip6(IpAddr)->addr));
         ip6_addr_clear_zone(ip_2_ip6(IpAddr));
+        if (Address->ScopeId && ip6_addr_has_scope(ip_2_ip6(IpAddr), IP6_UNKNOWN))
+            ip6_addr_set_zone(ip_2_ip6(IpAddr), LibIP6ZoneFromScopeId(Address->ScopeId));
     }
     else
     {
@@ -70,6 +121,7 @@ LibIPAddressFromLwip(const ip_addr_t *IpAddr, PIP_ADDRESS Address)
     {
         Address->Type = IP_ADDRESS_V6;
         RtlCopyMemory(Address->Address.IPv6Address, ip_2_ip6(IpAddr)->addr, sizeof(Address->Address.IPv6Address));
+        Address->ScopeId = ip6_addr_has_zone(ip_2_ip6(IpAddr)) ? LibIP6ScopeIdFromZone(ip6_addr_zone(ip_2_ip6(IpAddr))) : 0;
     }
     else
     {
@@ -350,17 +402,6 @@ LibUDPSendDatagram(PADDRESS_FILE AddrFile, PTDI_CONNECTION_INFORMATION ConnInfo,
     }
 }
 
-struct lib_ip6_query
-{
-    ULONG TableId;
-    PUCHAR Buffer;
-    ULONG Length;
-    ULONG Count;
-    ULONG Needed;
-    PIP6_STATISTICS Statistics;
-};
-
-static
 VOID
 LibIP6Emit(struct lib_ip6_query *Query, const VOID *Row, ULONG Size)
 {
@@ -373,7 +414,6 @@ LibIP6Emit(struct lib_ip6_query *Query, const VOID *Row, ULONG Size)
     Query->Count++;
 }
 
-static
 BOOLEAN
 LibIP6NetifIsLoopback(struct netif *netif)
 {
@@ -444,6 +484,8 @@ LibIP6QueryRoutes(struct lib_ip6_query *Query, struct netif *netif)
             LibIP6EmitRoute(Query, netif, &prefix_list[i].prefix, 64, NULL, MIB_IPPROTO_NETMGMT,
                             NlroRouterAdvertisement, prefix_list[i].invalidation_timer, FALSE);
         }
+
+        LibIP6QueryConfigRoutes(Query, netif);
 
         for (i = 0; i < LWIP_ND6_NUM_ROUTERS; i++)
         {
@@ -682,6 +724,12 @@ LibIP6QueryCallback(void *arg)
     struct netif *netif;
     s8_t i;
 
+    if (Query->TableId == Ip6TableDnsServers || Query->TableId == Ip6TableDnsSuffixes)
+    {
+        LibIP6QueryDns(Query);
+        return;
+    }
+
     NETIF_FOREACH(netif)
     {
         PIP_INTERFACE IF = netif->state;
@@ -707,6 +755,7 @@ LibIP6QueryCallback(void *arg)
             Row.Loopback = LibIP6NetifIsLoopback(netif);
             Row.Autoconfiguration = netif->ip6_autoconfig_enabled ? TRUE : FALSE;
             Row.LinkSpeed = (ULONG64)IF->Speed * 100;
+            LibIP6DescribeInterface(netif, &Row);
             LibIP6Emit(Query, &Row, sizeof(Row));
             break;
         }
@@ -777,6 +826,8 @@ LibIP6QueryCallback(void *arg)
                     Row.PrefixOrigin = IpPrefixOriginManual;
                     Row.SuffixOrigin = IpSuffixOriginManual;
                 }
+                LibIP6DescribeAddress(netif, Address, &Row.PrefixLength, &Row.PrefixOrigin, &Row.SuffixOrigin,
+                                      &Row.SkipAsSource);
 
                 LibIP6Emit(Query, &Row, sizeof(Row));
             }
@@ -822,6 +873,8 @@ LibIP6QueryCallback(void *arg)
             case ND6_PROBE:      Row.State = NlnsProbe; break;
             default:             Row.State = NlnsUnreachable; break;
             }
+            if (Entry->permanent)
+                Row.State = NlnsPermanent;
             Row.IsRouter = Entry->isrouter ? TRUE : FALSE;
             Row.IsUnreachable = (Entry->state == ND6_INCOMPLETE);
             LibIP6Emit(Query, &Row, sizeof(Row));
@@ -1234,11 +1287,19 @@ LibICMP6EchoRequest(PDEVICE_OBJECT DeviceObject, PIRP Irp, PIO_STACK_LOCATION Ir
     return STATUS_PENDING;
 }
 
+static
+void
+LibIPInitializeDone(void *arg)
+{
+    LWIP_UNUSED_ARG(arg);
+    LibIP6ConfigInit();
+}
+
 void
 LibIPInitialize(void)
 {
     /* This completes asynchronously */
-    tcpip_init(NULL, NULL);
+    tcpip_init(LibIPInitializeDone, NULL);
 }
 
 void
