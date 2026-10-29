@@ -41,6 +41,7 @@
 #define WDI_TLV_CREATE_PORT_PARAMETERS              0x28
 #define WDI_TLV_PORT_ATTRIBUTES                     0x29
 #define WDI_TLV_DELETE_PORT_PARAMETERS              0x2A
+#define WDI_TLV_CANCEL_PARAMETERS                   0x2B
 #define WDI_TLV_ASSOCIATION_RESULT_PARAMETERS       0x2D
 #define WDI_TLV_ASSOCIATION_REQUEST_FRAME           0x2E
 #define WDI_TLV_ASSOCIATION_RESPONSE_FRAME          0x2F
@@ -481,6 +482,8 @@ Ndis6WdiTask(
     _In_ BOOLEAN Wait,
     _In_opt_ NDIS6_WDI_TASK_CALLBACK Callback,
     _In_opt_ PVOID Context);
+
+BOOLEAN Ndis6WdiAbortTask(_In_ PNDIS6_WDI_ADAPTER Wdi, _In_ ULONG MessageId);
 
 VOID Ndis6WdiIndicateStatusUp(_In_ PNDIS6_WDI_ADAPTER Wdi, _In_ NDIS_STATUS Code, _In_reads_bytes_(Length) PVOID Buffer, _In_ ULONG Length);
 VOID Ndis6WdiIndicateLinkState(_In_ PNDIS6_WDI_ADAPTER Wdi, _In_ BOOLEAN Connected);

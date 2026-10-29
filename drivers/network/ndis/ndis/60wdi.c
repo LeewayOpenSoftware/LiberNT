@@ -729,6 +729,43 @@ Ndis6WdiTask(
     return NDIS_STATUS_SUCCESS;
 }
 
+BOOLEAN
+Ndis6WdiAbortTask(
+    _In_ PNDIS6_WDI_ADAPTER Wdi,
+    _In_ ULONG MessageId)
+{
+    NDIS6_WDI_TLV_BUILDER Tlvs;
+    UINT32 TransactionId = 0;
+    WDI_PORT_ID PortId = WDI_PORT_ID_ADAPTER;
+    BOOLEAN Pending = FALSE;
+    ULONG Offset;
+    KIRQL OldIrql;
+
+    KeAcquireSpinLock(&Wdi->CommandLock, &OldIrql);
+    if (Wdi->ActiveTask != NULL &&
+        Wdi->ActiveTask->MessageId == MessageId &&
+        !(Wdi->ActiveTask->Flags & (NDIS6_WDI_CMD_M4_DONE | NDIS6_WDI_CMD_ABANDONED)))
+    {
+        TransactionId = Wdi->ActiveTask->TransactionId;
+        PortId = ((PWDI_MESSAGE_HEADER)Wdi->ActiveTask->Buffer)->PortId;
+        Pending = TRUE;
+    }
+    KeReleaseSpinLock(&Wdi->CommandLock, OldIrql);
+
+    if (!Pending)
+        return FALSE;
+
+    Ndis6WdiTlvInit(&Tlvs);
+    Offset = Ndis6WdiTlvOpen(&Tlvs, WDI_TLV_CANCEL_PARAMETERS);
+    Ndis6WdiTlvAppend32(&Tlvs, WDI_DEFINE_OID(MessageId));
+    Ndis6WdiTlvAppend32(&Tlvs, TransactionId);
+    Ndis6WdiTlvAppend16(&Tlvs, PortId);
+    Ndis6WdiTlvClose(&Tlvs, Offset);
+    (VOID)Ndis6WdiProperty(Wdi, WDI_ABORT_TASK, PortId, &Tlvs, NULL, NULL);
+    Ndis6WdiTlvFree(&Tlvs);
+    return TRUE;
+}
+
 static
 VOID
 Ndis6WdiCheckTaskDeadline(
