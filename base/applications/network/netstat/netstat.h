@@ -52,5 +52,7 @@ VOID ShowUdpStatistics(VOID);
 VOID ShowEthernetStatistics(VOID);
 BOOL ShowTcpTable(VOID);
 BOOL ShowUdpTable(VOID);
+BOOL ShowTcp6Table(VOID);
+BOOL ShowUdp6Table(VOID);
 PCHAR GetPortName(UINT Port, PCSTR Proto, CHAR Name[], INT NameLen);
 PCHAR GetIpHostName(BOOL Local, UINT IpAddr, CHAR Name[], INT NameLen);
