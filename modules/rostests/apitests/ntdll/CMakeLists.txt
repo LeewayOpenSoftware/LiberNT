@@ -121,6 +121,7 @@ list(APPEND SOURCE
     NtSetVolumeInformationFile.c
     NtStartProfile.c
     NtUnloadDriver.c
+    NtWnfState.c
     NtWriteFile.c
     probelib.c
     RtlAllocateHeap.c
@@ -134,8 +135,8 @@ list(APPEND SOURCE
     RtlDebugInformation.c
     RtlDeleteAce.c
     RtlDetermineDosPathNameType.c
-    RtlWnfAndSqm.c
     ProcessPoolQuota.c
+    RtlWnfAndSqm.c
     RtlCheckPortableOperatingSystem.c
     RtlDoesFileExists.c
     RtlDosApplyFileIsolationRedirection_Ustr.c
