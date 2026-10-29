@@ -829,6 +829,15 @@ TiDispatch(
                 }
                 break;
 
+            case IOCTL_IP_SET_ROUTE:
+                if (DeviceObject != IPDeviceObject)
+                    Status = STATUS_INVALID_DEVICE_REQUEST;
+                else if (IrpSp->Parameters.DeviceIoControl.InputBufferLength < sizeof(IP4_ROUTE_INFO))
+                    Status = STATUS_INVALID_PARAMETER;
+                else
+                    Status = RouterSetRouteV4(Irp->AssociatedIrp.SystemBuffer);
+                break;
+
             case IOCTL_IP_QUERY_ADDRESS:
                 if (DeviceObject != IPDeviceObject)
                     Status = STATUS_INVALID_DEVICE_REQUEST;

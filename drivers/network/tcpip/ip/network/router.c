@@ -761,8 +761,38 @@ NTSTATUS RouterQueryRouteV4(PIP4_ROUTE_INFO Info)
 
         Info->Origin = FIBE->Origin;
         Info->Age = Elapsed;
-        Info->ValidLifetime = FIBE->Origin == NlroRouterAdvertisement ?
-                              (FIBE->Lifetime > Elapsed ? FIBE->Lifetime - Elapsed : 0) : MAXULONG;
+        if (FIBE->Origin == NlroRouterAdvertisement)
+            Info->ValidLifetime = FIBE->Lifetime > Elapsed ? FIBE->Lifetime - Elapsed : 0;
+        else
+            Info->ValidLifetime = FIBE->Lifetime ? FIBE->Lifetime : MAXULONG;
+        Status = STATUS_SUCCESS;
+        break;
+    }
+    TcpipReleaseSpinLock(&FIBLock, OldIrql);
+
+    return Status;
+}
+
+
+NTSTATUS RouterSetRouteV4(PIP4_ROUTE_INFO Info)
+{
+    NTSTATUS Status = STATUS_NOT_FOUND;
+    PLIST_ENTRY Entry;
+    KIRQL OldIrql;
+
+    TcpipAcquireSpinLock(&FIBLock, &OldIrql);
+    for (Entry = FIBListHead.Flink; Entry != &FIBListHead; Entry = Entry->Flink)
+    {
+        PFIB_ENTRY FIBE = CONTAINING_RECORD(Entry, FIB_ENTRY, ListEntry);
+
+        if (FIBE->Router->Interface->Index != Info->Index ||
+            FIBE->NetworkAddress.Address.IPv4Address != Info->Destination ||
+            FIBE->Netmask.Address.IPv4Address != Info->Mask ||
+            FIBE->Router->Address.Address.IPv4Address != Info->NextHop ||
+            FIBE->Origin == NlroRouterAdvertisement)
+            continue;
+
+        FIBE->Lifetime = Info->ValidLifetime == MAXULONG ? 0 : Info->ValidLifetime;
         Status = STATUS_SUCCESS;
         break;
     }

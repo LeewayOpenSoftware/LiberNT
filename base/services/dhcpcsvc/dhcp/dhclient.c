@@ -635,6 +635,30 @@ set_dhcp_router_discovery(PDHCP_ADAPTER Adapter, BOOLEAN Enable)
     NtClose(File);
 }
 
+static void
+set_route_lifetime(const MIB_IPFORWARDROW *Route, ULONG Lifetime)
+{
+    UNICODE_STRING Name = RTL_CONSTANT_STRING(L"\\Device\\Ip");
+    OBJECT_ATTRIBUTES Attributes;
+    IO_STATUS_BLOCK Iosb;
+    IP4_ROUTE_INFO Info;
+    HANDLE File;
+
+    InitializeObjectAttributes(&Attributes, &Name, OBJ_CASE_INSENSITIVE, NULL, NULL);
+    if (!NT_SUCCESS(NtOpenFile(&File, SYNCHRONIZE, &Attributes, &Iosb, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               FILE_SYNCHRONOUS_IO_NONALERT)))
+        return;
+
+    memset(&Info, 0, sizeof(Info));
+    Info.Index = Route->dwForwardIfIndex;
+    Info.Destination = Route->dwForwardDest;
+    Info.Mask = Route->dwForwardMask;
+    Info.NextHop = Route->dwForwardNextHop;
+    Info.ValidLifetime = Lifetime;
+    NtDeviceIoControlFile(File, NULL, NULL, NULL, &Iosb, IOCTL_IP_SET_ROUTE, &Info, sizeof(Info), NULL, 0);
+    NtClose(File);
+}
+
 static ULONGLONG
 link_local_timeout(PDHCP_ADAPTER Adapter)
 {
@@ -851,7 +875,7 @@ void setup_adapter( PDHCP_ADAPTER Adapter, struct client_lease *new_lease ) {
         if( Adapter->RouterMib.dwForwardNextHop != NewRouter ) {
             Adapter->RouterMib.dwForwardDest = 0; /* Default route */
             Adapter->RouterMib.dwForwardMask = 0;
-            Adapter->RouterMib.dwForwardMetric1 = 1;
+            Adapter->RouterMib.dwForwardMetric1 = 0;
             Adapter->RouterMib.dwForwardIfIndex = Adapter->IfMib.dwIndex;
 
             if( Adapter->RouterMib.dwForwardNextHop ) {
@@ -867,6 +891,8 @@ void setup_adapter( PDHCP_ADAPTER Adapter, struct client_lease *new_lease ) {
                 warning("CreateIpForwardEntry: %lu\n", err);
                 Adapter->RouterMib.dwForwardNextHop = 0;
             }
+            else if (new_lease->lease != TIME_MAX)
+                set_route_lifetime(&Adapter->RouterMib, (ULONG)new_lease->lease);
         }
 
         if (hkey && err == NO_ERROR) {
@@ -1508,7 +1534,7 @@ state_panic(void *ipp)
             {
                 Adapter->RouterMib.dwForwardDest = 0; /* Default route */
                 Adapter->RouterMib.dwForwardMask = 0;
-                Adapter->RouterMib.dwForwardMetric1 = 1;
+                Adapter->RouterMib.dwForwardMetric1 = 0;
                 Adapter->RouterMib.dwForwardIfIndex = Adapter->IfMib.dwIndex;
 
                 if (Adapter->RouterMib.dwForwardNextHop)

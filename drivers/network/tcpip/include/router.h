@@ -36,6 +36,7 @@ VOID RouterRemoveAdvertisedRoutes(PIP_INTERFACE Interface, PIP_ADDRESS RouterAdd
 VOID RouterAgeAdvertisedRoutes(VOID);
 struct _IP4_ROUTE_INFO;
 NTSTATUS RouterQueryRouteV4(struct _IP4_ROUTE_INFO *Info);
+NTSTATUS RouterSetRouteV4(struct _IP4_ROUTE_INFO *Info);
 PNEIGHBOR_CACHE_ENTRY RouteGetMulticastRoute(PIP_ADDRESS Destination, ULONG Selector);
 PNEIGHBOR_CACHE_ENTRY RouteGetRouteOnInterface(PIP_ADDRESS Destination, PIP_INTERFACE Interface);
 

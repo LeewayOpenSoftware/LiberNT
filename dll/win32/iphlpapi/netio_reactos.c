@@ -77,6 +77,28 @@ static NTSTATUS ip6_ioctl(ULONG Code, PVOID Input, ULONG InputLength)
     return Status;
 }
 
+static VOID ip4_route_set_lifetime(const MIB_IPFORWARDROW *Route, ULONG Lifetime)
+{
+    UNICODE_STRING Name = RTL_CONSTANT_STRING(L"\\Device\\Ip");
+    OBJECT_ATTRIBUTES Attributes;
+    IO_STATUS_BLOCK Iosb;
+    IP4_ROUTE_INFO Info;
+    HANDLE File;
+
+    InitializeObjectAttributes(&Attributes, &Name, OBJ_CASE_INSENSITIVE, NULL, NULL);
+    if (!NT_SUCCESS(NtOpenFile(&File, SYNCHRONIZE, &Attributes, &Iosb, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               FILE_SYNCHRONOUS_IO_NONALERT)))
+        return;
+    memset(&Info, 0, sizeof(Info));
+    Info.Index = Route->dwForwardIfIndex;
+    Info.Destination = Route->dwForwardDest;
+    Info.Mask = Route->dwForwardMask;
+    Info.NextHop = Route->dwForwardNextHop;
+    Info.ValidLifetime = Lifetime;
+    NtDeviceIoControlFile(File, NULL, NULL, NULL, &Iosb, IOCTL_IP_SET_ROUTE, &Info, sizeof(Info), NULL, 0);
+    NtClose(File);
+}
+
 static DWORD ip4_interface_set(IP4_INTERFACE_INFO *Info)
 {
     UNICODE_STRING Name = RTL_CONSTANT_STRING(L"\\Device\\Ip");
@@ -381,7 +403,10 @@ DWORD WINAPI CreateIpForwardEntry2(const MIB_IPFORWARD_ROW2 *Row)
         if (GetIpForwardEntry2(&Existing) == NO_ERROR)
             return ERROR_OBJECT_ALREADY_EXISTS;
         fill_ipv4_route(&Route, Index, Row);
-        return CreateIpForwardEntry(&Route);
+        Error = CreateIpForwardEntry(&Route);
+        if (Error == NO_ERROR && Row->ValidLifetime != 0xFFFFFFFF)
+            ip4_route_set_lifetime(&Route, Row->ValidLifetime);
+        return Error;
     }
 
     fill_route_set(&Set, Ip6SetAdd, Index, Row);

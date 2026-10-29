@@ -1093,10 +1093,11 @@ static void ipv4_route_origin(struct ipv4_route *route)
     status = NtDeviceIoControlFile(file, NULL, NULL, NULL, &iosb, IOCTL_IP_QUERY_ROUTE,
                                    &info, sizeof(info), &info, sizeof(info));
     NtClose(file);
-    if (!NT_SUCCESS(status) || info.Origin != NlroRouterAdvertisement) return;
-    route->origin = NlroRouterAdvertisement;
-    route->lifetime = info.ValidLifetime;
+    if (!NT_SUCCESS(status)) return;
     route->age = info.Age;
+    route->lifetime = info.ValidLifetime;
+    if (info.Origin != NlroRouterAdvertisement) return;
+    route->origin = NlroRouterAdvertisement;
     route->immortal = FALSE;
 }
 
