@@ -561,6 +561,12 @@ LxMountFindLocked(
     _Out_opt_ PCSTR *Relative);
 
 static
+BOOLEAN
+LxMountIsBelow(
+    _In_ PLX_MOUNT Mount,
+    _In_ PLX_MOUNT Ancestor);
+
+static
 VOID
 LxMountPropagate(
     _In_ PLX_MOUNT Mount);
@@ -1050,6 +1056,46 @@ LxInstanceAllocatePid(
 }
 
 static
+SIZE_T
+LxMountTargetLength(
+    _In_ PLX_MOUNT Mount)
+{
+    return (strcmp(Mount->Target, "/") == 0) ? 0 : strlen(Mount->Target);
+}
+
+static
+BOOLEAN
+LxMountCovered(
+    _In_ PLX_NS Ns,
+    _In_ PLX_MOUNT Mount)
+{
+    PLX_MOUNT Parent = Mount->Parent;
+    SIZE_T Length = LxMountTargetLength(Mount), ParentLength;
+    PLIST_ENTRY Entry;
+
+    if (Parent == NULL)
+        return FALSE;
+    ParentLength = LxMountTargetLength(Parent);
+    for (Entry = Ns->Mnt.Mounts.Flink; Entry != &Ns->Mnt.Mounts; Entry = Entry->Flink)
+    {
+        PLX_MOUNT Other = CONTAINING_RECORD(Entry, LX_MOUNT, Link);
+        SIZE_T OtherLength = LxMountTargetLength(Other);
+
+        if ((Other == Mount) || Other->Detached || (OtherLength < ParentLength) || (OtherLength > Length))
+            continue;
+        if ((OtherLength != 0) &&
+            ((strncmp(Mount->Target, Other->Target, OtherLength) != 0) ||
+             ((Mount->Target[OtherLength] != '\0') && (Mount->Target[OtherLength] != '/'))))
+        {
+            continue;
+        }
+        if (LxMountIsBelow(Other, Parent) && !LxMountIsBelow(Mount, Other))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static
 PLX_MOUNT
 LxMountFindLocked(
     _In_ PLX_NS Ns,
@@ -1070,6 +1116,8 @@ LxMountFindLocked(
             Match = TRUE;
         else
             Match = (strncmp(Path, Mount->Target, Length) == 0) && ((Path[Length] == '\0') || (Path[Length] == '/'));
+        if (Match && (Length != 0) && (Length >= BestLength) && LxMountCovered(Ns, Mount))
+            Match = FALSE;
         if (!Match && (Mount->Alias != NULL))
         {
             Length = strlen(Mount->Alias);
