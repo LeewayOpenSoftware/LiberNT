@@ -168,7 +168,7 @@ typedef struct _NDIS_LWM_DRIVER_CHARACTERISTICS
     UCHAR MinorDriverVersion;
     ULONG Flags;
     UNICODE_STRING ServiceName;
-    SET_OPTIONS_HANDLER SetOptionsHandler;
+    MINIPORT_SET_OPTIONS_HANDLER SetOptionsHandler;
     MINIPORT_PAUSE_HANDLER PauseHandler;
     MINIPORT_RESTART_HANDLER RestartHandler;
     MINIPORT_OID_REQUEST_HANDLER OidRequestHandler;
