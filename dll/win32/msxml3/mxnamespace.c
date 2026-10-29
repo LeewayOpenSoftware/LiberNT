@@ -575,6 +575,252 @@ static HRESULT WINAPI vbnamespacemanager_declarePrefix(IVBMXNamespaceManager *if
     return IMXNamespaceManager_declarePrefix(&This->IMXNamespaceManager_iface, prefix, namespaceURI);
 }
 
+#ifdef __REACTOS__
+typedef struct
+{
+    DispatchEx dispex;
+    IMXNamespacePrefixes IMXNamespacePrefixes_iface;
+    LONG refcount;
+    BSTR *prefixes;
+    LONG count;
+} namespaceprefixes;
+
+static inline namespaceprefixes *impl_from_IMXNamespacePrefixes(IMXNamespacePrefixes *iface)
+{
+    return CONTAINING_RECORD(iface, namespaceprefixes, IMXNamespacePrefixes_iface);
+}
+
+static HRESULT WINAPI namespaceprefixes_QueryInterface(IMXNamespacePrefixes *iface, REFIID riid, void **obj)
+{
+    namespaceprefixes *prefixes = impl_from_IMXNamespacePrefixes(iface);
+
+    TRACE("%p, %s, %p.\n", iface, debugstr_guid(riid), obj);
+
+    if (IsEqualGUID(riid, &IID_IMXNamespacePrefixes) ||
+        IsEqualGUID(riid, &IID_IDispatch) ||
+        IsEqualGUID(riid, &IID_IUnknown))
+    {
+        *obj = iface;
+    }
+    else if (dispex_query_interface(&prefixes->dispex, riid, obj))
+    {
+        return *obj ? S_OK : E_NOINTERFACE;
+    }
+    else
+    {
+        *obj = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IMXNamespacePrefixes_AddRef(iface);
+    return S_OK;
+}
+
+static ULONG WINAPI namespaceprefixes_AddRef(IMXNamespacePrefixes *iface)
+{
+    namespaceprefixes *prefixes = impl_from_IMXNamespacePrefixes(iface);
+    ULONG refcount = InterlockedIncrement(&prefixes->refcount);
+    TRACE("%p, refcount %lu.\n", iface, refcount);
+    return refcount;
+}
+
+static ULONG WINAPI namespaceprefixes_Release(IMXNamespacePrefixes *iface)
+{
+    namespaceprefixes *prefixes = impl_from_IMXNamespacePrefixes(iface);
+    ULONG refcount = InterlockedDecrement(&prefixes->refcount);
+
+    TRACE("%p, refcount %lu.\n", iface, refcount);
+
+    if (!refcount)
+    {
+        for (LONG i = 0; i < prefixes->count; ++i)
+            SysFreeString(prefixes->prefixes[i]);
+        free(prefixes->prefixes);
+        free(prefixes);
+    }
+
+    return refcount;
+}
+
+static HRESULT WINAPI namespaceprefixes_GetTypeInfoCount(IMXNamespacePrefixes *iface, UINT *count)
+{
+    namespaceprefixes *prefixes = impl_from_IMXNamespacePrefixes(iface);
+    return IDispatchEx_GetTypeInfoCount(&prefixes->dispex.IDispatchEx_iface, count);
+}
+
+static HRESULT WINAPI namespaceprefixes_GetTypeInfo(IMXNamespacePrefixes *iface, UINT index, LCID lcid,
+        ITypeInfo **ti)
+{
+    namespaceprefixes *prefixes = impl_from_IMXNamespacePrefixes(iface);
+    return IDispatchEx_GetTypeInfo(&prefixes->dispex.IDispatchEx_iface, index, lcid, ti);
+}
+
+static HRESULT WINAPI namespaceprefixes_GetIDsOfNames(IMXNamespacePrefixes *iface, REFIID riid,
+        LPOLESTR *names, UINT count, LCID lcid, DISPID *dispid)
+{
+    namespaceprefixes *prefixes = impl_from_IMXNamespacePrefixes(iface);
+    return IDispatchEx_GetIDsOfNames(&prefixes->dispex.IDispatchEx_iface, riid, names, count, lcid, dispid);
+}
+
+static HRESULT WINAPI namespaceprefixes_Invoke(IMXNamespacePrefixes *iface, DISPID dispid, REFIID riid,
+        LCID lcid, WORD flags, DISPPARAMS *params, VARIANT *result, EXCEPINFO *ei, UINT *argerr)
+{
+    namespaceprefixes *prefixes = impl_from_IMXNamespacePrefixes(iface);
+    return IDispatchEx_Invoke(&prefixes->dispex.IDispatchEx_iface, dispid, riid, lcid, flags, params,
+            result, ei, argerr);
+}
+
+static HRESULT WINAPI namespaceprefixes_get_item(IMXNamespacePrefixes *iface, LONG index, BSTR *prefix)
+{
+    namespaceprefixes *prefixes = impl_from_IMXNamespacePrefixes(iface);
+
+    TRACE("%p, %ld, %p.\n", iface, index, prefix);
+
+    if (!prefix)
+        return E_POINTER;
+
+    *prefix = NULL;
+
+    if (index < 0 || index >= prefixes->count)
+        return E_INVALIDARG;
+
+    return return_bstr(prefixes->prefixes[index], prefix);
+}
+
+static HRESULT WINAPI namespaceprefixes_get_length(IMXNamespacePrefixes *iface, LONG *length)
+{
+    namespaceprefixes *prefixes = impl_from_IMXNamespacePrefixes(iface);
+
+    TRACE("%p, %p.\n", iface, length);
+
+    if (!length)
+        return E_POINTER;
+
+    *length = prefixes->count;
+    return S_OK;
+}
+
+static HRESULT namespaceprefixes_enum_get_item(IUnknown *iface, LONG index, VARIANT *item)
+{
+    V_VT(item) = VT_BSTR;
+    return IMXNamespacePrefixes_get_item((IMXNamespacePrefixes *)iface, index, &V_BSTR(item));
+}
+
+static const struct enumvariant_funcs namespaceprefixes_enumvariant =
+{
+    namespaceprefixes_enum_get_item,
+    NULL
+};
+
+static HRESULT WINAPI namespaceprefixes_get__newEnum(IMXNamespacePrefixes *iface, IUnknown **enumv)
+{
+    TRACE("%p, %p.\n", iface, enumv);
+
+    if (!enumv)
+        return E_POINTER;
+
+    return create_enumvariant((IUnknown *)iface, TRUE, &namespaceprefixes_enumvariant, (IEnumVARIANT **)enumv);
+}
+
+static const IMXNamespacePrefixesVtbl namespaceprefixes_vtbl =
+{
+    namespaceprefixes_QueryInterface,
+    namespaceprefixes_AddRef,
+    namespaceprefixes_Release,
+    namespaceprefixes_GetTypeInfoCount,
+    namespaceprefixes_GetTypeInfo,
+    namespaceprefixes_GetIDsOfNames,
+    namespaceprefixes_Invoke,
+    namespaceprefixes_get_item,
+    namespaceprefixes_get_length,
+    namespaceprefixes_get__newEnum
+};
+
+static HRESULT namespaceprefixes_invoke(IUnknown *iface, DISPID id, LCID lcid, WORD flags, DISPPARAMS *params,
+        VARIANT *res, EXCEPINFO *ei)
+{
+    VARIANT index;
+    HRESULT hr;
+
+    TRACE("%p, %ld, %lx, %x, %p, %p, %p.\n", iface, id, lcid, flags, params, res, ei);
+
+    if (id != DISPID_VALUE || !(flags & (DISPATCH_METHOD | DISPATCH_PROPERTYGET)))
+        return DISP_E_UNKNOWNNAME;
+
+    if (params->cArgs - params->cNamedArgs != 1)
+        return DISP_E_BADPARAMCOUNT;
+
+    VariantInit(&index);
+    if (FAILED(hr = VariantChangeType(&index, params->rgvarg, 0, VT_I4)))
+        return hr;
+
+    if (!res)
+        return S_OK;
+
+    V_VT(res) = VT_BSTR;
+    return IMXNamespacePrefixes_get_item((IMXNamespacePrefixes *)iface, V_I4(&index), &V_BSTR(res));
+}
+
+static const dispex_static_data_vtbl_t namespaceprefixes_dispex_vtbl =
+{
+    NULL,
+    namespaceprefixes_invoke
+};
+
+static const tid_t namespaceprefixes_iface_tids[] =
+{
+    IMXNamespacePrefixes_tid,
+    0
+};
+
+static dispex_static_data_t namespaceprefixes_dispex =
+{
+    &namespaceprefixes_dispex_vtbl,
+    IMXNamespacePrefixes_tid,
+    NULL,
+    namespaceprefixes_iface_tids
+};
+
+static HRESULT WINAPI vbnamespacemanager_getDeclaredPrefixes(IVBMXNamespaceManager *iface,
+    IMXNamespacePrefixes** prefixes)
+{
+    namespacemanager *This = impl_from_IVBMXNamespaceManager( iface );
+    namespaceprefixes *object;
+    struct nscontext *ctxt;
+    BSTR prefix;
+
+    TRACE("%p, %p.\n", iface, prefixes);
+
+    if (!prefixes)
+        return E_POINTER;
+
+    *prefixes = NULL;
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    ctxt = LIST_ENTRY(list_head(&This->ctxts), struct nscontext, entry);
+    if (ctxt->count && !(object->prefixes = calloc(ctxt->count, sizeof(*object->prefixes))))
+    {
+        free(object);
+        return E_OUTOFMEMORY;
+    }
+
+    while (get_declared_prefix_idx(ctxt, object->count, &prefix) == S_OK)
+    {
+        if (!(object->prefixes[object->count] = SysAllocString(prefix)))
+            break;
+        ++object->count;
+    }
+
+    object->IMXNamespacePrefixes_iface.lpVtbl = &namespaceprefixes_vtbl;
+    object->refcount = 1;
+    init_dispex(&object->dispex, (IUnknown *)&object->IMXNamespacePrefixes_iface, &namespaceprefixes_dispex);
+
+    *prefixes = &object->IMXNamespacePrefixes_iface;
+    return S_OK;
+}
+#else
 static HRESULT WINAPI vbnamespacemanager_getDeclaredPrefixes(IVBMXNamespaceManager *iface,
     IMXNamespacePrefixes** prefixes)
 {
@@ -582,6 +828,7 @@ static HRESULT WINAPI vbnamespacemanager_getDeclaredPrefixes(IVBMXNamespaceManag
     FIXME("(%p)->(%p): stub\n", This, prefixes);
     return E_NOTIMPL;
 }
+#endif
 
 static HRESULT WINAPI vbnamespacemanager_getPrefixes(IVBMXNamespaceManager *iface,
     BSTR namespaceURI, IMXNamespacePrefixes** prefixes)

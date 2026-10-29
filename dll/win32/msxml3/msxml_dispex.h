@@ -83,6 +83,9 @@ typedef enum tid_t
     IMXWriter_tid,
     IVBMXNamespaceManager_tid,
     IServerXMLHTTPRequest_tid,
+#ifdef __REACTOS__
+    IMXNamespacePrefixes_tid,
+#endif
     LAST_tid
 } tid_t;
 
@@ -116,6 +119,16 @@ typedef struct
 
     dispex_static_data_t *data;
 } DispatchEx;
+
+#ifdef __REACTOS__
+struct enumvariant_funcs
+{
+    HRESULT (*get_item)(IUnknown*, LONG, VARIANT*);
+    HRESULT (*next)(IUnknown*);
+};
+
+extern HRESULT create_enumvariant( IUnknown*, BOOL, const struct enumvariant_funcs*, IEnumVARIANT**);
+#endif
 
 void init_dispex(DispatchEx*,IUnknown*,dispex_static_data_t*);
 void release_dispex(DispatchEx*);

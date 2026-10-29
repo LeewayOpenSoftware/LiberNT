@@ -313,12 +313,14 @@ struct nodemap_funcs
     HRESULT (*next_node)(const struct domnode *,LONG *,IXMLDOMNode **);
 };
 
+#ifndef __REACTOS__
 /* used by IEnumVARIANT to access outer object items */
 struct enumvariant_funcs
 {
     HRESULT (*get_item)(IUnknown*, LONG, VARIANT*);
     HRESULT (*next)(IUnknown*);
 };
+#endif
 
 /* constructors */
 extern HRESULT create_domdoc(struct domnode *node, IUnknown **);
@@ -339,7 +341,9 @@ extern HRESULT create_entity_ref(struct domnode *, IUnknown **);
 extern HRESULT create_doc_type(struct domnode *, IUnknown **);
 extern HRESULT create_selection(struct domnode *, BSTR, bool xpath, IXMLDOMNodeList** );
 extern HRESULT create_selection_from_nodeset( xmlXPathObjectPtr, IXMLDOMNodeList ** );
+#ifndef __REACTOS__
 extern HRESULT create_enumvariant( IUnknown*, BOOL, const struct enumvariant_funcs*, IEnumVARIANT**);
+#endif
 extern HRESULT create_dom_implementation(IXMLDOMImplementation **obj);
 extern HRESULT create_notation(struct domnode *, IUnknown **);
 

@@ -126,7 +126,10 @@ static tid_id_t tid_ids[] = {
     { &IID_IMXReaderControl, LibXml2 },
     { &IID_IMXWriter, LibXml2 },
     { &IID_IVBMXNamespaceManager, LibXml2 },
-    { &IID_IServerXMLHTTPRequest, LibXml2 }
+    { &IID_IServerXMLHTTPRequest, LibXml2 },
+#ifdef __REACTOS__
+    { &IID_IMXNamespacePrefixes, LibXml2 },
+#endif
 };
 
 const IID *get_riid_from_tid(tid_t tid)
