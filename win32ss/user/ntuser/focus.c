@@ -1797,18 +1797,16 @@ NtUserSetActiveWindow(HWND hWnd)
    TRACE("Enter NtUserSetActiveWindow(%p)\n", hWnd);
    UserEnterExclusive();
 
-   Window = NULL;
-   if (hWnd)
+   if (!hWnd)
+      goto Exit;
+
+   if (!(Window = UserGetWindowObject(hWnd)))
    {
-      if (!(Window = UserGetWindowObject(hWnd)))
-      {
-         ERR("NtUserSetActiveWindow: Invalid handle 0x%p!\n",hWnd);
-         goto Exit; // Return NULL
-      }
+      ERR("NtUserSetActiveWindow: Invalid handle 0x%p!\n",hWnd);
+      goto Exit; // Return NULL
    }
 
-   if (!Window ||
-        Window->head.pti->MessageQueue == gptiCurrent->MessageQueue)
+   if (Window->head.pti->MessageQueue == gptiCurrent->MessageQueue)
    {
       pwndPrev = gptiCurrent->MessageQueue->spwndActive;
       hWndPrev = (pwndPrev ? UserHMGetHandle(pwndPrev) : NULL);
