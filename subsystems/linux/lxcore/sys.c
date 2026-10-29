@@ -11,6 +11,7 @@
 #include <debug.h>
 
 #define LX_TIMER_ABSTIME 1
+#define LX_KTIME_SEC_MAX (MAXLONG64 / 1000000000LL)
 
 static ULONG64 LxReportedSyscalls[1024 / 64];
 
@@ -717,6 +718,16 @@ LX_SYSCALL(LxSysGettimeofday)
     return Result;
 }
 
+static
+LONG64
+LxSleepInterval(
+    _In_ const LX_TIMESPEC *Request)
+{
+    if (Request->Seconds >= LX_KTIME_SEC_MAX)
+        return MAXLONG64 / 100;
+    return Request->Seconds * 10000000 + (Request->Nanoseconds + 99) / 100;
+}
+
 LX_SYSCALL(LxSysNanosleep)
 {
     LX_TIMESPEC Request;
@@ -727,7 +738,7 @@ LX_SYSCALL(LxSysNanosleep)
     if ((Request.Seconds < 0) || (Request.Nanoseconds < 0) || (Request.Nanoseconds >= 1000000000))
         return -LX_EINVAL;
 
-    Result = LxSleep(Request.Seconds * 10000000 + (Request.Nanoseconds + 99) / 100);
+    Result = LxSleep(LxSleepInterval(&Request));
     if ((Result != 0) && (Call->Args[1] != 0))
     {
         LX_TIMESPEC Remaining = { 0, 0 };
@@ -748,7 +759,7 @@ LX_SYSCALL(LxSysClockNanosleep)
     if ((Request.Seconds < 0) || (Request.Nanoseconds < 0) || (Request.Nanoseconds >= 1000000000))
         return -LX_EINVAL;
 
-    Interval = Request.Seconds * 10000000 + (Request.Nanoseconds + 99) / 100;
+    Interval = LxSleepInterval(&Request);
     if (Call->Args[1] & LX_TIMER_ABSTIME)
     {
         LONG Error = LxQueryClockIn(Call->Process, (ULONG)Call->Args[0], &Now);
