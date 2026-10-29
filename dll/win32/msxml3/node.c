@@ -2029,6 +2029,27 @@ static void domnode_get_attribute_value(struct domnode *attr, struct string_buff
             }
         }
     }
+#ifdef __REACTOS__
+    else if (!properties->normalize_attribute_values && properties->version >= MSXML6)
+    {
+        LIST_FOR_EACH_ENTRY(child, &attr->children, struct domnode, entry)
+        {
+            p = child->data;
+
+            while (p && *p)
+            {
+                if (*p == '\r')
+                {
+                    if (p[1] == '\n') ++p;
+                    string_append(buffer, L"\n", 1);
+                }
+                else
+                    string_append(buffer, p, 1);
+                ++p;
+            }
+        }
+    }
+#endif
     else
     {
         LIST_FOR_EACH_ENTRY(child, &attr->children, struct domnode, entry)
