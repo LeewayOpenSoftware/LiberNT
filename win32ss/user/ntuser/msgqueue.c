@@ -2117,7 +2117,7 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
                          IN UINT QSflags,
                          OUT MSG* pMsg)
 {
-   BOOL AcceptMessage, NotForUs;
+   BOOL AcceptMessage, NotForUs, RemoveMsg;
    PUSER_MESSAGE CurrentMessage;
    PLIST_ENTRY ListHead;
    MSG msg;
@@ -2184,11 +2184,12 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
          clk_msg = MessageQueue->msgDblClk;
 
          NotForUs = FALSE;
+         RemoveMsg = Remove;
 
          MessageId = CurrentMessage->Id;
 
          UpdateKeyStateFromMsg(MessageQueue, &msg);
-         AcceptMessage = co_IntProcessHardwareMessage(&msg, &Remove, &NotForUs, ExtraInfo, MsgFilterLow, MsgFilterHigh);
+         AcceptMessage = co_IntProcessHardwareMessage(&msg, &RemoveMsg, &NotForUs, ExtraInfo, MsgFilterLow, MsgFilterHigh);
 
          if (pti->MessageQueue != MessageQueue)
          {
@@ -2212,7 +2213,7 @@ co_MsqPeekHardwareMessage(IN PTHREADINFO pti,
              }
          }
 
-         if (Remove)
+         if (RemoveMsg)
          {
              if (CurrentMessage != NULL && (MessageQueue->idSysPeek == (ULONG_PTR)CurrentMessage))
              {
