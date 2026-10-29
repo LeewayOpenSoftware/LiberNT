@@ -275,6 +275,7 @@ DECLSPEC_NORETURN VOID NTAPI KiRiscvTrapEntry(VOID);
 DECLSPEC_NORETURN VOID NTAPI KiRiscvTrapStop(_In_ PKTRAP_FRAME TrapFrame);
 VOID NTAPI KiRiscvTrapHandler(_Inout_ PKTRAP_FRAME TrapFrame);
 VOID NTAPI KiRiscvInterruptDispatch(_Inout_ PKTRAP_FRAME TrapFrame);
+BOOLEAN NTAPI KiRiscvAllocateInterruptTable(_In_ ULONG Number);
 VOID NTAPI KiRiscvJoinSchedulerSubNode(_In_ PKPRCB Prcb);
 PKINTERRUPT NTAPI KiRiscvQueryInterrupt(_In_ ULONG Source);
 ULONG NTAPI KiRiscvQueryInterruptLimit(VOID);

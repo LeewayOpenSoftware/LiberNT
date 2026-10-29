@@ -96,7 +96,7 @@ CODE_SEG("INIT") VOID NTAPI KeStartAllProcessors(VOID)
         if (!Ap) break;
         Ap->Stack = MmCreateKernelStack(FALSE, 0);
         DpcStack = MmCreateKernelStack(FALSE, 0);
-        if (!Ap->Stack || !DpcStack) goto Failed;
+        if (!Ap->Stack || !DpcStack || !KiRiscvAllocateInterruptTable(Number)) goto Failed;
         KiRiscvInitializePcr(&Ap->Pcr, &Ap->Thread.Tcb, Hart, Number, DpcStack,
                              Ap->PanicStack + sizeof(Ap->PanicStack));
         RtlZeroMemory(&State, sizeof(State));

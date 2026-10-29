@@ -2616,7 +2616,7 @@
 @ stdcall -arch=win64 KeInitializeEnumerationContext(ptr ptr)
 @ stdcall -arch=win64 KeInitializeEnumerationContextFromAffinity(ptr long int64)
 @ stdcall -arch=win64 KeInitializeEnumerationContextFromGroup(ptr ptr)
-@ stdcall -arch=arm64 KeInitializeSecondaryInterruptServices()
+@ stdcall -arch=arm64,riscv64 KeInitializeSecondaryInterruptServices()
 @ stub -arch=arm64 KeInitializeTimer2
 @ stdcall KeInitializeTriageDumpDataArray(ptr long)
 @ stdcall -arch=win64 KeInterlockedClearProcessorAffinityEx(ptr long)
