@@ -29,6 +29,7 @@ list(APPEND SOURCE
     EmptyClipboard.c
     EnableScrollBar.c
     EnumDisplaySettings.c
+    ForegroundStartup.c
     GetClassInfo.c
     GetDCEx.c
     GetProp.c
