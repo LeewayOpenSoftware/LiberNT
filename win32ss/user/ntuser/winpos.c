@@ -3422,6 +3422,9 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
           {
               co_WinPosActivateOtherWindow(Wnd);
           }
+
+          if (Cmd == SW_HIDE && IntGetFocusMessageQueue() != pti->MessageQueue)
+              pti->TIF_flags |= TIF_ALLOWFOREGROUNDACTIVATE;
       }
 
       /* Revert focus to parent */
