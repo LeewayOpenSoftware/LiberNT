@@ -3495,6 +3495,11 @@ static BOOL FASTCALL MENU_ShowPopup(PWND pwndOwner, PMENU menu, UINT id, UINT fl
                     (HANDLE)(ULONG_PTR)DWM_TRANSITION_PACK(MenuTransitionSeq, 0, 255, 150), FALSE);
     }
     co_WinPosSetWindowPos( pWnd, 0, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    if (!menu->cItems)
+    {
+        UserDerefObjectCo(pWnd);
+        return FALSE;
+    }
     co_WinPosSetWindowPos( pWnd, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
 
     co_IntUpdateWindows(pWnd, RDW_ALLCHILDREN, FALSE);
@@ -5065,15 +5070,22 @@ IntTrackPopupMenuEx(
           MENU_InitSysMenuPopup( menu, pWnd->style, pWnd->pcls->style, HTSYSMENU);
 
        if (MENU_ShowPopup(pWnd, menu, 0, wFlags | TPM_POPUPMENU, x, y, lpTpm ? &lpTpm->rcExclude : NULL))
+       {
           ret = MENU_TrackMenu( menu, wFlags | TPM_POPUPMENU, 0, 0, pWnd);
+          MENU_ExitTracking(pWnd, menu, TRUE, wFlags);
+       }
        else
        {
+          IntNotifyWinEvent(EVENT_SYSTEM_MENUEND, pWnd, OBJID_WINDOW, CHILDID_SELF, 0);
           MsqSetStateWindow(pti, MSQ_STATE_MENUOWNER, NULL);
           pti->MessageQueue->QF_flags &= ~QF_CAPTURELOCKED;
           co_UserSetCapture(NULL); /* release the capture */
+          if (!(wFlags & TPM_NONOTIFY))
+             co_IntSendMessage(UserHMGetHandle(pWnd), WM_EXITMENULOOP, !(wFlags & TPM_SYSTEM_MENU), 0);
+          co_UserShowCaret(0);
+          top_popup = 0;
+          top_popup_hmenu = NULL;
        }
-
-       MENU_ExitTracking(pWnd, menu, TRUE, wFlags);
 
        if (menu->hWnd)
        {
@@ -5160,6 +5172,9 @@ PopupMenuWndProc(
 
     case WM_MOUSEACTIVATE:  /* We don't want to be activated */
       *lResult = MA_NOACTIVATE;
+      break;
+
+    case WM_SHOWWINDOW:
       break;
 
     case WM_PAINT:
