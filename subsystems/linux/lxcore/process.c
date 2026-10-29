@@ -701,18 +701,41 @@ LxProcessUsage(
         ObDereferenceObject(Referenced);
 }
 
-VOID
+BOOLEAN
 LxProcessExitStatus(
     _In_ PLX_PROCESS Process,
     _In_ LONG WaitStatus)
 {
+    BOOLEAN First;
+
     ExAcquireFastMutex(&Process->Lock);
-    if (!Process->WaitStatusValid)
+    First = !Process->WaitStatusValid;
+    if (First)
     {
         Process->WaitStatus = WaitStatus;
         Process->WaitStatusValid = TRUE;
     }
     ExReleaseFastMutex(&Process->Lock);
+    return First;
+}
+
+VOID
+LxProcessZapThreads(
+    _In_ PLX_PROCESS Process,
+    _In_opt_ PLX_THREAD Except)
+{
+    PLIST_ENTRY Entry;
+
+    ExAcquireFastMutex(&Process->Lock);
+    for (Entry = Process->Threads.Flink; Entry != &Process->Threads; Entry = Entry->Flink)
+    {
+        PLX_THREAD Thread = CONTAINING_RECORD(Entry, LX_THREAD, Link);
+
+        if (Thread != Except)
+            InterlockedOr64(&Thread->Pending, (LONG64)(1ULL << (LX_SIGKILL - 1)));
+    }
+    ExReleaseFastMutex(&Process->Lock);
+    LxSignalWakeThread(Process, 0);
 }
 
 VOID
@@ -722,8 +745,9 @@ LxProcessExitGroup(
 {
     NTSTATUS ExitCode;
     PLX_THREAD Thread;
+    BOOLEAN First;
 
-    LxProcessExitStatus(Process, WaitStatus);
+    First = LxProcessExitStatus(Process, WaitStatus);
     if ((WaitStatus & 0x7F) == 0)
         ExitCode = (WaitStatus >> 8) & 0xFF;
     else
@@ -741,6 +765,12 @@ LxProcessExitGroup(
         if ((Thread != NULL) && (Thread->Process == Process))
             PsPicoTerminateCurrentThread(ExitCode);
         return;
+    }
+    if ((ReadNoFence(&Process->Traced) != 0) && (Thread != NULL) && (Thread->Process == Process))
+    {
+        if (First)
+            LxProcessZapThreads(Process, Thread);
+        PsPicoTerminateCurrentThread(ExitCode);
     }
 
     ZwTerminateProcess(NtCurrentProcess(), ExitCode);

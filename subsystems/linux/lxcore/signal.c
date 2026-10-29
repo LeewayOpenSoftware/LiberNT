@@ -686,6 +686,13 @@ LxSignalSend(
          ((Handler == LX_SIG_DFL) && !LxSignalStopsByDefault(Signal) && (ReadNoFence(&Target->Traced) == 0))) &&
         !((Signal != LX_SIGKILL) && LxSignalDumpsCore(Signal) && LxSignalTakenByCurrent(Target, TargetThread, Bit)))
     {
+        if ((Signal == LX_SIGKILL) && (ReadNoFence(&Target->Traced) != 0) && (Target->Mm == Target) &&
+            (Target->VmUsers == 0))
+        {
+            if (LxProcessExitStatus(Target, LX_SIGKILL))
+                LxProcessZapThreads(Target, NULL);
+            return;
+        }
         LxSignalTerminate(Target, Signal);
         return;
     }
@@ -892,7 +899,8 @@ LxSignalCheckPending(
             }
             if (LxSignalDumpsCore(Signal) && LxCoreDump(Thread, TrapFrame, ExceptionFrame, Signal))
                 Signal |= 0x80;
-            LxPtraceEvent(Thread, TrapFrame, ExceptionFrame, LX_PTRACE_EVENT_EXIT, (ULONG64)Signal, FALSE);
+            LxPtraceEvent(Thread, TrapFrame, ExceptionFrame, LX_PTRACE_EVENT_EXIT,
+                          Process->WaitStatusValid ? (ULONG64)Process->WaitStatus : (ULONG64)Signal, FALSE);
             LxProcessExitGroup(Process, Signal);
             return;
         }
