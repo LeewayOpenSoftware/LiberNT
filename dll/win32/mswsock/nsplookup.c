@@ -886,7 +886,9 @@ NSP_GetHostByNameHeapAllocW(_In_ PWSHANDLEINTERN data,
     }
     else if (!hostinfo->addressCount)
     {
-        result = (status4 == ERROR_TIMEOUT || status6 == ERROR_TIMEOUT) ? WSATRY_AGAIN : WSAHOST_NOT_FOUND;
+        result = (status4 == ERROR_TIMEOUT || status6 == ERROR_TIMEOUT ||
+                  status4 == DNS_ERROR_RCODE_SERVER_FAILURE || status6 == DNS_ERROR_RCODE_SERVER_FAILURE) ?
+                 WSATRY_AGAIN : WSAHOST_NOT_FOUND;
     }
     else
     {

@@ -29,6 +29,7 @@ typedef struct _RESOLVER_SERVER
     SOCKADDR_INET Address;
     ULONG Adapter;
     BOOL Sent;
+    BOOL Failed;
 } RESOLVER_SERVER, *PRESOLVER_SERVER;
 
 typedef struct _RESOLVER_ADAPTER
@@ -706,7 +707,7 @@ ResolverSendRound(PRESOLVER_CONFIG Config, SOCKET Sockets[2], const UCHAR *Query
         SOCKET Socket = Sockets[Server->Address.si_family == AF_INET6];
         BOOL First = (i == Adapter->FirstServer);
 
-        if (Adapter->Negative || Socket == INVALID_SOCKET)
+        if (Adapter->Negative || Server->Failed || Socket == INVALID_SOCKET)
             continue;
         if (Round == 0 && (Server->Adapter != 0 || !First))
             continue;
@@ -716,6 +717,33 @@ ResolverSendRound(PRESOLVER_CONFIG Config, SOCKET Sockets[2], const UCHAR *Query
                ResolverSockaddrLength(&Server->Address));
         Server->Sent = TRUE;
     }
+}
+
+static
+BOOL
+ResolverFailOver(PRESOLVER_CONFIG Config, SOCKET Sockets[2], const UCHAR *Query, INT QueryLength)
+{
+    BOOL Pending = FALSE;
+    ULONG i;
+
+    for (i = 0; i < Config->ServerCount; i++)
+    {
+        PRESOLVER_SERVER Server = &Config->Servers[i];
+        SOCKET Socket = Sockets[Server->Address.si_family == AF_INET6];
+
+        if (Config->Adapters[Server->Adapter].Negative || Server->Failed || Socket == INVALID_SOCKET)
+            continue;
+        if (Server->Sent)
+        {
+            Pending = TRUE;
+            continue;
+        }
+        sendto(Socket, (PCHAR)Query, QueryLength, 0, (const SOCKADDR *)&Server->Address,
+               ResolverSockaddrLength(&Server->Address));
+        Server->Sent = TRUE;
+        return TRUE;
+    }
+    return Pending;
 }
 
 static
@@ -761,7 +789,10 @@ ResolverQueryName(PRESOLVER_CONFIG Config, PCWSTR Name, WORD Type, DWORD Options
     for (i = 0; i < Config->AdapterCount; i++)
         Config->Adapters[i].Negative = FALSE;
     for (i = 0; i < Config->ServerCount; i++)
+    {
         Config->Servers[i].Sent = FALSE;
+        Config->Servers[i].Failed = FALSE;
+    }
 
     Id = (WORD)(GetTickCount() ^ (GetCurrentThreadId() << 5) ^ (ULONG_PTR)Name);
     QueryLength = ResolverBuildQuery(Name, Type, Id, !(Options & DNS_QUERY_NO_RECURSION), Query, sizeof(Query));
@@ -844,6 +875,13 @@ ResolverQueryName(PRESOLVER_CONFIG Config, PCWSTR Name, WORD Type, DWORD Options
                 else if (Reply.Status != ERROR_SUCCESS)
                 {
                     Failure = Reply.Status;
+                    Config->Servers[Server].Failed = TRUE;
+                    if (!ResolverFailOver(Config, Sockets, Query, QueryLength))
+                    {
+                        closesocket(Sockets[0]);
+                        closesocket(Sockets[1]);
+                        return Negative != ERROR_SUCCESS ? Negative : Failure;
+                    }
                 }
             }
         }
