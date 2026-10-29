@@ -1680,6 +1680,7 @@ WSHSetSocketInformation(
 
     if (Context->SocketState == SocketStateCreated)
     {
+        /* TODO: Windows applies IP/IPv6 multicast joins on an unbound socket at once (report sent, socket stays unbound); they wait here for bind */
         if (Context->RequestQueue)
         {
             Queued = Context->RequestQueue;
