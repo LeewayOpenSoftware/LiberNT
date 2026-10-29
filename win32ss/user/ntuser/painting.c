@@ -699,6 +699,13 @@ IntInvalidateWindows(PWND Wnd, PREGION Rgn, ULONG Flags)
    /* Nothing to paint, just return */
    if ((RgnType == NULLREGION && (Flags & RDW_INVALIDATE)) || RgnType == ERROR)
    {
+      if (RgnType == NULLREGION && (Flags & RDW_INTERNALPAINT) && !(Wnd->state & WNDS_INTERNALPAINT))
+      {
+         HadPaintMessage = IntIsWindowDirty(Wnd);
+         Wnd->state |= WNDS_INTERNALPAINT;
+         if (!HadPaintMessage && IntIsWindowDirty(Wnd))
+            MsqIncPaintCountQueue(Wnd->head.pti);
+      }
       if (RgnParentDC) REGION_Delete(RgnParentDC);
       return;
    }
