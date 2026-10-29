@@ -466,6 +466,7 @@ LxBuildStack(
     LX_AUX(LX_AT_EGID, LxCredViewId(Process, TRUE, Process->Gid[1]));
     LX_AUX(LX_AT_SECURE, (Process->Uid[0] != Process->Uid[1]) || (Process->Gid[0] != Process->Gid[1]));
     LX_AUX(LX_AT_HWCAP, LxArchHwcap());
+    LX_AUX(LX_AT_HWCAP2, LxArchHwcap2());
     LX_AUX(LX_AT_CLKTCK, 100);
     LX_AUX(LX_AT_RANDOM, RandomAddress);
     LX_AUX(LX_AT_PLATFORM, PlatformAddress);

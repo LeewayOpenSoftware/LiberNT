@@ -1350,6 +1350,7 @@ BOOLEAN LxCoreDump(_In_ PLX_THREAD Thread, _In_ PKTRAP_FRAME TrapFrame, _In_opt_
 VOID LxCoreGetPattern(_Out_writes_(Size) PSTR Buffer, _In_ ULONG Size);
 LONG LxCoreSetPattern(_In_reads_bytes_(Length) PCSTR Data, _In_ ULONG Length);
 ULONG64 LxArchHwcap(VOID);
+ULONG64 LxArchHwcap2(VOID);
 PCSTR LxArchPlatform(VOID);
 VOID LxArchGetSyscall(_In_ PKTRAP_FRAME TrapFrame, _Out_ PULONG Number, _Out_writes_(6) PULONG64 Args);
 VOID LxArchSetSyscallResult(_Inout_ PKTRAP_FRAME TrapFrame, _In_ LONG64 Result);
