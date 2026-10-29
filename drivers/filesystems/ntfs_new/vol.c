@@ -4,6 +4,7 @@
  * PURPOSE:     Source file for the ntfs_new volume management
  * COPYRIGHT:   Copyright 2024 Carl Bialorucki <carl.bialorucki@reactos.org>
  *              Copyright 2024 Justin Miller <justin.miller@reactos.org>
+ *              Copyright 2026 Ahmed ARIF <arif.ing@outlook.com>
  */
 
 #include "ntfspch.h"
@@ -680,40 +681,85 @@ NtfsRecordNameMissing(_In_ PVolumeContextBlock VolCB,
     ExReleaseFastMutex(&VolCB->MissingNameMutex);
 }
 
+static
+USHORT
+NtfsMissingNameLeafStart(_In_reads_(Length) PCWSTR Name,
+                         _In_ USHORT Length)
+{
+    USHORT Index = Length;
+
+    while (Index > 0 && Name[Index - 1] != L'\\')
+        Index--;
+    return Index;
+}
+
+static
+BOOLEAN
+NtfsMissingNameLeafMatches(_In_ PNtfsMissingName Entry,
+                           _In_reads_(LeafLength) PCWSTR Leaf,
+                           _In_ USHORT LeafLength)
+{
+    USHORT Start = NtfsMissingNameLeafStart(Entry->Name, Entry->Length);
+    USHORT Index;
+
+    if (Entry->Length - Start != LeafLength)
+        return FALSE;
+
+    for (Index = 0; Index < LeafLength; Index++)
+    {
+        if (RtlUpcaseUnicodeChar(Entry->Name[Start + Index]) !=
+            RtlUpcaseUnicodeChar(Leaf[Index]))
+        {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
 VOID
 NtfsForgetMissingName(_In_ PVolumeContextBlock VolCB,
                       _In_reads_(Length) PCWSTR Name,
                       _In_ USHORT Length)
 {
-    ULONG Hash;
     PLIST_ENTRY Entry;
+    PLIST_ENTRY Next;
+    LIST_ENTRY Stale;
+    USHORT LeafStart;
 
     if (!VolCB || !Name || !Length)
         return;
 
     Length = NtfsMissingNameLength(Name, Length);
-    Hash = NtfsHashName(Name, Length);
+    LeafStart = NtfsMissingNameLeafStart(Name, Length);
+    InitializeListHead(&Stale);
     ExAcquireFastMutex(&VolCB->MissingNameMutex);
-    for (Entry = VolCB->MissingNameHash[
-             Hash & (NTFS_MISSING_NAME_BUCKETS - 1)].Flink;
-         Entry != &VolCB->MissingNameHash[
-             Hash & (NTFS_MISSING_NAME_BUCKETS - 1)];
-         Entry = Entry->Flink)
+    for (Entry = VolCB->MissingNameList.Flink;
+         Entry != &VolCB->MissingNameList;
+         Entry = Next)
     {
         PNtfsMissingName Missing =
-            CONTAINING_RECORD(Entry, NtfsMissingName, HashLink);
+            CONTAINING_RECORD(Entry, NtfsMissingName, Link);
 
-        if (NtfsMissingNameMatches(Missing, Hash, Name, Length))
+        Next = Entry->Flink;
+        if (NtfsMissingNameLeafMatches(Missing,
+                                       Name + LeafStart,
+                                       Length - LeafStart))
         {
             RemoveEntryList(&Missing->Link);
             RemoveEntryList(&Missing->HashLink);
             VolCB->MissingNameCount--;
-            ExReleaseFastMutex(&VolCB->MissingNameMutex);
-            ExFreePoolWithTag(Missing, TAG_NTFS);
-            return;
+            InsertTailList(&Stale, &Missing->Link);
         }
     }
     ExReleaseFastMutex(&VolCB->MissingNameMutex);
+
+    while (!IsListEmpty(&Stale))
+    {
+        PNtfsMissingName Missing =
+            CONTAINING_RECORD(RemoveHeadList(&Stale), NtfsMissingName, Link);
+
+        ExFreePoolWithTag(Missing, TAG_NTFS);
+    }
 }
 
 VOID
