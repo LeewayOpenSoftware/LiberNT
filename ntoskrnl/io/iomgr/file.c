@@ -1738,7 +1738,7 @@ IopGetDevicePDO(IN PDEVICE_OBJECT DeviceObject)
 
     ASSERT(DeviceObject != NULL);
 
-    OldIrql = KeAcquireQueuedSpinLock(LockQueueIoDatabaseLock);
+    OldIrql = IopAcquireDatabaseLockShared();
     /* Get the base DO */
     PDO = IopGetDeviceAttachmentBase(DeviceObject);
     /* Check whether that's really a PDO and if so, keep it */
@@ -1750,7 +1750,7 @@ IopGetDevicePDO(IN PDEVICE_OBJECT DeviceObject)
     {
         ObReferenceObject(PDO);
     }
-    KeReleaseQueuedSpinLock(LockQueueIoDatabaseLock, OldIrql);
+    IopReleaseDatabaseLockShared(OldIrql);
 
     return PDO;
 }
