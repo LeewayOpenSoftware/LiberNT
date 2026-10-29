@@ -3205,13 +3205,15 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
          return WasVisible;
 
       case SW_SHOWMINNOACTIVE:
-         Swp |= SWP_NOACTIVATE | SWP_NOZORDER;
-         /* Fall through. */
       case SW_SHOWMINIMIZED:
       case SW_MINIMIZE: /* CORE-15669: SW_MINIMIZE also shows */
          Swp |= SWP_SHOWWINDOW;
          {
-            if (Cmd == SW_MINIMIZE) Swp |= SWP_NOACTIVATE | SWP_NOZORDER;
+            if (Cmd != SW_SHOWMINIMIZED)
+            {
+               Swp |= SWP_NOACTIVATE;
+               if ((style & (WS_CHILD | WS_POPUP)) != WS_CHILD) Swp |= SWP_NOZORDER;
+            }
             if (!(style & WS_MINIMIZE))
             {
                IntShowOwnedPopups(Wnd, FALSE );
@@ -3315,6 +3317,7 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
        Cmd != SW_SHOWNA &&
        Cmd != SW_SHOWMAXIMIZED &&
        Cmd != SW_SHOWMINIMIZED &&
+       !((Cmd == SW_MINIMIZE || Cmd == SW_SHOWMINNOACTIVE) && (Swp & SWP_STATECHANGED)) &&
        !((Cmd == SW_RESTORE || Cmd == SW_SHOWNORMAL || Cmd == SW_SHOWDEFAULT) && (Swp & SWP_STATECHANGED)))
    {
       //ERR("SWP Child No active and ZOrder\n");
@@ -3340,7 +3343,8 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
              (IsChildVisible(Wnd) ? "TRUE" : "FALSE"), (Swp & SWP_STATECHANGED ? "TRUE" : "FALSE"),
              (ShowFlag ? "TRUE" : "FALSE"),LOWORD(Swp));
    co_WinPosSetWindowPos( Wnd,
-                          ((Swp & SWP_STATECHANGED) && (Wnd->style & (WS_CHILD | WS_MINIMIZE)) == (WS_CHILD | WS_MINIMIZE)) ? HWND_BOTTOM :
+                          ((Swp & SWP_STATECHANGED) && Cmd != SW_SHOWMINIMIZED &&
+                           (Wnd->style & (WS_CHILD | WS_MINIMIZE)) == (WS_CHILD | WS_MINIMIZE)) ? HWND_BOTTOM :
                           0 != (Wnd->ExStyle & WS_EX_TOPMOST) ? HWND_TOPMOST : HWND_TOP,
                           NewPos.left,
                           NewPos.top,
