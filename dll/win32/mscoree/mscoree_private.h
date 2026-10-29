@@ -179,6 +179,9 @@ extern void RuntimeHost_NotifyEvent(EClrEvent event, void *data);
 extern int (CDECL *mono_domain_get_id)(MonoDomain *domain);
 
 extern void set_app_assembly_bindings(struct list *bindings, const WCHAR *base_dir, SIZE_T base_dir_size);
+extern void replace_app_assembly_bindings(struct list *bindings);
+extern char* (CDECL *mono_string_to_utf8)(MonoString *string_obj);
+extern void (CDECL *mono_free)(void *);
 #endif
 
 typedef enum {

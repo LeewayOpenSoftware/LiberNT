@@ -110,7 +110,11 @@ static void (CDECL *mono_config_parse)(const char *filename);
 MonoDomain* (CDECL *mono_domain_get)(void);
 MonoDomain* (CDECL *mono_domain_get_by_id)(int id);
 void (CDECL *mono_domain_set_config)(MonoDomain *domain,const char *base_dir,const char *config_file_name);
+#ifdef __REACTOS__
+void (CDECL *mono_free)(void *);
+#else
 static void (CDECL *mono_free)(void *);
+#endif
 MonoImage* (CDECL *mono_get_corlib)(void);
 static MonoImage* (CDECL *mono_image_open)(const char *fname, MonoImageOpenStatus *status);
 MonoImage* (CDECL *mono_image_open_from_module_handle)(HMODULE module_handle, char* fname, UINT has_entry_point, MonoImageOpenStatus* status);
@@ -146,6 +150,9 @@ static void (CDECL *mono_set_crash_chaining)(BOOL chain_signals);
 static void (CDECL *mono_set_dirs)(const char *assembly_dir, const char *config_dir);
 static void (CDECL *mono_set_verbose_level)(DWORD level);
 MonoString* (CDECL *mono_string_new)(MonoDomain *domain, const char *str);
+#ifdef __REACTOS__
+char* (CDECL *mono_string_to_utf8)(MonoString *string_obj);
+#endif
 static char* (CDECL *mono_stringify_assembly_name)(MonoAssemblyName *aname);
 void (CDECL *mono_thread_manage)(void);
 MonoDomain* (CDECL *mono_threads_attach_coop)(MonoDomain *domain, void *attach_cookie);
@@ -262,6 +269,9 @@ static HRESULT load_mono(LPCWSTR mono_path)
         LOAD_MONO_FUNCTION(mono_set_verbose_level);
         LOAD_MONO_FUNCTION(mono_stringify_assembly_name);
         LOAD_MONO_FUNCTION(mono_string_new);
+#ifdef __REACTOS__
+        LOAD_MONO_FUNCTION(mono_string_to_utf8);
+#endif
         LOAD_MONO_FUNCTION(mono_thread_manage);
         LOAD_MONO_FUNCTION(mono_threads_attach_coop);
         LOAD_MONO_FUNCTION(mono_threads_detach_coop);
@@ -1881,6 +1891,25 @@ void set_app_assembly_bindings(struct list *bindings, const WCHAR *base_dir, SIZ
     AcquireSRWLockExclusive(&app_bindings_lock);
     app_base_dir = dir;
     list_move_tail(&app_assembly_bindings, bindings);
+    ReleaseSRWLockExclusive(&app_bindings_lock);
+}
+
+void replace_app_assembly_bindings(struct list *bindings)
+{
+    assembly_binding *binding, *binding2;
+
+    AcquireSRWLockExclusive(&app_bindings_lock);
+    LIST_FOR_EACH_ENTRY_SAFE(binding, binding2, &app_assembly_bindings, assembly_binding, entry)
+    {
+        list_remove(&binding->entry);
+        free(binding->name);
+        free(binding->public_key_token);
+        free(binding->culture);
+        free(binding->code_base);
+        free(binding);
+    }
+    list_move_tail(&app_assembly_bindings, bindings);
+    app_bindings_set = TRUE;
     ReleaseSRWLockExclusive(&app_bindings_lock);
 }
 

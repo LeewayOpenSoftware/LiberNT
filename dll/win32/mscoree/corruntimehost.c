@@ -1428,6 +1428,39 @@ static const struct ICLRControlVtbl CLRControlVtbl =
     CLRControl_SetAppDomainManagerType
 };
 
+static void RuntimeHost_ApplyDomainConfiguration(RuntimeHost *This)
+{
+    WCHAR exe_config[MAX_PATH], *config;
+    parsed_config_file parsed_config;
+    MonoObject *result = NULL;
+    char *configA;
+    int len;
+
+    if (FAILED(RuntimeHost_Invoke(This, NULL, "System", "AppDomain", "GetConfigurationFileInternal", NULL, NULL, 0, &result)) || !result)
+        return;
+
+    configA = mono_string_to_utf8((MonoString *)result);
+    if (!configA)
+        return;
+    len = MultiByteToWideChar(CP_UTF8, 0, configA, -1, NULL, 0);
+    config = len ? malloc(len * sizeof(WCHAR)) : NULL;
+    if (config)
+        MultiByteToWideChar(CP_UTF8, 0, configA, -1, config, len);
+    mono_free(configA);
+    if (!config)
+        return;
+
+    GetModuleFileNameW(NULL, exe_config, MAX_PATH);
+    lstrcatW(exe_config, L".config");
+    if (config[0] && _wcsicmp(config, exe_config) && SUCCEEDED(parse_config_file(config, &parsed_config)))
+    {
+        TRACE("domain manager configuration %s\n", debugstr_w(config));
+        replace_app_assembly_bindings(&parsed_config.assembly_bindings);
+        free_parsed_config_file(&parsed_config);
+    }
+    free(config);
+}
+
 static void RuntimeHost_InitializeDomainManager(RuntimeHost *This, MonoDomain *domain)
 {
     char *assemblyA = NULL, *typeA = NULL;
@@ -1484,6 +1517,9 @@ static void RuntimeHost_InitializeDomainManager(RuntimeHost *This, MonoDomain *d
             IHostControl_Release(host_control);
         }
     }
+
+    if (SUCCEEDED(hr))
+        RuntimeHost_ApplyDomainConfiguration(This);
 
     mono_threads_detach_coop(prev_domain, &attach_cookie);
 
