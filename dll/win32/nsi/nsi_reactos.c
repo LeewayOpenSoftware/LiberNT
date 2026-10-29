@@ -385,7 +385,8 @@ static BOOL ip4_query_interface(UINT index, IP4_INTERFACE_INFO *info)
     return NT_SUCCESS(status);
 }
 
-static ULONG ip4_address_dad_state(UINT index, DWORD address)
+static void ip4_address_info(UINT index, DWORD address, struct nsi_ip_unicast_dynamic *dynamic,
+                             struct nsi_ip_unicast_static *stat)
 {
     UNICODE_STRING name = RTL_CONSTANT_STRING(L"\\Device\\Ip");
     OBJECT_ATTRIBUTES attr;
@@ -400,11 +401,16 @@ static ULONG ip4_address_dad_state(UINT index, DWORD address)
     InitializeObjectAttributes(&attr, &name, OBJ_CASE_INSENSITIVE, NULL, NULL);
     status = NtOpenFile(&file, SYNCHRONIZE, &attr, &iosb, FILE_SHARE_READ | FILE_SHARE_WRITE,
                         FILE_SYNCHRONOUS_IO_NONALERT);
-    if (!NT_SUCCESS(status)) return IpDadStatePreferred;
-    status = NtDeviceIoControlFile(file, NULL, NULL, NULL, &iosb, IOCTL_IP_QUERY_ADDRESS,
-                                   &info, sizeof(info), &info, sizeof(info));
-    NtClose(file);
-    return NT_SUCCESS(status) ? info.DadState : IpDadStatePreferred;
+    if (NT_SUCCESS(status))
+    {
+        status = NtDeviceIoControlFile(file, NULL, NULL, NULL, &iosb, IOCTL_IP_QUERY_ADDRESS,
+                                       &info, sizeof(info), &info, sizeof(info));
+        NtClose(file);
+    }
+    if (!NT_SUCCESS(status))
+        info.DadState = IpDadStatePreferred;
+    if (dynamic) dynamic->dad_state = info.DadState;
+    if (stat) stat->creation_time = info.CreationTime.QuadPart;
 }
 
 static void override_zone_indices(ULONG *zones, const ULONG *overrides)
@@ -606,7 +612,12 @@ static DWORD enumerate_ipv6_unicast(struct nsi_enumerate_all_ex *params)
             dynamic->scope_id = IN6_IS_ADDR_LINKLOCAL((const IN6_ADDR *)row->Address) ? row->Index : 0;
             dynamic->dad_state = row->DadState;
         }
-        if (params->static_data) memset((struct nsi_ip_unicast_static *)params->static_data + i, 0, sizeof(struct nsi_ip_unicast_static));
+        if (params->static_data)
+        {
+            struct nsi_ip_unicast_static *stat = (struct nsi_ip_unicast_static *)params->static_data + i;
+            memset(stat, 0, sizeof(*stat));
+            stat->creation_time = row->CreationTime.QuadPart;
+        }
     }
     HeapFree(GetProcessHeap(), 0, header);
     return finish_enumeration(params, count, want_data);
@@ -930,9 +941,14 @@ static DWORD enumerate_ipv4_unicast(struct nsi_enumerate_all_ex *params)
                 {
                     struct nsi_ip_unicast_dynamic *dynamic = (struct nsi_ip_unicast_dynamic *)params->dynamic_data + written;
                     memset(dynamic, 0, sizeof(*dynamic));
-                    dynamic->dad_state = ip4_address_dad_state(indexes->indexes[i], address);
+                    ip4_address_info(indexes->indexes[i], address, dynamic, NULL);
                 }
-                if (params->static_data) memset((struct nsi_ip_unicast_static *)params->static_data + written, 0, sizeof(struct nsi_ip_unicast_static));
+                if (params->static_data)
+                {
+                    struct nsi_ip_unicast_static *stat = (struct nsi_ip_unicast_static *)params->static_data + written;
+                    memset(stat, 0, sizeof(*stat));
+                    ip4_address_info(indexes->indexes[i], address, NULL, stat);
+                }
                 written++;
             }
             count++;

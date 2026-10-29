@@ -211,6 +211,7 @@ typedef struct _IP_NTE {
     ULONG DadState;
     ULONG DadProbes;
     ULONGLONG DadNext;
+    LARGE_INTEGER Created;
 } IP_NTE, *PIP_NTE;
 
 typedef struct _IP_SET_ADDRESS {

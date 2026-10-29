@@ -1456,6 +1456,9 @@ netif_ip6_addr_set_state(struct netif *netif, s8_t addr_idx, u8_t state)
     netif->ip6_dad_sent[addr_idx] = 0;
     netif->ip6_dad_next[addr_idx] = sys_now();
   }
+  if (ip6_addr_isinvalid(old_state) && !ip6_addr_isinvalid(state)) {
+    netif->ip6_addr_created[addr_idx] = sys_now();
+  }
   /* state is actually being changed? */
   if (old_state != state) {
     u8_t old_valid = old_state & IP6_ADDR_VALID;

@@ -689,6 +689,7 @@ NTSTATUS IPAddInterfaceAddress(PIP_INTERFACE Interface, IPv4_RAW_ADDRESS Address
 
     Nte->Interface = Interface;
     Nte->Context = Address;
+    KeQuerySystemTime(&Nte->Created);
     if (Interface != Loopback && Interface->DadTransmits)
     {
         Nte->DadState = IpDadStateTentative;
@@ -1039,6 +1040,7 @@ NTSTATUS IPQueryAddressV4(PIP4_ADDRESS_INFO Info)
         if (Nte->Interface->Index == Info->Index && Nte->Unicast.Address.IPv4Address == Info->Address)
         {
             Info->DadState = Nte->DadState;
+            Info->CreationTime = Nte->Created;
             Status = STATUS_SUCCESS;
             break;
         }

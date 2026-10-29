@@ -34,6 +34,7 @@ typedef struct _IP4_ADDRESS_INFO
     ULONG Address;
     ULONG DadState;
     ULONG Reserved;
+    LARGE_INTEGER CreationTime;
 } IP4_ADDRESS_INFO, *PIP4_ADDRESS_INFO;
 
 #define IOCTL_IP_QUERY_ROUTE _TCP_CTL_CODE(0x80C, METHOD_BUFFERED, FILE_ANY_ACCESS)
@@ -251,6 +252,7 @@ typedef struct _IP6_ADDRESS_ROW
     ULONG SuffixOrigin;
     BOOLEAN SkipAsSource;
     BOOLEAN Reserved[3];
+    LARGE_INTEGER CreationTime;
 } IP6_ADDRESS_ROW, *PIP6_ADDRESS_ROW;
 
 typedef struct _IP6_ROUTE_ROW
