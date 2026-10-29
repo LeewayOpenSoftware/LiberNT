@@ -1086,7 +1086,14 @@ static DWORD WAVE_mciRecord(MCIDEVICEID wDevID, DWORD_PTR dwFlags, DWORD_PTR pmt
 
     if (dwRet != MMSYSERR_NOERROR) {
 	TRACE("Can't open low level audio device %ld\n", dwRet);
+#ifdef __REACTOS__
+	if (dwRet == MMSYSERR_BADDEVICEID || dwRet == MMSYSERR_NODRIVER || dwRet == WAVERR_BADFORMAT)
+	    dwRet = (wmw->wInput == (WORD)WAVE_MAPPER) ? MCIERR_WAVE_INPUTSUNSUITABLE : MCIERR_WAVE_SETINPUTUNSUITABLE;
+	else
+	    dwRet = MCIERR_DEVICE_OPEN;
+#else
 	dwRet = MCIERR_DEVICE_OPEN;
+#endif
 	wmw->hWave = 0;
 	goto cleanUp;
     }
