@@ -1430,6 +1430,7 @@ BOOL NTAPI
 UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
 {
     WORD wScanCode, wVk;
+    DWORD dwFlags;
     PKL pKl = NULL;
     PKBDTABLES pKbdTbl;
     PUSER_MESSAGE_QUEUE pFocusQueue;
@@ -1458,8 +1459,15 @@ UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
 
     /* Note: wScan field is always used */
     wScanCode = pKbdInput->wScan;
+    dwFlags = pKbdInput->dwFlags;
 
-    if (pKbdInput->dwFlags & KEYEVENTF_UNICODE)
+    if ((dwFlags & KEYEVENTF_UNICODE) && pKbdInput->wVk != 0 && pKbdInput->wVk != VK_PACKET)
+    {
+        dwFlags &= ~KEYEVENTF_UNICODE;
+        wScanCode &= 0xFF;
+        wVk = pKbdInput->wVk & 0xFF;
+    }
+    else if (dwFlags & KEYEVENTF_UNICODE)
     {
         /* Generate WM_KEYDOWN msg with wParam == VK_PACKET and
            high order word of lParam == pKbdInput->wScan */
@@ -1499,7 +1507,7 @@ UserSendKeyboardInput(KEYBDINPUT *pKbdInput, BOOL bInjected)
     }
 
     /* Finally process this key */
-    return ProcessKeyEvent(wVk, wScanCode, pKbdInput->dwFlags, bInjected, dwTime, pKbdInput->dwExtraInfo);
+    return ProcessKeyEvent(wVk, wScanCode, dwFlags, bInjected, dwTime, pKbdInput->dwExtraInfo);
 }
 
 /*
