@@ -880,14 +880,23 @@ NSP_NbnsQueryThread(LPVOID Parameter)
     SOCKADDR_IN Target = {AF_INET};
     UCHAR Reply[576];
     BOOL Yes = TRUE;
+    HANDLE Mutex = NULL;
     SOCKET s;
     INT Try;
 
     Count = NSP_NbnsBroadcasts(Broadcasts);
-    /* FIXME: Windows sends name queries from UDP 137 through NetBT; without NetBT the query uses an ephemeral port */
     s = Count ? socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP) : INVALID_SOCKET;
     if (s != INVALID_SOCKET)
+    {
+        SOCKADDR_IN Local = {AF_INET};
+
+        Mutex = CreateMutexW(NULL, FALSE, L"Global\\LiberNTNetbiosNameService");
+        if (Mutex)
+            WaitForSingleObject(Mutex, NSP_NBNS_TRIES * NSP_NBNS_TIMEOUT * 4);
+        Local.sin_port = htons(NSP_NBNS_PORT);
+        bind(s, (SOCKADDR *)&Local, sizeof(Local));
         setsockopt(s, SOL_SOCKET, SO_BROADCAST, (char *)&Yes, sizeof(Yes));
+    }
     Target.sin_port = htons(NSP_NBNS_PORT);
     for (Try = 0; s != INVALID_SOCKET && Try < NSP_NBNS_TRIES && !Query->AddressCount; Try++)
     {
@@ -920,6 +929,11 @@ NSP_NbnsQueryThread(LPVOID Parameter)
     }
     if (s != INVALID_SOCKET)
         closesocket(s);
+    if (Mutex)
+    {
+        ReleaseMutex(Mutex);
+        CloseHandle(Mutex);
+    }
     NSP_NbnsRelease(Query);
     return 0;
 }
