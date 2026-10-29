@@ -153,6 +153,7 @@ typedef struct _StaticShellEntry_
 } StaticShellEntry, *PStaticShellEntry;
 
 #define DCM_FCIDM_SHVIEW_OFFSET 0x7000 // Offset from the menu ids in the menu resource to FCIDM_SHVIEW_*
+#define DCM_DFLT_ID_COUNT 0x40
 
 //
 // verbs for InvokeCommandInfo
@@ -283,6 +284,7 @@ static HRESULT GetFriendlyVerb(_In_ PCWSTR pszVerb, _Out_ PWSTR pszBuf, _In_ SIZ
 class CDefaultContextMenu :
     public CComObjectRootEx<CComMultiThreadModelNoCS>,
     public IContextMenu3,
+    public IShellExtInit,
     public IObjectWithSite,
     public IServiceProvider
 {
@@ -350,6 +352,8 @@ class CDefaultContextMenu :
         ~CDefaultContextMenu();
         HRESULT WINAPI Initialize(const DEFCONTEXTMENU *pdcm, LPFNDFMCALLBACK lpfn);
 
+        STDMETHOD(Initialize)(PCIDLIST_ABSOLUTE pidlFolder, IDataObject *pdtobj, HKEY hkeyProgID) override;
+
         // IContextMenu
         STDMETHOD(QueryContextMenu)(HMENU hMenu, UINT indexMenu, UINT idCmdFirst, UINT idCmdLast, UINT uFlags) override;
         STDMETHOD(InvokeCommand)(LPCMINVOKECOMMANDINFO lpcmi) override;
@@ -375,6 +379,7 @@ class CDefaultContextMenu :
         COM_INTERFACE_ENTRY_IID(IID_IContextMenu, IContextMenu)
         COM_INTERFACE_ENTRY_IID(IID_IContextMenu2, IContextMenu2)
         COM_INTERFACE_ENTRY_IID(IID_IContextMenu3, IContextMenu3)
+        COM_INTERFACE_ENTRY_IID(IID_IShellExtInit, IShellExtInit)
         COM_INTERFACE_ENTRY_IID(IID_IObjectWithSite, IObjectWithSite)
         COM_INTERFACE_ENTRY_IID(IID_IServiceProvider, IServiceProvider)
         END_COM_MAP()
@@ -465,6 +470,34 @@ HRESULT WINAPI CDefaultContextMenu::Initialize(const DEFCONTEXTMENU *pdcm, LPFND
     }
 
     return hr;
+}
+
+STDMETHODIMP CDefaultContextMenu::Initialize(PCIDLIST_ABSOLUTE pidlFolder, IDataObject *pdtobj, HKEY hkeyProgID)
+{
+    if (pidlFolder)
+    {
+        PIDLIST_ABSOLUTE pidl = ILClone(pidlFolder);
+        if (!pidl)
+            return E_OUTOFMEMORY;
+        if (m_pidlFolder)
+            CoTaskMemFree(m_pidlFolder);
+        m_pidlFolder = pidl;
+    }
+
+    if (pdtobj)
+        m_pDataObj = pdtobj;
+
+    if (hkeyProgID)
+    {
+        if (m_cKeys >= _countof(m_aKeys))
+            return E_INVALIDARG;
+        m_aKeys[m_cKeys] = SHRegDuplicateHKey(hkeyProgID);
+        if (!m_aKeys[m_cKeys])
+            return E_OUTOFMEMORY;
+        m_cKeys++;
+    }
+
+    return S_OK;
 }
 
 HRESULT CDefaultContextMenu::_DoCallback(UINT uMsg, WPARAM wParam, LPVOID lParam)
@@ -959,7 +992,7 @@ CDefaultContextMenu::TryPickDefault(HMENU hMenu, UINT idCmdFirst, UINT DfltOffse
     // Don't want to pick something like cut or delete as the default but
     // a static or dynamic verb is a good default.
     if (m_iIdSCMLast > m_iIdSCMFirst || m_iIdSHELast > m_iIdSHEFirst)
-        SetMenuDefaultItem(hMenu, idCmdFirst, MF_BYCOMMAND);
+        SetMenuDefaultItem(hMenu, idCmdFirst + m_iIdSCMFirst, MF_BYCOMMAND);
 }
 
 HRESULT
@@ -985,8 +1018,8 @@ CDefaultContextMenu::QueryContextMenu(
     }
 
     /* Add static context menu handlers */
-    cIds = AddStaticContextMenusToMenu(hMenu, &IndexMenu, idCmdFirst, idCmdLast, uFlags);
-    m_iIdSCMFirst = 0; // FIXME: This should be = idCmdFirst?
+    cIds = DCM_DFLT_ID_COUNT + AddStaticContextMenusToMenu(hMenu, &IndexMenu, idCmdFirst + DCM_DFLT_ID_COUNT, idCmdLast, uFlags);
+    m_iIdSCMFirst = DCM_DFLT_ID_COUNT; // FIXME: This should be = idCmdFirst?
     m_iIdSCMLast = cIds;
     idCmdNext = idCmdFirst + cIds;
 
@@ -1040,11 +1073,10 @@ CDefaultContextMenu::QueryContextMenu(
         if (!(rfg & SFGAO_HASPROPSHEET))
             DeleteMenu(hmenuDefault, IDM_PROPERTIES, MF_BYCOMMAND);
 
-        idDefaultOffset = idCmdNext;
-        UINT idMax = Shell_MergeMenus(hMenu, GetSubMenu(hmenuDefault, 0), IndexMenu, idCmdNext, idCmdLast, 0);
-        m_iIdDfltFirst = cIds;
-        cIds += idMax - idCmdNext;
-        m_iIdDfltLast = cIds;
+        idDefaultOffset = idCmdFirst;
+        Shell_MergeMenus(hMenu, GetSubMenu(hmenuDefault, 0), IndexMenu, idCmdFirst, idCmdLast, 0);
+        m_iIdDfltFirst = 0;
+        m_iIdDfltLast = DCM_DFLT_ID_COUNT;
 
         DestroyMenu(hmenuDefault);
     }

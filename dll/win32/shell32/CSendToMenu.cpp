@@ -289,7 +289,7 @@ CSendToMenu::QueryContextMenu(HMENU hMenu,
           hMenu, indexMenu, idCmdFirst, idCmdLast, uFlags);
 
     if (uFlags & (CMF_NOVERBS | CMF_VERBSONLY))
-        return MAKE_HRESULT(SEVERITY_SUCCESS, 0, idCmdFirst);
+        return MAKE_HRESULT(SEVERITY_SUCCESS, 0, 0);
 
     HMENU hSubMenu = CreateMenu();
     if (!hSubMenu)
@@ -305,7 +305,7 @@ CSendToMenu::QueryContextMenu(HMENU hMenu,
     MENUITEMINFOW mii = { sizeof(mii) };
     mii.fMask = MIIM_TYPE | MIIM_ID | MIIM_STATE | MIIM_SUBMENU;
     mii.fType = MFT_STRING;
-    mii.wID = -1;
+    mii.wID = idCmdFirst + cItems;
     mii.dwTypeData = strSendTo.GetBuffer();
     mii.cch = wcslen(mii.dwTypeData);
     mii.fState = MFS_ENABLED;
@@ -320,7 +320,7 @@ CSendToMenu::QueryContextMenu(HMENU hMenu,
     m_hSubMenu = hSubMenu;
     DestroyMenu(hOldSubMenu);
 
-    return MAKE_HRESULT(SEVERITY_SUCCESS, 0, idCmdFirst + cItems);
+    return MAKE_HRESULT(SEVERITY_SUCCESS, 0, cItems + 1);
 }
 
 STDMETHODIMP
