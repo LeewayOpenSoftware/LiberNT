@@ -391,3 +391,66 @@ ComVisible System.Void
 MemberOrder System.Object ToString Equals GetHashCode GetType
 MemberOrder System.Delegate GetInvocationList Clone GetObjectData DynamicInvoke Method Target
 MemberOrder System.Reflection.Binder BindToMethod BindToField SelectMethod SelectProperty ChangeType ReorderArgumentArray
+InterfaceOrder System.Runtime.InteropServices._Exception ToString:0 Equals:1 GetHashCode:0 GetType:0 get_Message:0 GetBaseException:0 get_StackTrace:0 get_HelpLink:0 set_HelpLink:1 get_Source:0 set_Source:1 GetObjectData:2 get_InnerException:0 get_TargetSite:0
+InterfaceOrder System.Runtime.InteropServices._Activator GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._Attribute GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._Thread GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Reflection.ICustomAttributeProvider GetCustomAttributes:2 GetCustomAttributes_2:1 IsDefined:2
+InterfaceOrder System.Runtime.InteropServices._MemberInfo GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8 ToString:0 Equals:1 GetHashCode:0 GetType:0 get_MemberType:0 get_name:0 get_DeclaringType:0 get_ReflectedType:0 GetCustomAttributes:2 GetCustomAttributes_2:1 IsDefined:2
+InterfaceOrder System.Diagnostics.SymbolStore.ISymbolDocument get_Url:0 get_DocumentType:0 get_Language:0 get_LanguageVendor:0 get_CheckSumAlgorithmId:0 GetCheckSum:0 FindClosestLine:1 get_HasEmbeddedSource:0 get_SourceLength:0 GetSourceRange:4
+InterfaceOrder System.Diagnostics.SymbolStore.ISymbolDocumentWriter SetSource:1 SetCheckSum:2
+InterfaceOrder System.Diagnostics.SymbolStore.ISymbolMethod get_Token:0 get_SequencePointCount:0 GetSequencePoints:6 get_RootScope:0 GetScope:1 GetOffset:3 GetRanges:3 GetParameters:0 GetNamespace:0 GetSourceStartEnd:3
+InterfaceOrder System.Diagnostics.SymbolStore.ISymbolReader GetDocument:4 GetDocuments:0 get_UserEntryPoint:0 GetMethod:1 GetMethod_2:2 GetVariables:1 GetGlobalVariables:0 GetMethodFromDocumentPosition:3 GetSymAttribute:2 GetNamespaces:0
+InterfaceOrder System.Diagnostics.SymbolStore.ISymbolScope get_Method:0 get_parent:0 GetChildren:0 get_StartOffset:0 get_EndOffset:0 GetLocals:0 GetNamespaces:0
+InterfaceOrder System.Diagnostics.SymbolStore.ISymbolVariable get_name:0 get_Attributes:0 GetSignature:0 get_AddressKind:0 get_AddressField1:0 get_AddressField2:0 get_AddressField3:0 get_StartOffset:0 get_EndOffset:0
+InterfaceOrder System.Diagnostics.SymbolStore.ISymbolWriter Initialize:3 DefineDocument:4 SetUserEntryPoint:1 OpenMethod:1 CloseMethod:0 DefineSequencePoints:6 OpenScope:1 CloseScope:1 SetScopeRange:3 DefineLocalVariable:9 DefineParameter:7 DefineField:8 DefineGlobalVariable:7 Close:0 SetSymAttribute:3 OpenNamespace:1 CloseNamespace:0 UsingNamespace:1 SetMethodSourceRange:6 SetUnderlyingWriter:1
+InterfaceOrder System.Runtime.InteropServices._Assembly ToString:0 Equals:1 GetHashCode:0 GetType:0 get_CodeBase:0 get_EscapedCodeBase:0 GetName:0 GetName_2:1 get_FullName:0 get_EntryPoint:0 GetType_2:1 GetType_3:2 GetExportedTypes:0 GetTypes:0 GetManifestResourceStream:2 GetManifestResourceStream_2:1 GetFile:1 GetFiles:0 GetFiles_2:1 GetManifestResourceNames:0 GetManifestResourceInfo:1 get_Location:0 get_Evidence:0 GetCustomAttributes:2 GetCustomAttributes_2:1 IsDefined:2 GetObjectData:2 add_ModuleResolve:1 remove_ModuleResolve:1 GetType_4:3 GetSatelliteAssembly:1 GetSatelliteAssembly_2:2 LoadModule:2 LoadModule_2:3 CreateInstance:1 CreateInstance_2:2 CreateInstance_3:7 GetLoadedModules:0 GetLoadedModules_2:1 GetModules:0 GetModules_2:1 GetModule:1 GetReferencedAssemblies:0 get_GlobalAssemblyCache:0
+InterfaceOrder System.Runtime.InteropServices._AssemblyName GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._MethodBase GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8 ToString:0 Equals:1 GetHashCode:0 GetType:0 get_MemberType:0 get_name:0 get_DeclaringType:0 get_ReflectedType:0 GetCustomAttributes:2 GetCustomAttributes_2:1 IsDefined:2 GetParameters:0 GetMethodImplementationFlags:0 get_MethodHandle:0 get_Attributes:0 get_CallingConvention:0 Invoke_2:5 get_IsPublic:0 get_IsPrivate:0 get_IsFamily:0 get_IsAssembly:0 get_IsFamilyAndAssembly:0 get_IsFamilyOrAssembly:0 get_IsStatic:0 get_IsFinal:0 get_IsVirtual:0 get_IsHideBySig:0 get_IsAbstract:0 get_IsSpecialName:0 get_IsConstructor:0 Invoke_3:2
+InterfaceOrder System.Runtime.InteropServices._ConstructorInfo GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8 ToString:0 Equals:1 GetHashCode:0 GetType:0 get_MemberType:0 get_name:0 get_DeclaringType:0 get_ReflectedType:0 GetCustomAttributes:2 GetCustomAttributes_2:1 IsDefined:2 GetParameters:0 GetMethodImplementationFlags:0 get_MethodHandle:0 get_Attributes:0 get_CallingConvention:0 Invoke_2:5 get_IsPublic:0 get_IsPrivate:0 get_IsFamily:0 get_IsAssembly:0 get_IsFamilyAndAssembly:0 get_IsFamilyOrAssembly:0 get_IsStatic:0 get_IsFinal:0 get_IsVirtual:0 get_IsHideBySig:0 get_IsAbstract:0 get_IsSpecialName:0 get_IsConstructor:0 Invoke_3:2 Invoke_4:4 Invoke_5:1
+InterfaceOrder System.Runtime.InteropServices._FieldInfo GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8 ToString:0 Equals:1 GetHashCode:0 GetType:0 get_MemberType:0 get_name:0 get_DeclaringType:0 get_ReflectedType:0 GetCustomAttributes:2 GetCustomAttributes_2:1 IsDefined:2 get_FieldType:0 GetValue:1 GetValueDirect:1 SetValue:5 SetValueDirect:2 get_FieldHandle:0 get_Attributes:0 SetValue_2:2 get_IsPublic:0 get_IsPrivate:0 get_IsFamily:0 get_IsAssembly:0 get_IsFamilyAndAssembly:0 get_IsFamilyOrAssembly:0 get_IsStatic:0 get_IsInitOnly:0 get_IsLiteral:0 get_IsNotSerialized:0 get_IsSpecialName:0 get_IsPinvokeImpl:0
+InterfaceOrder System.Runtime.InteropServices._PropertyInfo GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8 ToString:0 Equals:1 GetHashCode:0 GetType:0 get_MemberType:0 get_name:0 get_DeclaringType:0 get_ReflectedType:0 GetCustomAttributes:2 GetCustomAttributes_2:1 IsDefined:2 get_PropertyType:0 GetValue:2 GetValue_2:5 SetValue:3 SetValue_2:6 GetAccessors:1 GetGetMethod:1 GetSetMethod:1 GetIndexParameters:0 get_Attributes:0 get_CanRead:0 get_CanWrite:0 GetAccessors_2:0 GetGetMethod_2:0 GetSetMethod_2:0 get_IsSpecialName:0
+InterfaceOrder System.Runtime.InteropServices._EventInfo GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8 ToString:0 Equals:1 GetHashCode:0 GetType:0 get_MemberType:0 get_name:0 get_DeclaringType:0 get_ReflectedType:0 GetCustomAttributes:2 GetCustomAttributes_2:1 IsDefined:2 GetAddMethod:1 GetRemoveMethod:1 GetRaiseMethod:1 get_Attributes:0 GetAddMethod_2:0 GetRemoveMethod_2:0 GetRaiseMethod_2:0 AddEventHandler:2 RemoveEventHandler:2 get_EventHandlerType:0 get_IsSpecialName:0 get_IsMulticast:0
+InterfaceOrder System.Runtime.InteropServices._ParameterInfo GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._Module GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Security.ISecurityEncodable ToXml:0 FromXml:1
+InterfaceOrder System.Security.ISecurityPolicyEncodable ToXml:1 FromXml:2
+InterfaceOrder System.Security.Policy.IMembershipCondition Check:1 Copy:0 ToString:0 Equals:1
+InterfaceOrder System.Runtime.InteropServices.ITypeLibConverter ConvertTypeLibToAssembly:8 ConvertAssemblyToTypeLib:4 GetPrimaryInteropAssembly:6 ConvertTypeLibToAssembly_2:7
+InterfaceOrder System.Security.IPermission Copy:0 Intersect:1 Union:1 IsSubsetOf:1 Demand:0
+InterfaceOrder System.Runtime.Remoting.Contexts.IContextAttribute IsContextOK:2 GetPropertiesForNewContext:1
+InterfaceOrder System.Runtime.Remoting.Contexts.IContextProperty get_name:0 IsNewContextOK:1 Freeze:1
+InterfaceOrder System.Runtime.Remoting.Activation.IActivator get_NextActivator:0 set_NextActivator:1 Activate:1 get_level:0
+InterfaceOrder System.Runtime.Remoting.Channels.IClientResponseChannelSinkStack AsyncProcessResponse:2 DispatchReplyMessage:1 DispatchException:1
+InterfaceOrder System.Runtime.Remoting.Channels.IClientChannelSinkStack Push:2 Pop:1
+InterfaceOrder System.Runtime.Remoting.Channels.IServerChannelSinkStack Push:2 Pop:1 Store:2 StoreAndDispatch:2 ServerCallback:1
+InterfaceOrder System.Runtime.Remoting.Contexts.IContextPropertyActivator IsOKToActivate:1 CollectFromClientContext:1 DeliverClientContextToServerContext:1 CollectFromServerContext:1 DeliverServerContextToClientContext:1
+InterfaceOrder System.Runtime.Remoting.Channels.IChannel get_ChannelPriority:0 get_ChannelName:0 Parse:2
+InterfaceOrder System.Runtime.Remoting.Channels.IServerChannelSinkProvider GetChannelData:1 CreateSink:1 get_Next:0 set_Next:1
+InterfaceOrder System.Runtime.Remoting.Channels.IServerChannelSink ProcessMessage:7 AsyncProcessResponse:5 GetResponseStream:4 get_NextChannelSink:0
+InterfaceOrder System.Runtime.Remoting.Messaging.IMethodMessage get_Uri:0 get_MethodName:0 get_typeName:0 get_MethodSignature:0 get_ArgCount:0 GetArgName:1 GetArg:1 get_args:0 get_HasVarArgs:0 get_LogicalCallContext:0 get_MethodBase:0
+InterfaceOrder System.Runtime.Remoting.Messaging.IMethodCallMessage get_InArgCount:0 GetInArgName:1 GetInArg:1 get_InArgs:0
+InterfaceOrder System.Runtime.Remoting.Activation.IConstructionCallMessage get_Activator:0 set_Activator:1 get_CallSiteActivationAttributes:0 get_ActivationTypeName:0 get_ActivationType:0 get_ContextProperties:0
+InterfaceOrder System.Runtime.Remoting.Messaging.IMethodReturnMessage get_OutArgCount:0 GetOutArgName:1 GetOutArg:1 get_OutArgs:0 get_Exception:0 get_ReturnValue:0
+InterfaceOrder System.Runtime.Remoting.Channels.IChannelReceiverHook get_ChannelScheme:0 get_WantsToListen:0 get_ChannelSinkChain:0 AddHookChannelUri:1
+InterfaceOrder System.Runtime.Remoting.Channels.IClientChannelSinkProvider CreateSink:3 get_Next:0 set_Next:1
+InterfaceOrder System.Runtime.Remoting.Channels.IClientChannelSink ProcessMessage:5 AsyncProcessRequest:4 AsyncProcessResponse:4 GetRequestStream:2 get_NextChannelSink:0
+InterfaceOrder System.Runtime.Remoting.Contexts.IDynamicMessageSink ProcessMessageStart:3 ProcessMessageFinish:3
+InterfaceOrder System.Runtime.Remoting.Lifetime.ILease Register:2 Register_2:1 Unregister:1 Renew:1 get_RenewOnCallTime:0 set_RenewOnCallTime:1 get_SponsorshipTimeout:0 set_SponsorshipTimeout:1 get_InitialLeaseTime:0 set_InitialLeaseTime:1 get_CurrentLeaseTime:0 get_CurrentState:0
+InterfaceOrder System.Runtime.Remoting.Services.ITrackingHandler MarshaledObject:2 UnmarshaledObject:2 DisconnectedObject:1
+InterfaceOrder System.Runtime.InteropServices._AssemblyBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._ConstructorBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._CustomAttributeBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._EnumBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._EventBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._FieldBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._ILGenerator GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._LocalBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._MethodBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._MethodRental GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._ModuleBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._ParameterBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._PropertyBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._SignatureHelper GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+InterfaceOrder System.Runtime.InteropServices._TypeBuilder GetTypeInfoCount:1 GetTypeInfo:3 GetIDsOfNames:5 Invoke:8
+MemberOrder System.MarshalByRefObject GetLifetimeService InitializeLifetimeService CreateObjRef

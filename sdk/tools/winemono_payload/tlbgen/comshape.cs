@@ -1,7 +1,7 @@
 /*
  * PROJECT:     LiberNT Wine Mono payload
  * LICENSE:     MIT (https://spdx.org/licenses/MIT)
- * PURPOSE:     Applies the COM visibility and class interface attributes of the .NET Framework mscorlib
+ * PURPOSE:     Applies the COM visibility, class interface attributes and interface layouts of the .NET Framework mscorlib
  * COPYRIGHT:   Copyright 2026 Ahmed ARIF <arif.ing@outlook.com>
  */
 
@@ -35,6 +35,36 @@ static class ComShape
         type.CustomAttributes.Add(attribute);
     }
 
+    static void Reorder(TypeDefinition type, string[] keys)
+    {
+        var rest = type.Methods.ToList();
+        var ordered = new System.Collections.Generic.List<MethodDefinition>();
+        foreach (var key in keys)
+        {
+            int colon = key.LastIndexOf(':');
+            string name = key.Substring(0, colon);
+            int count = int.Parse(key.Substring(colon + 1));
+            var m = rest.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase) && x.Parameters.Count == count);
+            int suffix = name.LastIndexOf('_');
+            if (m == null && suffix > 0 && name.Substring(suffix + 1).All(char.IsDigit))
+            {
+                string stem = name.Substring(0, suffix);
+                m = rest.FirstOrDefault(x => string.Equals(x.Name, stem, StringComparison.OrdinalIgnoreCase) && x.Parameters.Count == count);
+            }
+            if (m == null)
+            {
+                Console.Error.WriteLine("comshape: " + type.FullName + " has no " + key);
+                continue;
+            }
+            rest.Remove(m);
+            ordered.Add(m);
+        }
+        ordered.AddRange(rest);
+        type.Methods.Clear();
+        foreach (var m in ordered)
+            type.Methods.Add(m);
+    }
+
     static int Main(string[] args)
     {
         var module = ModuleDefinition.ReadModule(args[0], new ReaderParameters { ReadWrite = false, InMemory = true });
@@ -57,6 +87,9 @@ static class ComShape
                 Replace(type, classItf, new CustomAttributeArgument(classItfType, int.Parse(f[2])));
                 break;
             case "MemberOrder":
+                break;
+            case "InterfaceOrder":
+                Reorder(type, f.Skip(2).ToArray());
                 break;
             case "ComDefaultInterface":
                 Replace(type, defaultItf, new CustomAttributeArgument(module.ImportReference(Find(module, "System.Type")), Find(module, f[2])));
