@@ -1519,6 +1519,10 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
             TRACE("MCI_STATUS_NUMBER_OF_TRACKS => %Iu\n", lpParms->dwReturn);
 	    break;
 	case MCI_STATUS_POSITION:
+#ifdef __REACTOS__
+	    if ((dwFlags & MCI_TRACK) && lpParms->dwTrack != 1)
+		return MCIERR_OUTOFRANGE;
+#endif
 	    if (!wmw->hFile) {
 		lpParms->dwReturn = 0;
 		return MCIERR_UNSUPPORTED_FUNCTION;
