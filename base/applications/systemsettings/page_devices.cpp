@@ -13,6 +13,7 @@
 #include <cfgmgr32.h>
 #include <devguid.h>
 #include <winspool.h>
+#include <map>
 
 typedef INT_PTR (WINAPI *PFN_DEVICEPROPERTIES)(HWND, LPCWSTR, LPCWSTR, BOOL);
 typedef BOOL (WINAPI *PFN_INSTALLDEVINST)(HWND, LPCWSTR, BOOL, LPDWORD);
@@ -475,6 +476,215 @@ AddDeviceList(PageBuilder &page)
     SetupDiDestroyDeviceInfoList(set);
 }
 
+typedef ULONG64 DRVINST_JOB_ID;
+
+typedef struct _DRVINST_RESULT
+{
+    ULONG Size;
+    ULONG Win32;
+    ULONG Cr;
+    ULONG DevStatus;
+    ULONG Problem;
+    ULONG Flags;
+} DRVINST_RESULT;
+
+typedef struct _DRVINST_JOB_INFO
+{
+    ULONG Size;
+    DRVINST_JOB_ID JobId;
+    ULONG State;
+    ULONG Source;
+    ULONG Flags;
+    ULONG SubmitTick;
+    ULONG EndTick;
+    DRVINST_RESULT Result;
+    WCHAR DeviceInstanceId[200];
+} DRVINST_JOB_INFO;
+
+#define DRVINST_F_SILENT          0x00000001
+#define DRVINST_RF_NEEDREBOOT     0x00000002
+#define DRVINST_RF_ROLLEDBACK     0x00000004
+#define DRVINST_JOB_STATE_ROLLED_BACK 6
+
+typedef DWORD (WINAPI *PFN_DRVINST_SUBMIT)(PCWSTR, DWORD, DRVINST_JOB_ID *);
+typedef DWORD (WINAPI *PFN_DRVINST_GETJOB)(DRVINST_JOB_ID, DRVINST_JOB_INFO *);
+typedef DWORD (WINAPI *PFN_DRVINST_ENUMJOBS)(DRVINST_JOB_ID *, DWORD *);
+
+struct DrvJobEntry
+{
+    DRVINST_JOB_ID Id = 0;
+    ULONG State = 0;
+    ULONG Win32 = 0;
+    ULONG Problem = 0;
+    ULONG Flags = 0;
+    bool Finished = false;
+};
+
+/* newdev.dll is cached for the process lifetime; it is never freed while a
+ * submitted job can still be running in the service. */
+static HMODULE g_drvInstModule;
+static bool g_drvInstTried;
+static PFN_DRVINST_SUBMIT g_drvInstSubmit;
+static PFN_DRVINST_GETJOB g_drvInstGetJob;
+static PFN_DRVINST_ENUMJOBS g_drvInstEnumJobs;
+static std::map<std::wstring, DrvJobEntry> g_driverJobs;
+
+static bool
+DrvInstAvailable(void)
+{
+    if (!g_drvInstTried)
+    {
+        g_drvInstTried = true;
+        g_drvInstModule = LoadLibraryW(L"newdev.dll");
+        if (g_drvInstModule)
+        {
+            g_drvInstSubmit = (PFN_DRVINST_SUBMIT)GetProcAddress(g_drvInstModule, "DrvInstSubmitDevice");
+            g_drvInstGetJob = (PFN_DRVINST_GETJOB)GetProcAddress(g_drvInstModule, "DrvInstGetJob");
+            g_drvInstEnumJobs = (PFN_DRVINST_ENUMJOBS)GetProcAddress(g_drvInstModule, "DrvInstEnumJobs");
+        }
+    }
+    return g_drvInstSubmit && g_drvInstGetJob;
+}
+
+static bool
+PollDriverJobs(void)
+{
+    bool active = false;
+
+    if (!DrvInstAvailable())
+        return false;
+    for (auto &pair : g_driverJobs)
+    {
+        DrvJobEntry &entry = pair.second;
+        DRVINST_JOB_INFO info;
+        DWORD err;
+
+        if (entry.Finished)
+            continue;
+        ZeroMemory(&info, sizeof(info));
+        info.Size = sizeof(info);
+        err = g_drvInstGetJob(entry.Id, &info);
+        if (err == ERROR_SUCCESS)
+        {
+            entry.State = info.State;
+            entry.Win32 = info.Result.Win32;
+            entry.Problem = info.Result.Problem;
+            entry.Flags = info.Result.Flags;
+            if (info.State >= 2 || info.EndTick != 0)
+                entry.Finished = true;
+            else
+                active = true;
+        }
+        else
+        {
+            entry.State = 3;
+            entry.Win32 = err;
+            entry.Finished = true;
+        }
+    }
+    return active;
+}
+
+static void
+AutoSearchDriver(const std::wstring &id)
+{
+    auto existing = g_driverJobs.find(id);
+    DRVINST_JOB_ID job = 0;
+    DrvJobEntry entry;
+    DWORD err;
+
+    if (!DrvInstAvailable())
+        return;
+    if (existing != g_driverJobs.end() && !existing->second.Finished)
+        return;
+    entry.Id = 0;
+    entry.State = 0;
+    entry.Win32 = 0;
+    entry.Problem = 0;
+    entry.Flags = 0;
+    entry.Finished = false;
+    err = g_drvInstSubmit(id.c_str(), DRVINST_F_SILENT, &job);
+    if (err != ERROR_SUCCESS)
+    {
+        entry.State = 3;
+        entry.Win32 = err;
+        entry.Finished = true;
+    }
+    else
+    {
+        entry.Id = job;
+    }
+    g_driverJobs[id] = entry;
+}
+
+static std::wstring
+JobStatusText(const DrvJobEntry &entry)
+{
+    std::wstring text;
+
+    switch (entry.State)
+    {
+        case 0: text = Str(IDS_DRIVER_STATUS_QUEUED); break;
+        case 1: text = Str(IDS_DRIVER_STATUS_INSTALLING); break;
+        case 2: text = Str(IDS_DRIVER_STATUS_SUCCEEDED); break;
+        case 3:
+            if (entry.Flags & DRVINST_RF_ROLLEDBACK)
+                text = Printf(Str(IDS_DRIVER_STATUS_ROLLBACK_PROBLEM).c_str(), entry.Problem);
+            else
+                text = Printf(Str(IDS_DRIVER_STATUS_FAILED).c_str(), entry.Win32);
+            break;
+        case 4: text = Str(IDS_DRIVER_STATUS_TIMED_OUT); break;
+        case 5: text = Str(IDS_DRIVER_STATUS_CANCELED); break;
+        case DRVINST_JOB_STATE_ROLLED_BACK:
+            text = Printf(Str(IDS_DRIVER_STATUS_ROLLED_BACK).c_str(), entry.Win32);
+            break;
+        default: text = Str(IDS_DRIVER_STATUS_UNKNOWN); break;
+    }
+    if (entry.State == 2 && (entry.Flags & DRVINST_RF_NEEDREBOOT))
+        text += L" (" + Str(IDS_DRIVER_NEED_REBOOT) + L")";
+    return text;
+}
+
+static void
+BuildDriverJobHistory(PageBuilder &page)
+{
+    page.Group(Str(IDS_DRIVERS_HISTORY));
+    if (!DrvInstAvailable())
+    {
+        page.Text(Str(IDS_DRIVER_SERVICE_UNAVAILABLE));
+        return;
+    }
+    if (g_drvInstEnumJobs)
+    {
+        DRVINST_JOB_ID ids[64];
+        DWORD count = _countof(ids);
+
+        if (g_drvInstEnumJobs(ids, &count) == ERROR_SUCCESS && count > 0)
+        {
+            for (DWORD i = 0; i < count; i++)
+            {
+                DRVINST_JOB_INFO info;
+                DrvJobEntry entry;
+
+                ZeroMemory(&info, sizeof(info));
+                info.Size = sizeof(info);
+                if (g_drvInstGetJob(ids[i], &info) != ERROR_SUCCESS)
+                    continue;
+                entry.Id = info.JobId;
+                entry.State = info.State;
+                entry.Win32 = info.Result.Win32;
+                entry.Problem = info.Result.Problem;
+                entry.Flags = info.Result.Flags;
+                entry.Finished = info.State >= 2 || info.EndTick != 0;
+                page.Info(Printf(L"%I64u  %s", info.JobId, info.DeviceInstanceId),
+                          JobStatusText(entry), NULL);
+            }
+            return;
+        }
+    }
+    page.Text(Str(IDS_DRIVERS_NONE));
+}
+
 static std::wstring
 DriverStatusText(SP_DEVINFO_DATA *data)
 {
@@ -498,10 +708,12 @@ BuildDrivers(PageBuilder &page)
     HDEVINFO set;
     SP_DEVINFO_DATA data = { sizeof(data) };
     UINT count = 0;
+    bool active;
 
     page.Hero(Str(IDS_PAGE_DRIVERS), Str(IDS_DRIVERS_DESC), L"device_meeting_room_20_regular");
     if (page.Indexing)
         return;
+    active = PollDriverJobs();
     set = SetupDiGetClassDevsW(NULL, NULL, NULL, DIGCF_ALLCLASSES);
     if (set == INVALID_HANDLE_VALUE)
         return;
@@ -524,8 +736,19 @@ BuildDrivers(PageBuilder &page)
         SetupDiLoadClassIcon(&data.ClassGuid, &icon, NULL);
         {
             std::wstring id = instance;
-            SettingRow &row = page.Button(name, DriverStatusText(&data), NULL, Str(IDS_UPDATE_DRIVER),
-                                          [host, id](int) { UpdateDeviceDriver(host->Window(), id); });
+            auto job = g_driverJobs.find(id);
+            SettingRow &row = page.Button(name,
+                                          job != g_driverJobs.end() ? JobStatusText(job->second)
+                                                                    : DriverStatusText(&data),
+                                          NULL, Str(IDS_UPDATE_DRIVER),
+                                          [host, id](int action) {
+                                              if (action == 0)
+                                                  UpdateDeviceDriver(host->Window(), id);
+                                              else
+                                                  AutoSearchDriver(id);
+                                          });
+            if (DrvInstAvailable())
+                row.Actions.push_back(Str(IDS_DRIVER_AUTO_SEARCH));
             row.Image = icon;
         }
         count++;
@@ -533,6 +756,9 @@ BuildDrivers(PageBuilder &page)
     if (count == 0)
         page.Text(Str(IDS_DRIVERS_NONE));
     SetupDiDestroyDeviceInfoList(set);
+    BuildDriverJobHistory(page);
+    if (active)
+        page.Host->SetTimerRefresh(1500);
 }
 
 void
