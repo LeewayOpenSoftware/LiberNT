@@ -1,0 +1,13 @@
+--- a/mono/metadata/reflection.c
++++ b/mono/metadata/reflection.c
+@@ -2449,10 +2449,6 @@
+ 		MonoType *type = mono_reflection_type_handle_mono_type (MONO_HANDLE_CAST (MonoReflectionType, obj), error);
+ 		return_val_if_nok (error, 0);
+ 		MonoClass *mc = mono_class_from_mono_type_internal (type);
+-		if (!mono_class_init_internal (mc)) {
+-			mono_error_set_for_class_failure (error, mc);
+-			return 0;
+-		}
+ 
+ 		token = m_class_get_type_token (mc);
+ 	} else if (strcmp (klass_name, "RuntimeMethodInfo") == 0 ||
