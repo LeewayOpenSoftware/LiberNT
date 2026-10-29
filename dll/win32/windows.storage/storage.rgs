@@ -66,5 +66,51 @@ HKCR
                 val HideAsDeletePerUser = s ''
             }
         }
+        '{E03E85B0-7BE3-4000-BA98-6C13DE9FA486}' = s 'Condition Factory'
+        {
+            InprocServer32 = s '%MODULE%'
+            {
+                val ThreadingModel = s 'Both'
+            }
+        }
+        '{52F15C89-5A17-48E1-BBCD-46A3F89C7CC2}' = s 'Leaf Condition'
+        {
+            InprocServer32 = s '%MODULE%'
+            {
+                val ThreadingModel = s 'Both'
+            }
+        }
+        '{116F8D13-101E-4FA5-84D4-FF8279381935}' = s 'Compound Condition'
+        {
+            InprocServer32 = s '%MODULE%'
+            {
+                val ThreadingModel = s 'Both'
+            }
+        }
+        '{8DE9C74C-605A-4ACD-BEE3-2B222AA2D23D}' = s 'Negation Condition'
+        {
+            InprocServer32 = s '%MODULE%'
+            {
+                val ThreadingModel = s 'Both'
+            }
+        }
+        '{14010E02-BBBD-41F0-88E3-EDA371216584}' = s 'Search Folder Item Factory'
+        {
+            InprocServer32 = s '%MODULE%'
+            {
+                val ThreadingModel = s 'Apartment'
+            }
+        }
+        '{B2952B16-0E07-4E5A-B993-58C52CB94CAE}' = s 'Search Results'
+        {
+            InprocServer32 = s '%MODULE%'
+            {
+                val ThreadingModel = s 'Apartment'
+            }
+            ShellFolder
+            {
+                val Attributes = d '2684354560'
+            }
+        }
     }
 }
