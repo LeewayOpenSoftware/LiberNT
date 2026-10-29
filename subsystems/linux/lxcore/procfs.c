@@ -5743,6 +5743,8 @@ LxSynthStat(
         {
             Stat->Uid = Target->Uid[1];
             Stat->Gid = Target->Gid[1];
+            if (Synth.Id == LxProcTaskDir)
+                Stat->Nlink = 2 + (Target->Exited ? 1 : (ULONG)max(Target->ThreadCount, 1));
             LxProcessDereference(Target);
         }
     }
