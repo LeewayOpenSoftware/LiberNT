@@ -653,28 +653,6 @@ NdisMSetMiniportAttributes(
             PNDIS_MINIPORT_ADD_DEVICE_REGISTRATION_ATTRIBUTES AddDevice =
                 &MiniportAttributes->AddDeviceRegistrationAttributes;
 
-            if (InterlockedCompareExchange(&Ext->MiniportAddDeviceState, NDIS6_ADD_DEVICE_CALLING, NDIS6_ADD_DEVICE_CALLING) !=
-                    NDIS6_ADD_DEVICE_CALLING ||
-                Ext->MiniportAddDeviceAttributesValid)
-            {
-                return NDIS_STATUS_INVALID_STATE;
-            }
-
-            if (AddDevice->Header.Revision !=
-                    NDIS_MINIPORT_ADD_DEVICE_REGISTRATION_ATTRIBUTES_REVISION_1)
-            {
-                return NDIS_STATUS_BAD_VERSION;
-            }
-
-            if (AddDevice->Header.Size !=
-                    NDIS_SIZEOF_MINIPORT_ADD_DEVICE_REGISTRATION_ATTRIBUTES_REVISION_1)
-            {
-                return NDIS_STATUS_INVALID_LENGTH;
-            }
-
-            if (AddDevice->Flags != 0)
-                return NDIS_STATUS_INVALID_PARAMETER;
-
             Ext->MiniportAddDeviceContext =
                 AddDevice->MiniportAddDeviceContext;
             Ext->MiniportAddDeviceAttributesValid = TRUE;
