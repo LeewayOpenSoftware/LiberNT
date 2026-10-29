@@ -1524,10 +1524,15 @@ LxUnixParseControl(
                 PLONG Values = (PLONG)(Message + 1);
                 PLX_FILE *Array;
 
-                if ((Count == 0) || (*FdCount + Count > LX_UNIX_MAX_FDS))
+                if (*FdCount + Count > LX_UNIX_MAX_FDS)
                 {
                     Result = -LX_EINVAL;
                     break;
+                }
+                if (Count == 0)
+                {
+                    Offset += LX_ALIGN_UP(Message->Length, 8);
+                    continue;
                 }
                 Array = LxAlloc(sizeof(PLX_FILE) * (*FdCount + Count));
                 if (Array == NULL)
