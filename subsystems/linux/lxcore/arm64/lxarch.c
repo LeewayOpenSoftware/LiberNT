@@ -396,6 +396,13 @@ LxArchApplySpeculation(
         TrapFrame->Spsr |= 0x1000ULL;
 }
 
+BOOLEAN
+LxArchPersonalityAllowed(
+    _In_ ULONG Personality)
+{
+    return (Personality & 0xFF) != LX_PER_LINUX32;
+}
+
 VOID
 LxArchClassifyFault(
     _In_ PEXCEPTION_RECORD ExceptionRecord,

@@ -860,6 +860,8 @@ LxExecImage(
         Process->Uid[1] = FileUid;
     if (SetGid)
         Process->Gid[1] = FileGid;
+    if (SetUid || SetGid)
+        Process->Personality &= ~LX_PER_CLEAR_ON_SETID;
     LxCredExec(Process, &Old);
     ExReleaseFastMutex(&Process->Lock);
 

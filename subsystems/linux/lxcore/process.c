@@ -398,6 +398,7 @@ LxProcessFork(
     Process->Dumpable = Parent->Dumpable;
     Process->CoreFilter = Parent->CoreFilter;
     Process->OomScoreAdj = Parent->OomScoreAdj;
+    Process->Personality = Parent->Personality;
     Process->Trace = Parent->Trace;
     for (Fd = 0; Fd < LX_MAX_FDS; Fd++)
     {

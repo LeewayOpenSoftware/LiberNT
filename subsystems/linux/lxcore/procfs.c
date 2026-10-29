@@ -2310,6 +2310,21 @@ LxPagemapOpen(
     return 0;
 }
 
+static
+VOID
+LxGenPidPersonality(
+    _In_ PLX_PROCESS Self,
+    _In_ PLX_SYNTH Synth,
+    _Inout_ PLX_TEXT Text)
+{
+    PLX_PROCESS Process = LxProcessLookup(Self->Instance, Synth->Pid);
+
+    if (Process == NULL)
+        return;
+    LxTextPrintf(Text, "%08lx\n", Process->Personality);
+    LxProcessDereference(Process);
+}
+
 static const LX_PID_ENTRY LxPidEntries[] =
 {
     { "attr", LX_S_IFDIR, 0555, NULL, NULL, NULL },
@@ -2338,7 +2353,7 @@ static const LX_PID_ENTRY LxPidEntries[] =
     { "oom_score", LX_S_IFREG, 0444, "0\n", NULL, NULL },
     { "oom_score_adj", LX_S_IFREG, 0644, NULL, LxGenPidOomScoreAdj, LxWritePidOomScoreAdj },
     { "pagemap", LX_S_IFREG, 0400, NULL, NULL, NULL },
-    { "personality", LX_S_IFREG, 0400, "00000000\n", NULL, NULL },
+    { "personality", LX_S_IFREG, 0400, NULL, LxGenPidPersonality, NULL },
     { "root", LX_S_IFLNK, 0777, NULL, NULL, NULL },
     { "sessionid", LX_S_IFREG, 0444, "4294967295", NULL, NULL },
     { "setgroups", LX_S_IFREG, 0644, NULL, LxGenPidSetgroups, LxWritePidSetgroups },

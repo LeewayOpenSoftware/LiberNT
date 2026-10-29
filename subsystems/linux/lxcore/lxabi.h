@@ -1399,6 +1399,8 @@ C_ASSERT(sizeof(LX_FLOCK) == 32);
 #define LX_PR_GET_PDEATHSIG         2
 #define LX_PR_GET_DUMPABLE          3
 #define LX_PR_SET_DUMPABLE          4
+#define LX_PER_LINUX32              0x0008
+#define LX_PER_CLEAR_ON_SETID       0x00740000
 #define LX_PR_GET_KEEPCAPS          7
 #define LX_PR_SET_KEEPCAPS          8
 #define LX_PR_SET_NAME              15

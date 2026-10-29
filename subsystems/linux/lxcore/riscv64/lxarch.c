@@ -341,6 +341,14 @@ LxArchApplySpeculation(
     UNREFERENCED_PARAMETER(TrapFrame);
 }
 
+BOOLEAN
+LxArchPersonalityAllowed(
+    _In_ ULONG Personality)
+{
+    UNREFERENCED_PARAMETER(Personality);
+    return TRUE;
+}
+
 VOID
 LxArchClassifyFault(
     _In_ PEXCEPTION_RECORD ExceptionRecord,

@@ -642,6 +642,7 @@ struct _LX_PROCESS
     ULONG GroupStopCount;
     volatile LONG ContinueGeneration;
     KEVENT ContinueEvent;
+    ULONG Personality;
 };
 
 typedef struct _LX_CRED_SAVE
@@ -1406,6 +1407,7 @@ LONG LxCoreSetPattern(_In_reads_bytes_(Length) PCSTR Data, _In_ ULONG Length);
 ULONG64 LxArchHwcap(VOID);
 ULONG64 LxArchHwcap2(VOID);
 LONG LxArchSpecStoreBypassMode(VOID);
+BOOLEAN LxArchPersonalityAllowed(_In_ ULONG Personality);
 VOID LxArchApplySpeculation(_In_ PLX_THREAD Thread, _Inout_ PKTRAP_FRAME TrapFrame);
 LONG64 LxSpecCtrlGet(_In_ PLX_THREAD Thread, _In_ ULONG64 Which);
 LONG64 LxSpecCtrlSet(_Inout_ PLX_THREAD Thread, _In_ ULONG64 Which, _In_ ULONG64 Control);

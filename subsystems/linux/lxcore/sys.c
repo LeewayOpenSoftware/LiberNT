@@ -4115,7 +4115,16 @@ LX_SYSCALL(LxSysKeyctl)
 
 LX_SYSCALL(LxSysPersonality)
 {
-    return (Call->Args[0] == 0xFFFFFFFF) ? 0 : 0;
+    ULONG Persona = (ULONG)Call->Args[0];
+    ULONG Old = Call->Process->Personality;
+
+    if (Persona == 0xFFFFFFFF)
+        return Old;
+    if (!LxArchPersonalityAllowed(Persona))
+        return -LX_EINVAL;
+    /* TODO: apply READ_IMPLIES_EXEC to later mappings and ADDR_NO_RANDOMIZE once exec randomizes the layout. */
+    Call->Process->Personality = Persona;
+    return Old;
 }
 
 LX_SYSCALL(LxSysMincore)
