@@ -6,7 +6,8 @@ if(ARCH STREQUAL "amd64")
     set_module_type(glthunk win32dll ENTRYPOINT 0 UNICODE)
 endif()
 
-if(NOT (ARCH STREQUAL "riscv64" AND ENABLE_FELIX86 AND TARGET mesa_gallium_build))
+if(NOT (ARCH STREQUAL "riscv64" AND ENABLE_FELIX86 AND TARGET mesa_gallium_build AND
+        EXISTS "${REACTOS_SOURCE_DIR}/submodules/felix86/src/felix86/v2/recompiler.cpp"))
     return()
 endif()
 
