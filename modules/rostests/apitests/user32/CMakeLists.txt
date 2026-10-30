@@ -30,6 +30,7 @@ list(APPEND SOURCE
     EmptyClipboard.c
     EnableScrollBar.c
     EnumDisplaySettings.c
+    ForegroundRight.c
     ForegroundStartup.c
     GetClassInfo.c
     GetDCEx.c

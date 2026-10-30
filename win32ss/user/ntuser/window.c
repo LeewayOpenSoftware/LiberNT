@@ -484,9 +484,10 @@ static void IntSendDestroyMsg(HWND hWnd)
           (ti->MessageQueue->spwndActive == NULL && ti->MessageQueue == IntGetFocusMessageQueue()) )
       {
          BOOL WasForeground = (ti->MessageQueue == IntGetFocusMessageQueue());
+         BOOL WasDeactivated = (ti->MessageQueue->spwndActive == NULL);
 
          co_WinPosActivateOtherWindow(Window);
-         if (WasForeground && IntGetFocusMessageQueue() != ti->MessageQueue)
+         if (WasForeground && WasDeactivated && IntGetFocusMessageQueue() != ti->MessageQueue)
             ti->TIF_flags |= TIF_ALLOWFOREGROUNDACTIVATE;
       }
 
@@ -3099,6 +3100,7 @@ BOOLEAN co_UserDestroyWindow(PVOID Object)
    PTHREADINFO ti;
    MSG msg;
    PWND Window = Object;
+   BOOL WasVisible;
 
    ASSERT_REFS_CO(Window); // FIXME: Temp HACK?
 
@@ -3163,6 +3165,8 @@ BOOLEAN co_UserDestroyWindow(PVOID Object)
       IntSendParentNotify(Window, WM_DESTROY);
    }
 
+   WasVisible = !!(Window->style & WS_VISIBLE);
+
    /* Hide the window */
    if (Window->style & WS_VISIBLE)
    {
@@ -3182,7 +3186,7 @@ BOOLEAN co_UserDestroyWindow(PVOID Object)
       BOOL WasForeground = (ti->MessageQueue == IntGetFocusMessageQueue());
 
       co_WinPosActivateOtherWindow(Window);
-      if (WasForeground && IntGetFocusMessageQueue() != ti->MessageQueue)
+      if (WasForeground && WasVisible && IntGetFocusMessageQueue() != ti->MessageQueue)
          ti->TIF_flags |= TIF_ALLOWFOREGROUNDACTIVATE;
    }
 
