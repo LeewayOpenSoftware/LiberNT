@@ -334,6 +334,7 @@ set(COMPAT_RUNTIME_MODULES
     wkscli
     wlanapi
     wldap32
+    wldp
     wmi
     wmiutils
     wmvcore
