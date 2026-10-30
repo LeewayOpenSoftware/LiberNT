@@ -24,6 +24,7 @@ using ::std::nullptr_t;
 #if defined(_KERNEL_MODE) && !defined(__REACTOS__)
 #define CODE_SEG(segment) __declspec(code_seg(segment))
 #else
+#undef CODE_SEG
 #define CODE_SEG(segment)
 #endif
 

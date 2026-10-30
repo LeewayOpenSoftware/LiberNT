@@ -672,6 +672,7 @@ public:
 
     static
     void
+    NTAPI
     _EvtCleanup(
         _In_ WDFOBJECT NetAdatper
     );

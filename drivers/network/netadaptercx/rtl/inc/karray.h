@@ -166,7 +166,7 @@ public:
 
         if constexpr(__is_trivially_copyable(T))
         {
-            memcpy(p, _p, m_numElements * sizeof(T));
+            memcpy(static_cast<void *>(p), _p, m_numElements * sizeof(T));
         }
         else
         {

@@ -44,6 +44,17 @@ Abstract:
 
 #include "NxAdapter.tmh"
 
+static
+void
+NTAPI
+NxAdapterDestroy(
+    _In_ WDFOBJECT Object
+)
+{
+    auto nxAdapter = GetNxAdapterFromHandle(Object);
+    nxAdapter->~NxAdapter();
+}
+
 
 static void *
     PLUGPLAY_NOTIFICATION_TAG = reinterpret_cast<void *>('NPnP');
@@ -1159,11 +1170,7 @@ NxAdapter::_Create(
 
     #pragma prefast(suppress:__WARNING_FUNCTION_CLASS_MISMATCH_NONE, "can't add class to static member function")
     attributes.EvtCleanupCallback = NxAdapter::_EvtCleanup;
-    attributes.EvtDestroyCallback = [](WDFOBJECT Object)
-    {
-        auto nxAdapter = GetNxAdapterFromHandle(Object);
-        nxAdapter->~NxAdapter();
-    };
+    attributes.EvtDestroyCallback = NxAdapterDestroy;
 
     CX_RETURN_IF_NOT_NT_SUCCESS(
         WdfObjectAllocateContext(
@@ -2167,8 +2174,10 @@ NxAdapter::GetDatapathCapabilities(
     if (physicalDeviceObject != nullptr)
     {
         USHORT deviceNumaNode;
-        (void)IoGetDeviceNumaNode(physicalDeviceObject, &deviceNumaNode);
-        preferredNumaNode = deviceNumaNode;
+        if (NT_SUCCESS(IoGetDeviceNumaNode(physicalDeviceObject, &deviceNumaNode)))
+        {
+            preferredNumaNode = deviceNumaNode;
+        }
     }
 #else
     ULONG preferredNumaNode = MM_ANY_NODE_OK;
@@ -2455,6 +2464,7 @@ NxAdapter::GetMdlForDriverAllocatedMemory(
 }
 
 void
+NTAPI
 NxAdapter::_EvtCleanup(
     _In_  WDFOBJECT NetAdapter
 )

@@ -45,7 +45,7 @@ public:
         _In_ UNICODE_STRING const * RegistryPath
     );
 
-    static void
+    static void NTAPI
     Destroy(
         _In_ WDFOBJECT Driver
     );

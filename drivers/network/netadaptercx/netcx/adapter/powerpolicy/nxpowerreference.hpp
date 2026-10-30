@@ -8,6 +8,7 @@ class NxNdisPnpPower;
 #define NX_POWER_REFERENCE_TAG 'RpxN'
 
 void
+NTAPI
 EvtPowerRequiredWorkItem(
     _In_ WDFWORKITEM WorkItem
 );
@@ -106,6 +107,7 @@ public:
 
     friend
     void
+    NTAPI
     EvtPowerRequiredWorkItem(
         WDFWORKITEM WorkItem
     );

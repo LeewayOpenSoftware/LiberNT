@@ -149,7 +149,7 @@ NblPool::Initialize(_In_ NDIS_HANDLE NdisHandle,
         NET_BUFFER_FIRST_MDL(nb) = NET_BUFFER_CURRENT_MDL(nb) = nullptr;
 
         auto internalAllocationOffset = (UCHAR*)nb - (UCHAR*)nbl;
-        if (internalAllocationOffset < 4 * sizeof(NET_BUFFER_LIST))
+        if (static_cast<size_t>(internalAllocationOffset) < 4 * sizeof(NET_BUFFER_LIST))
             g_NetBufferOffset = internalAllocationOffset;
 
         PushToReturn(nbl);

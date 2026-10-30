@@ -54,7 +54,7 @@ struct KRTL_CLASS KALLOCATOR : public KALLOCATION_TAG<TAG, ARENA>
 {
     // Scalar new & delete
 
-    PAGED void *operator new(size_t cb, std::nothrow_t const &)
+    PAGED void *operator new(size_t cb, std::nothrow_t const &) noexcept
     {
         PAGED_CODE();
         #pragma warning( suppress : 4996 28751 )
@@ -73,7 +73,7 @@ struct KRTL_CLASS KALLOCATOR : public KALLOCATION_TAG<TAG, ARENA>
 
     // Scalar new with bonus bytes
 
-    PAGED void *operator new(size_t cb, std::nothrow_t const &, size_t extraBytes)
+    PAGED void *operator new(size_t cb, std::nothrow_t const &, size_t extraBytes) noexcept
     {
         PAGED_CODE();
 
@@ -89,7 +89,7 @@ struct KRTL_CLASS KALLOCATOR : public KALLOCATION_TAG<TAG, ARENA>
 
     // Array new & delete
 
-    PAGED void *operator new[](size_t cb, std::nothrow_t const &)
+    PAGED void *operator new[](size_t cb, std::nothrow_t const &) noexcept
     {
         PAGED_CODE();
         #pragma warning( suppress : 4996 28751 )
@@ -127,7 +127,7 @@ struct KRTL_CLASS_DPC_ALLOC KALLOCATOR_NONPAGED : public KALLOCATION_TAG_DPC_ALL
 {
     // Scalar new & delete
 
-    NONPAGED void *operator new(size_t cb, std::nothrow_t const &)
+    NONPAGED void *operator new(size_t cb, std::nothrow_t const &) noexcept
     {
         #pragma warning( suppress : 4996 28751 )
         return ExAllocatePoolWithTag(static_cast<POOL_TYPE>(ARENA), cb, TAG);
@@ -143,7 +143,7 @@ struct KRTL_CLASS_DPC_ALLOC KALLOCATOR_NONPAGED : public KALLOCATION_TAG_DPC_ALL
 
     // Scalar new with bonus bytes
 
-    NONPAGED void *operator new(size_t cb, std::nothrow_t const &, size_t extraBytes)
+    NONPAGED void *operator new(size_t cb, std::nothrow_t const &, size_t extraBytes) noexcept
     {
         auto size = cb + extraBytes;
 
@@ -157,7 +157,7 @@ struct KRTL_CLASS_DPC_ALLOC KALLOCATOR_NONPAGED : public KALLOCATION_TAG_DPC_ALL
 
     // Array new & delete
 
-    NONPAGED void *operator new[](size_t cb, std::nothrow_t const &)
+    NONPAGED void *operator new[](size_t cb, std::nothrow_t const &) noexcept
     {
         #pragma warning( suppress : 4996 28751 )
         return ExAllocatePoolWithTag(static_cast<POOL_TYPE>(ARENA), cb, TAG);

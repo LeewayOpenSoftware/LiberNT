@@ -169,6 +169,17 @@ static NET_CLIENT_QUEUE_DISPATCH const QueueDispatchVerifying
     &NetClientQueueGetRingCollection,
 };
 
+static
+void
+NTAPI
+NxQueueDestroy(
+    _In_ WDFOBJECT Object
+)
+{
+    auto nxQueue = GetNxQueueFromHandle(Object);
+    nxQueue->~NxQueue();
+}
+
 _Use_decl_annotations_
 NTSTATUS
 PacketQueueCreate(
@@ -184,11 +195,7 @@ PacketQueueCreate(
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, NxQueue);
     attributes.ParentObject = InitContext.ParentObject;
     attributes.EvtCleanupCallback = EvtQueueCleanup;
-    attributes.EvtDestroyCallback = [](WDFOBJECT Object)
-    {
-        auto nxQueue = GetNxQueueFromHandle(Object);
-        nxQueue->~NxQueue();
-    };
+    attributes.EvtDestroyCallback = NxQueueDestroy;
 
     unique_packet_queue queue;
 

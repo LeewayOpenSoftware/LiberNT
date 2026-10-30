@@ -11,7 +11,7 @@
 
 #include "NxMemoryApi.tmh"
 
-static void NxMemoryDestroyCallback(WDFOBJECT Object)
+static void NTAPI NxMemoryDestroyCallback(WDFOBJECT Object)
 {
     NxMemory * memory = GetNxMemoryFromHandle(Object);
     memory->~NxMemory();

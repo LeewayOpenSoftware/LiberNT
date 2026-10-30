@@ -13,12 +13,7 @@ namespace Rtl
 
         bool Initialize(size_t numberOfBits)
         {
-#ifdef _WIN64
             size_t bitsPerMachineWord = 64;
-#else
-            size_t bitsPerMachineWord = 32;
-#endif
-
             if (!m_storage.resize((numberOfBits + bitsPerMachineWord - 1) / bitsPerMachineWord))
                 return false;
 
@@ -57,7 +52,7 @@ namespace Rtl
 
     private:
         RTL_BITMAP_EX m_bitmap;
-        Rtl::KArray<SIZE_T, NonPagedPoolNx> m_storage;
+        Rtl::KArray<ULONG64, NonPagedPoolNx> m_storage;
     };
 
 }

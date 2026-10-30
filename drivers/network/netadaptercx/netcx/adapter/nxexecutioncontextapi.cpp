@@ -12,11 +12,45 @@
 
 #include "NxExecutionContextApi.tmh"
 
+static
+void
+NTAPI
+NxExecutionContextDestroy(
+    _In_ WDFOBJECT Object
+)
+{
+    auto ec = GetExecutionContextFromHandle(Object);
+    ec->~NxExecutionContext();
+}
+
+static
+void
+NTAPI
+NxExecutionContextTaskCleanup(
+    _In_ WDFOBJECT Object
+)
+{
+    auto nxExecutionContextTask = GetNxExecutionContextTaskFromHandle(Object);
+    nxExecutionContextTask->OnDelete();
+}
+
+static
+void
+NTAPI
+NxExecutionContextTaskDestroy(
+    _In_ WDFOBJECT Object
+)
+{
+    auto nxExecutionContextTask = GetNxExecutionContextTaskFromHandle(Object);
+    nxExecutionContextTask->~NxExecutionContextTask();
+}
+
 
 _Must_inspect_result_
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 NTSTATUS
+NTAPI
 NETEXPORT(NetExecutionContextCreate)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ WDFDEVICE Device,
@@ -47,11 +81,7 @@ Returns:
     WDF_OBJECT_ATTRIBUTES attributes;
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, NxExecutionContext);
     attributes.ParentObject = Device;
-    attributes.EvtDestroyCallback = [](WDFOBJECT Object)
-    {
-        auto ec = GetExecutionContextFromHandle(Object);
-        ec->~NxExecutionContext();
-    };
+    attributes.EvtDestroyCallback = NxExecutionContextDestroy;
 
     wil::unique_wdf_object object;
 
@@ -104,6 +134,7 @@ _Must_inspect_result_
 _IRQL_requires_(PASSIVE_LEVEL)
 WDFAPI
 NTSTATUS
+NTAPI
 NETEXPORT(NetExecutionContextTaskCreate)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETEXECUTIONCONTEXT NetExecutionContextHandle,
@@ -134,17 +165,9 @@ Returns:
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&taskAttributes, NxExecutionContextTask);
     taskAttributes.ParentObject = NetExecutionContextHandle;
 
-    taskAttributes.EvtCleanupCallback = [](WDFOBJECT Object)
-    {
-        auto nxExecutionContextTask = GetNxExecutionContextTaskFromHandle(Object);
-        nxExecutionContextTask->OnDelete();
-    };
+    taskAttributes.EvtCleanupCallback = NxExecutionContextTaskCleanup;
 
-    taskAttributes.EvtDestroyCallback = [](WDFOBJECT Object)
-    {
-        auto nxExecutionContextTask = GetNxExecutionContextTaskFromHandle(Object);
-        nxExecutionContextTask->~NxExecutionContextTask();
-    };
+    taskAttributes.EvtDestroyCallback = NxExecutionContextTaskDestroy;
 
     wil::unique_wdf_any<WDFOBJECT> wdfObject;
 
@@ -183,6 +206,7 @@ Returns:
 _IRQL_requires_max_(DISPATCH_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetExecutionContextTaskEnqueue)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETEXECUTIONCONTEXTTASK NetExecutionContextTaskHandle
@@ -210,6 +234,7 @@ Routine Description:
 _IRQL_requires_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetExecutionContextTaskWaitCompletion)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _Inout_ NETEXECUTIONCONTEXTTASK NetExecutionContextTaskHandle

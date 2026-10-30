@@ -67,6 +67,7 @@ NetAdapterInitAllocateCommon(
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 NETADAPTER_INIT *
+NTAPI
 NETEXPORT(NetAdapterInitAllocate)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ WDFDEVICE Device
@@ -110,6 +111,7 @@ Remarks
 #ifdef _KERNEL_MODE
 _IRQL_requires_max_(PASSIVE_LEVEL)
 NETADAPTER_INIT *
+NTAPI
 NETEXPORT(NetAdapterLightweightInitAllocate)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ GUID const * NetworkInterfaceGuid
@@ -169,6 +171,7 @@ Remarks
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterInitFree)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER_INIT * AdapterInit
@@ -204,6 +207,7 @@ Return Value:
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterInitSetDatapathCallbacks)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _Inout_ NETADAPTER_INIT * AdapterInit,
@@ -245,6 +249,7 @@ _Must_inspect_result_
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 NTSTATUS
+NTAPI
 NETEXPORT(NetAdapterCreate)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER_INIT * AdapterInit,
@@ -363,6 +368,7 @@ _Must_inspect_result_
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 NTSTATUS
+NTAPI
 NETEXPORT(NetAdapterStart)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter
@@ -383,6 +389,7 @@ NETEXPORT(NetAdapterStart)(
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterStop)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter
@@ -400,6 +407,7 @@ NETEXPORT(NetAdapterStop)(
 #ifdef _KERNEL_MODE
 WDFAPI
 NDIS_HANDLE
+NTAPI
 NETEXPORT(NetAdapterWdmGetNdisHandle)(
     _In_ NET_DRIVER_GLOBALS *              Globals,
     _In_ NETADAPTER                        Adapter
@@ -427,6 +435,7 @@ Return Value:
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 NET_LUID
+NTAPI
 NETEXPORT(NetAdapterGetNetLuid)(
     _In_     NET_DRIVER_GLOBALS *                Globals,
     _In_     NETADAPTER                          Adapter
@@ -456,6 +465,7 @@ WDFAPI
 _Must_inspect_result_
 _IRQL_requires_(PASSIVE_LEVEL)
 NTSTATUS
+NTAPI
 NETEXPORT(NetAdapterOpenConfiguration)(
     _In_     NET_DRIVER_GLOBALS *                Globals,
     _In_     NETADAPTER                          Adapter,
@@ -540,6 +550,7 @@ Returns:
 _IRQL_requires_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterSetDataPathCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -580,6 +591,7 @@ NETEXPORT(NetAdapterSetDataPathCapabilities)(
 _IRQL_requires_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterSetDataPathCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -647,6 +659,7 @@ NETEXPORT(NetAdapterSetDataPathCapabilities)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterSetReceiveScalingCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -669,6 +682,7 @@ NETEXPORT(NetAdapterSetReceiveScalingCapabilities)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterSetLinkLayerMtuSize)(
     _In_ NET_DRIVER_GLOBALS *                   DriverGlobals,
     _In_ NETADAPTER                             Adapter,
@@ -712,6 +726,7 @@ Remarks:
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterSetLinkLayerCapabilities)(
     _In_ NET_DRIVER_GLOBALS *                   DriverGlobals,
     _In_ NETADAPTER                             Adapter,
@@ -764,6 +779,7 @@ Remarks:
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 VOID
+NTAPI
 NETEXPORT(NetAdapterSetReceiveFilterCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -788,6 +804,7 @@ NETEXPORT(NetAdapterSetReceiveFilterCapabilities)(
 WDFAPI
 _IRQL_requires_max_(DISPATCH_LEVEL)
 NET_PACKET_FILTER_FLAGS
+NTAPI
 NETEXPORT(NetReceiveFilterGetPacketFilter)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETRECEIVEFILTER ReceiveFilter
@@ -804,6 +821,7 @@ NETEXPORT(NetReceiveFilterGetPacketFilter)(
 WDFAPI
 _IRQL_requires_max_(DISPATCH_LEVEL)
 SIZE_T
+NTAPI
 NETEXPORT(NetReceiveFilterGetMulticastAddressCount)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETRECEIVEFILTER ReceiveFilter
@@ -820,6 +838,7 @@ NETEXPORT(NetReceiveFilterGetMulticastAddressCount)(
 WDFAPI
 _IRQL_requires_max_(DISPATCH_LEVEL)
 NET_ADAPTER_LINK_LAYER_ADDRESS const *
+NTAPI
 NETEXPORT(NetReceiveFilterGetMulticastAddressList)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETRECEIVEFILTER ReceiveFilter
@@ -837,6 +856,7 @@ NETEXPORT(NetReceiveFilterGetMulticastAddressList)(
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterSetPermanentLinkLayerAddress)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -890,6 +910,7 @@ Remarks:
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterSetCurrentLinkLayerAddress)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -945,6 +966,7 @@ Remarks:
 _IRQL_requires_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterPowerOffloadSetArpCapabilities)(
     _In_ PNET_DRIVER_GLOBALS DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -964,6 +986,7 @@ NETEXPORT(NetAdapterPowerOffloadSetArpCapabilities)(
 _IRQL_requires_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterPowerOffloadSetNSCapabilities)(
     _In_ PNET_DRIVER_GLOBALS DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1083,6 +1106,7 @@ NETEXPORT(NetAdapterWakeSetPacketFilterCapabilities)(
 WDFAPI
 _IRQL_requires_max_(DISPATCH_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterSetLinkState)(
     _In_ NET_DRIVER_GLOBALS *    DriverGlobals,
     _In_ NETADAPTER              Adapter,
@@ -1125,6 +1149,7 @@ Remarks:
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterOffloadSetChecksumCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1192,6 +1217,7 @@ Returns:
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsChecksumIPv4Enabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1239,6 +1265,7 @@ NETEXPORT(NetOffloadIsChecksumIPv4Enabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsChecksumTcpEnabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1286,6 +1313,7 @@ NETEXPORT(NetOffloadIsChecksumTcpEnabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsChecksumUdpEnabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1334,6 +1362,7 @@ NETEXPORT(NetOffloadIsChecksumUdpEnabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterOffloadSetTxChecksumCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1358,6 +1387,7 @@ NETEXPORT(NetAdapterOffloadSetTxChecksumCapabilities)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterOffloadSetRxChecksumCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1379,6 +1409,7 @@ NETEXPORT(NetAdapterOffloadSetRxChecksumCapabilities)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsTxChecksumIPv4Enabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1398,6 +1429,7 @@ NETEXPORT(NetOffloadIsTxChecksumIPv4Enabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsTxChecksumTcpEnabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1418,6 +1450,7 @@ NETEXPORT(NetOffloadIsTxChecksumTcpEnabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsTxChecksumUdpEnabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1439,6 +1472,7 @@ NETEXPORT(NetOffloadIsTxChecksumUdpEnabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsRxChecksumIPv4Enabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1457,6 +1491,7 @@ NETEXPORT(NetOffloadIsRxChecksumIPv4Enabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsRxChecksumTcpEnabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1475,6 +1510,7 @@ NETEXPORT(NetOffloadIsRxChecksumTcpEnabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsRxChecksumUdpEnabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1493,6 +1529,7 @@ NETEXPORT(NetOffloadIsRxChecksumUdpEnabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterOffloadSetGsoCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1516,6 +1553,7 @@ NETEXPORT(NetAdapterOffloadSetGsoCapabilities)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsLsoIPv4Enabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1536,6 +1574,7 @@ NETEXPORT(NetOffloadIsLsoIPv4Enabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsLsoIPv6Enabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1556,6 +1595,7 @@ NETEXPORT(NetOffloadIsLsoIPv6Enabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsUsoIPv4Enabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1576,6 +1616,7 @@ NETEXPORT(NetOffloadIsUsoIPv4Enabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsUsoIPv6Enabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1596,6 +1637,7 @@ NETEXPORT(NetOffloadIsUsoIPv6Enabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterOffloadSetRscCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1635,6 +1677,7 @@ Returns:
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsTcpRscIPv4Enabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1654,6 +1697,7 @@ NETEXPORT(NetOffloadIsTcpRscIPv4Enabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsTcpRscIPv6Enabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1673,6 +1717,7 @@ NETEXPORT(NetOffloadIsTcpRscIPv6Enabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsRscTcpTimestampOptionEnabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1691,6 +1736,7 @@ NETEXPORT(NetOffloadIsRscTcpTimestampOptionEnabled)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 BOOLEAN
+NTAPI
 NETEXPORT(NetOffloadIsUdpRscEnabled)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETOFFLOAD Offload
@@ -1708,6 +1754,7 @@ NETEXPORT(NetOffloadIsUdpRscEnabled)(
 
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterReportWakeReasonPacket)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1724,6 +1771,7 @@ NETEXPORT(NetAdapterReportWakeReasonPacket)(
 
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterReportWakeReasonMediaChange)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1759,6 +1807,7 @@ NETEXPORT(NetAdapterWifiDestroyPeerAddressDatapath)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterInitAddTxDemux)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER_INIT * AdapterInit,
@@ -1779,6 +1828,7 @@ NETEXPORT(NetAdapterInitAddTxDemux)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 NET_ADAPTER_TX_DEMUX const *
+NTAPI
 NETEXPORT(NetAdapterGetTxPeerAddressDemux)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter
@@ -1795,6 +1845,7 @@ NETEXPORT(NetAdapterGetTxPeerAddressDemux)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterWifiAddPeer)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1813,6 +1864,7 @@ NETEXPORT(NetAdapterWifiAddPeer)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterWifiRemovePeer)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1831,6 +1883,7 @@ NETEXPORT(NetAdapterWifiRemovePeer)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterOffloadSetIeee8021qTagCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -1870,6 +1923,7 @@ Returns:
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterPauseOffloadCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter
@@ -1889,6 +1943,7 @@ NETEXPORT(NetAdapterPauseOffloadCapabilities)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterResumeOffloadCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter
@@ -1909,6 +1964,7 @@ NETEXPORT(NetAdapterResumeOffloadCapabilities)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 void
+NTAPI
 NETEXPORT(NetAdapterInitSetSelfManagedPowerReferences)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER_INIT * AdapterInit,
@@ -1931,6 +1987,7 @@ NETEXPORT(NetAdapterInitSetSelfManagedPowerReferences)(
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 NET_WAKE_REASON_TYPE
+NTAPI
 NETEXPORT(NetAdapterQueryWakeReason)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter

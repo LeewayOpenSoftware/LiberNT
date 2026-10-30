@@ -10,6 +10,17 @@
 #include "nxbufferqueue.hpp"
 #include "NxBufferQueueApi.tmh"
 
+static
+void
+NTAPI
+NxBufferQueueDestroy(
+    _In_ WDFOBJECT Object
+)
+{
+    auto bufferQueue = GetNxBufferQueueFromHandle(Object);
+    bufferQueue->~NxBufferQueue();
+}
+
 _IRQL_requires_(PASSIVE_LEVEL)
 WDFAPI
 NTSTATUS
@@ -34,11 +45,7 @@ NETEXPORT(NetBufferQueueCreate)(
     WDF_OBJECT_ATTRIBUTES attributes;
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, NxBufferQueue);
     attributes.ParentObject = ExecutionContext;
-    attributes.EvtDestroyCallback = [](WDFOBJECT Object)
-    {
-        auto bufferQueue = GetNxBufferQueueFromHandle(Object);
-        bufferQueue->~NxBufferQueue();
-    };
+    attributes.EvtDestroyCallback = NxBufferQueueDestroy;
 
     wil::unique_wdf_object object;
 

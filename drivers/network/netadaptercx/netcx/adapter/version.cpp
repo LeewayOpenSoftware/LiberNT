@@ -101,6 +101,7 @@ CxDriverContext::Init(
 }
 
 void
+NTAPI
 CxDriverContext::Destroy(
     _In_ WDFOBJECT Driver
 )
@@ -239,6 +240,7 @@ Routine Description:
 
 static
 NTSTATUS
+NTAPI
 NetAdapterCxInitialize(
     void
 )
@@ -248,6 +250,7 @@ NetAdapterCxInitialize(
 
 static
 void
+NTAPI
 NetAdapterCxDeinitialize(
     void
 )
@@ -256,6 +259,7 @@ NetAdapterCxDeinitialize(
 
 static
 NTSTATUS
+NTAPI
 NetAdapterCxBindClient(
     WDF_CLASS_BIND_INFO *  ClassInfo,
     WDF_COMPONENT_GLOBALS * ClientGlobals
@@ -384,6 +388,7 @@ Return Value:
 
 static
 void
+NTAPI
 NetAdapterCxUnbindClient(
     WDF_CLASS_BIND_INFO * ClassInfo,
     WDF_COMPONENT_GLOBALS * ClientGlobals

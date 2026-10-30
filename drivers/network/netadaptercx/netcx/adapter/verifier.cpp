@@ -1492,8 +1492,8 @@ NetRingIndexInRange(
         return BeginIndex <= Index && Index < EndIndex;
     }
 
-    return 0 <= Index && Index < EndIndex
-        || BeginIndex <= Index && Index <= Ring.ElementIndexMask;
+    return (0 <= Index && Index < EndIndex)
+        || (BeginIndex <= Index && Index <= Ring.ElementIndexMask);
 }
 
 static

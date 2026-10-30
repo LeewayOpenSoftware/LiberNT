@@ -1,6 +1,5 @@
 // Copyright (C) Microsoft Corporation. All rights reserved.
 
-#pragma once
 
 #ifdef _KERNEL_MODE
 #include <ntddk.h>

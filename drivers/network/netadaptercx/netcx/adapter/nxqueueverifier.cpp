@@ -14,6 +14,17 @@
 
 using namespace NetCx::Core;
 
+static
+void
+NTAPI
+NxQueueVerifierDestroy(
+    _In_ WDFOBJECT Object
+)
+{
+    auto queueVerifier = GetNxQueueVerifierFromHandle(Object);
+    queueVerifier->~NxQueueVerifier();
+}
+
 _Use_decl_annotations_
 NTSTATUS
 PacketQueueVerifierCreate(
@@ -27,11 +38,7 @@ PacketQueueVerifierCreate(
 
     WDF_OBJECT_ATTRIBUTES attributes;
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, NxQueueVerifier);
-    attributes.EvtDestroyCallback = [](WDFOBJECT Object)
-    {
-        auto queueVerifier = GetNxQueueVerifierFromHandle(Object);
-        queueVerifier->~NxQueueVerifier();
-    };
+    attributes.EvtDestroyCallback = NxQueueVerifierDestroy;
 
     void * memory;
 
@@ -169,11 +176,15 @@ NxQueueVerifier::PreAdvance(
 
             // this won't work because these are valid values.
 
-            fragment->ValidLength = ~0U;
-            fragment->Offset = ~0U;
+            fragment->ValidLength = 0;
+
+            fragment->ValidLength--;
+            fragment->Offset = 0;
+            fragment->Offset--;
             if (rxCapabilities.AttachmentMode == NetRxFragmentBufferAttachmentModeDriver)
             {
-                fragment->Capacity = ~0U;
+                fragment->Capacity = 0;
+                fragment->Capacity--;
             }
         }
 
@@ -229,11 +240,15 @@ NxQueueVerifier::PreAdvance(
 
             // this won't work because these are valid values.
 
-            fragment->ValidLength = ~0U;
-            fragment->Offset = ~0U;
+            fragment->ValidLength = 0;
+
+            fragment->ValidLength--;
+            fragment->Offset = 0;
+            fragment->Offset--;
             if (rxCapabilities.AttachmentMode == NetRxFragmentBufferAttachmentModeDriver)
             {
-                fragment->Capacity = ~0U;
+                fragment->Capacity = 0;
+                fragment->Capacity--;
             }
         }
 

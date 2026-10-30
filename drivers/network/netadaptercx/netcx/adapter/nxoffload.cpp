@@ -123,7 +123,7 @@ NxOffloadFacade::QueryStandardizedKeywordSetting(
     PULONG Value
 )
 {
-    NxConfiguration* nxConfiguration;
+    NxConfiguration* nxConfiguration = nullptr;
     NTSTATUS status;
 
     if (m_adapter.IsDevicelessAdapter())

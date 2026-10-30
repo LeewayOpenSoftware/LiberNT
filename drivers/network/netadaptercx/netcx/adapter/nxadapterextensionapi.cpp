@@ -67,6 +67,7 @@ NETEXPORT(NetDriverExtensionInitialize)(
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 NETADAPTER
+NTAPI
 NETEXPORT(NetAdapterInitGetCreatedAdapter)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER_INIT * AdapterInit
@@ -114,6 +115,7 @@ GetAdapterExtensionInitFromHandle(
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 NETADAPTEREXT_INIT *
+NTAPI
 NETEXPORT(NetAdapterExtensionInitAllocate)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER_INIT * AdapterInit
@@ -170,6 +172,7 @@ Remarks
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterExtensionInitSetOidRequestPreprocessCallback)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _Inout_ NETADAPTEREXT_INIT * AdapterExtensionInit,
@@ -210,6 +213,7 @@ Remarks
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterDispatchPreprocessedOidRequest)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -247,6 +251,7 @@ Arguments:
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterExtensionInitSetDirectOidRequestPreprocessCallback)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _Inout_ NETADAPTEREXT_INIT * AdapterExtensionInit,
@@ -267,6 +272,7 @@ NETEXPORT(NetAdapterExtensionInitSetDirectOidRequestPreprocessCallback)(
 _IRQL_requires_max_(DISPATCH_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterDispatchPreprocessedDirectOidRequest)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter,
@@ -337,6 +343,7 @@ NETEXPORT(NetExAdapterDispatchPreprocessedDirectOid)(
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetAdapterExtensionInitSetTxPeerDemuxCallback)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _Inout_ NETADAPTEREXT_INIT * AdapterExtensionInit,
@@ -357,6 +364,7 @@ NETEXPORT(NetAdapterExtensionInitSetTxPeerDemuxCallback)(
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 WDFOBJECT
+NTAPI
 NETEXPORT(NetAdapterGetParent)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ NETADAPTER Adapter
@@ -391,6 +399,7 @@ Return Value:
 WDFAPI
 _IRQL_requires_(PASSIVE_LEVEL)
 ULONG
+NTAPI
 NETEXPORT(NetAdapterGetLinkLayerMtuSize)(
     _In_ NET_DRIVER_GLOBALS *                   DriverGlobals,
     _In_ NETADAPTER                             Adapter

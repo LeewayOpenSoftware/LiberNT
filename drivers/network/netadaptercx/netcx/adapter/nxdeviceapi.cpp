@@ -100,6 +100,7 @@ WDFAPI
 _Must_inspect_result_
 _IRQL_requires_(PASSIVE_LEVEL)
 NTSTATUS
+NTAPI
 NETEXPORT(NetDeviceOpenConfiguration)(
     _In_ NET_DRIVER_GLOBALS * Globals,
     _In_ WDFDEVICE Device,
@@ -170,6 +171,7 @@ WDFAPI
 _Must_inspect_result_
 _IRQL_requires_(PASSIVE_LEVEL)
 NTSTATUS
+NTAPI
 NETEXPORT(NetDeviceAssignSupportedOidList)(
     _In_ NET_DRIVER_GLOBALS * Globals,
     _In_ WDFDEVICE Device,
@@ -208,6 +210,7 @@ Arguments:
 _IRQL_requires_max_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetDeviceInitSetResetConfig)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ PWDFDEVICE_INIT DeviceInit,
@@ -251,6 +254,7 @@ NETEXPORT(NetDeviceInitSetPowerPolicyEventCallbacks)(
 _IRQL_requires_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetDeviceInitSetResetCapabilities)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _Inout_ PWDFDEVICE_INIT DeviceInit,
@@ -270,6 +274,7 @@ NETEXPORT(NetDeviceInitSetResetCapabilities)(
 _IRQL_requires_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetDeviceStoreResetDiagnostics)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ WDFDEVICE Device,
@@ -297,6 +302,7 @@ NETEXPORT(NetDeviceStoreResetDiagnostics)(
 _IRQL_requires_(PASSIVE_LEVEL)
 WDFAPI
 void
+NTAPI
 NETEXPORT(NetDeviceRequestReset)(
     _In_ NET_DRIVER_GLOBALS * DriverGlobals,
     _In_ WDFDEVICE Device

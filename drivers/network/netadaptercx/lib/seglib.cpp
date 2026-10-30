@@ -587,7 +587,7 @@ CreateSegmentedClone(
     BOOLEAN const isIPv6 = (versionByte >> 4) == IPV6_VERSION;
 
     if (mss == 0 || (!isIPv6 && (versionByte >> 4) != IPV4_VERSION) ||
-        transportHeaderOffset <= IpHeaderOffset + (isIPv6 ? IPV6_HEADER_LENGTH - 1 : 19))
+        transportHeaderOffset <= static_cast<ULONG>(IpHeaderOffset + (isIPv6 ? IPV6_HEADER_LENGTH - 1 : 19)))
     {
         return STATUS_INVALID_PARAMETER;
     }

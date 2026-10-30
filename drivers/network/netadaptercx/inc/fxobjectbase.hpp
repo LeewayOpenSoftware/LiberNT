@@ -99,6 +99,7 @@ private:
 
     static
     void
+    NTAPI
     _OnCleanup(
         _In_ WDFOBJECT FxObject)
     {
@@ -111,6 +112,7 @@ private:
 
     static
     void
+    NTAPI
     _OnDestroy(
         _In_ WDFOBJECT FxObject)
     {

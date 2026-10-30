@@ -28,6 +28,7 @@ public:
     _IRQL_requires_(DISPATCH_LEVEL)
     static
     void
+    NTAPI
     DpcThunk(
 #ifdef _KERNEL_MODE
         _In_ KDPC * KDpc,

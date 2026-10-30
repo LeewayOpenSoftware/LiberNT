@@ -3,6 +3,7 @@
 
 typedef
 NTSTATUS
+NTAPI
 DeviceResetHandler(
     _In_ void * InterfaceContext,
     _In_ DEVICE_RESET_TYPE ResetType,
@@ -10,7 +11,7 @@ DeviceResetHandler(
     _In_opt_ void * ResetParameters
 );
 
-typedef void InterfaceDereference(
+typedef void NTAPI InterfaceDereference(
     void *Context
 );
 

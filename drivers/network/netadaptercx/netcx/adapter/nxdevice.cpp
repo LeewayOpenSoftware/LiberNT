@@ -32,6 +32,23 @@ Abstract:
 
 #include "NxDevice.tmh"
 
+static
+void
+NTAPI
+NxDeviceDestroy(
+    _In_ WDFOBJECT Object
+)
+{
+    // Note: Do not assume 'Object' is a valid WDFDEVICE handle. In case of failure
+    // we might get a half initialized device object. The only thing that is guaranteed
+    // to succeed is getting the typed context
+    auto nxDevice = static_cast<NxDevice *>(WdfObjectGetTypedContext(
+        Object,
+        NxDevice));
+
+    nxDevice->~NxDevice();
+}
+
 #define NX_WMI_TAG 'mWxN'
 
 static void *
@@ -338,11 +355,12 @@ Routine description:
     if (m_resetDiagnosticsBuffer != WDF_NO_HANDLE)
     {
         // Continue to PLDR even if this memcopy fails
-        (void) WdfMemoryCopyFromBuffer(
+        NTSTATUS const copyStatus = WdfMemoryCopyFromBuffer(
             m_resetDiagnosticsBuffer,
             0U,
             const_cast<UINT8 *>(ResetDiagnosticsBuffer),
             diagnosticsSize);
+        UNREFERENCED_PARAMETER(copyStatus);
 
         //
         // Store reset diagnostic info in NetAdapterCxTriageBlock
@@ -583,17 +601,7 @@ Routine Description:
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, NxDevice);
 
     attributes.EvtCleanupCallback = EvtDeviceCleanup;
-    attributes.EvtDestroyCallback = [](WDFOBJECT Object)
-    {
-        // Note: Do not assume 'Object' is a valid WDFDEVICE handle. In case of failure
-        // we might get a half initialized device object. The only thing that is guaranteed
-        // to succeed is getting the typed context
-        auto nxDevice = static_cast<NxDevice *>(WdfObjectGetTypedContext(
-            Object,
-            NxDevice));
-
-        nxDevice->~NxDevice();
-    };
+    attributes.EvtDestroyCallback = NxDeviceDestroy;
 
     void * storage;
 
@@ -648,13 +656,14 @@ NxDevice::Initialize(
     DEVPROPTYPE devPropType;
     ULONG requiredSize;
 
-    WdfDeviceQueryPropertyEx(
+    NTSTATUS const addressStatus = WdfDeviceQueryPropertyEx(
         m_device,
         &data,
         sizeof(m_deviceBusAddress),
         &m_deviceBusAddress,
         &requiredSize,
         &devPropType);
+    UNREFERENCED_PARAMETER(addressStatus);
 
     WDF_DEVICE_PROPERTY_DATA_INIT(&data, &DEVPKEY_Device_InstanceId);
 

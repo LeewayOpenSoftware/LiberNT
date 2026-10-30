@@ -92,4 +92,4 @@ struct KnobDescriptor
     }
 };
 
-static_assert(sizeof(KnobDescriptor) == 48, "KnobDescriptor size differs from the 22621 symbols");
+static_assert(sizeof(void *) != 8 || sizeof(KnobDescriptor) == 48, "KnobDescriptor size differs from the 22621 symbols");

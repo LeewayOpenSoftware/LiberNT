@@ -9,6 +9,8 @@ Abstract:
 
 #pragma once
 
+#include <wil/wistd_type_traits.h>
+
 struct AdapterExtensionInit;
 struct AdapterInit;
 struct QUEUE_CREATION_CONTEXT;
@@ -285,12 +287,13 @@ Verifier_VerifyNotNull(
     _In_ void const * const Ptr
 );
 
-template <typename TResult, typename... TArguments>
+template <typename TFunction>
+    requires wistd::is_function_v<TFunction>
 inline
 void
 Verifier_VerifyNotNull(
     _In_ NX_PRIVATE_GLOBALS const * PrivateGlobals,
-    _In_ TResult (*Function)(TArguments...)
+    _In_ TFunction * Function
 )
 {
     Verifier_VerifyNotNull(PrivateGlobals, reinterpret_cast<void const *>(Function));

@@ -108,6 +108,7 @@ NxConfiguration::~NxConfiguration()
 }
 
 void
+NTAPI
 NxConfiguration::_EvtCleanup(
     _In_  WDFOBJECT Configuration
 )

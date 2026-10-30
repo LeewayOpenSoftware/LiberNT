@@ -50,7 +50,7 @@ typedef struct _NET_OFFLOAD_GSO_CAPABILITIES
 } NET_OFFLOAD_GSO_CAPABILITIES;
 
 template <typename P>
-using NxOffloadCallBack = void (*)(NETADAPTER, NETOFFLOAD);
+using NxOffloadCallBack = void (NTAPI *)(NETADAPTER, NETOFFLOAD);
 
 class NxAdapter;
 

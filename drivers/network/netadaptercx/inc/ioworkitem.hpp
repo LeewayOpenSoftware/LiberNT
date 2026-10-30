@@ -67,6 +67,7 @@ private:
     static
     _Function_class_(IO_WORKITEM_ROUTINE_EX)
     void
+    NTAPI
     Callback(
         _In_ PVOID IoObject,
         _In_opt_ PVOID Context,

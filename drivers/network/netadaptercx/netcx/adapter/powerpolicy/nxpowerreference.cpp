@@ -42,6 +42,7 @@ WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(PowerRequiredWorkItemContext, GetPowerRequire
 
 _Use_decl_annotations_
 void
+NTAPI
 EvtPowerRequiredWorkItem(
     WDFWORKITEM WorkItem
 )
