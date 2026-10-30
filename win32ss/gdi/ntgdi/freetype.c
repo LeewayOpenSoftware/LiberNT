@@ -8603,6 +8603,8 @@ IntExtTextOutW(
             realglyph->left = 0;
         }
 
+        MaskRect.left = 0;
+        MaskRect.top = 0;
         MaskRect.right = realglyph->bitmap.width;
         MaskRect.bottom = realglyph->bitmap.rows;
 
@@ -8657,9 +8659,22 @@ IntExtTextOutW(
                 {
                     DestRect.bottom = lprc->bottom;
                 }
+
+                if (DestRect.left < lprc->left)
+                {
+                    MaskRect.left = lprc->left - DestRect.left;
+                    DestRect.left = lprc->left;
+                }
+
+                if (DestRect.top < lprc->top)
+                {
+                    MaskRect.top = lprc->top - DestRect.top;
+                    DestRect.top = lprc->top;
+                }
             }
 
-            if (!IntEngMaskBlt(psoDest,
+            if ((DestRect.right > DestRect.left) && (DestRect.bottom > DestRect.top) &&
+                !IntEngMaskBlt(psoDest,
                                psoGlyph,
                                (CLIPOBJ *)&dc->co,
                                &exloRGB2Dst.xlo,
