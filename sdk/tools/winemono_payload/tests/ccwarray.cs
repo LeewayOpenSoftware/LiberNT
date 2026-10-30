@@ -37,6 +37,12 @@ public interface ICcwItems
 
     [PreserveSig]
     int SumRecords(uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)] CcwRecord[] records);
+
+    [PreserveSig]
+    int GetDates(uint count, [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)] DateTime[] dates);
+
+    [PreserveSig]
+    int CountDates(uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)] DateTime[] dates);
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
@@ -74,6 +80,22 @@ public class CcwItems : ICcwItems
         foreach (CcwRecord record in records)
             sum += record.Value + (record.Name == null ? 0 : record.Name.Length * 100);
         return sum;
+    }
+
+    public int GetDates(uint count, DateTime[] dates)
+    {
+        for (int i = 0; i < dates.Length; i++)
+            dates[i] = new DateTime(2020 + i, 1, 2, 12, 0, 0);
+        return dates.Length;
+    }
+
+    public int CountDates(uint count, DateTime[] dates)
+    {
+        int years = 0;
+
+        foreach (DateTime date in dates)
+            years += date.Year;
+        return years;
     }
 
     public int Sum(uint count, ICcwItem[] items)
@@ -173,6 +195,21 @@ public static class Program
         Check(Marshal.ReadIntPtr(records, 0) == abc, "SumRecords leaves the caller's records unchanged");
         Marshal.FreeBSTR(abc);
         Marshal.FreeCoTaskMem(records);
+
+        IntPtr dates = Marshal.AllocCoTaskMem(2 * 8);
+        Marshal.WriteInt64(dates, 0, 0);
+        Marshal.WriteInt64(dates, 8, 0);
+        int dateCount = Slot<RecordsFn>(itf, 7)(itf, 2, dates);
+        double firstDate = BitConverter.Int64BitsToDouble(Marshal.ReadInt64(dates, 0));
+        double secondDate = BitConverter.Int64BitsToDouble(Marshal.ReadInt64(dates, 8));
+        Check(dateCount == 2, "GetDates result " + dateCount);
+        Check(firstDate == new DateTime(2020, 1, 2, 12, 0, 0).ToOADate(), "GetDates element 0 is an OLE date " + firstDate);
+        Check(secondDate == new DateTime(2021, 1, 2, 12, 0, 0).ToOADate(), "GetDates element 1 is an OLE date " + secondDate);
+        Marshal.WriteInt64(dates, 0, BitConverter.DoubleToInt64Bits(new DateTime(2000, 6, 1).ToOADate()));
+        Marshal.WriteInt64(dates, 8, BitConverter.DoubleToInt64Bits(new DateTime(2001, 6, 1).ToOADate()));
+        int years = Slot<RecordsFn>(itf, 8)(itf, 2, dates);
+        Check(years == 4001, "CountDates of the OLE dates passed in " + years);
+        Marshal.FreeCoTaskMem(dates);
 
         Marshal.FreeCoTaskMem(buffer);
         Marshal.Release(itf);
