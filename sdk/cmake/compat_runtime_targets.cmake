@@ -167,6 +167,7 @@ set(COMPAT_RUNTIME_MODULES
     msacm32.drv
     msadp32.acm
     msafd
+    msasn1
     msauddecmft
     mscat32
     mscms

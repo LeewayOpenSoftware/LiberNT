@@ -416,6 +416,7 @@ static const CATEGORY_RULE Rules[] =
     { "schannel_winetest", "*", "security:crypto" },
     { "secur32_winetest", "*", "security:crypto" },
     { "winscard_winetest", "*", "security:crypto" },
+    { "msasn1_winetest", "*", "security:crypto" },
     { "wintrust_winetest", "*", "security:crypto" },
     { "advapi32_apitest", "*", "security:tokens" },
     { "advapi32_winetest", "*", "security:tokens" },
