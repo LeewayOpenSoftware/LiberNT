@@ -8,6 +8,7 @@
 
 #include <win32k.h>
 #include <immdev.h>
+#include <reactos/dwmframe.h>
 DBG_DEFAULT_CHANNEL(UserWinpos);
 
 /* GLOBALS *******************************************************************/
@@ -1386,6 +1387,7 @@ typedef struct _WINPOS_ENTRY
    BOOL bPointerInWindow;
    BOOL bDeferActivate;
    BOOL bCompositedPureMove;
+   BOOL bRefreshFrame;
    UINT Flags;
    HWND hwndBand;
    WINDOWPOS WinPos;
@@ -2709,6 +2711,35 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
 }
 
 static VOID FASTCALL
+co_WinPosRefreshFrame(PWND Window)
+{
+   WINDOWPOS WinPos = { 0 };
+   RECTL WindowRect = Window->rcWindow;
+   RECTL ClientRect = Window->rcClient;
+   RECTL ValidRects[2];
+
+   WinPos.hwnd = UserHMGetHandle(Window);
+   WinPos.x = Window->rcWindow.left;
+   WinPos.y = Window->rcWindow.top;
+   WinPos.cx = Window->rcWindow.right - Window->rcWindow.left;
+   WinPos.cy = Window->rcWindow.bottom - Window->rcWindow.top;
+   if (Window->spwndParent && !UserIsDesktopWindow(Window->spwndParent))
+   {
+      WinPos.x -= Window->spwndParent->rcClient.left;
+      WinPos.y -= Window->spwndParent->rcClient.top;
+   }
+   WinPos.flags = SWP_FRAMECHANGED | SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
+
+   co_WinPosDoNCCALCSize(Window, &WinPos, &WindowRect, &ClientRect, ValidRects);
+   if (!IntIsWindow(WinPos.hwnd))
+      return;
+   Window->rcClient = ClientRect;
+   co_UserRedrawWindow(Window, NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ERASE | RDW_ERASENOW);
+   if (IntIsWindow(WinPos.hwnd))
+      IntNotifyWinEvent(EVENT_OBJECT_LOCATIONCHANGE, Window, OBJID_WINDOW, CHILDID_SELF, WEF_SETBYWNDPTI);
+}
+
+static VOID FASTCALL
 co_WinPosBatchChanged(PWINPOS_ENTRY Entry)
 {
    PWND Window = Entry->Window;
@@ -2740,6 +2771,9 @@ co_WinPosBatchChanged(PWINPOS_ENTRY Entry)
       TRACE("WM_WINDOWPOSCHANGED hwnd %p Flags %04x\n",WinPos.hwnd,WinPos.flags);
       co_IntSendMessageNoWait(WinPos.hwnd, WM_WINDOWPOSCHANGED, 0, (LPARAM) &WinPos);
    }
+
+   if (Entry->bRefreshFrame && Window && IntIsWindow(WinPos.hwnd))
+      co_WinPosRefreshFrame(Window);
 
    if ( WinPos.flags & SWP_FRAMECHANGED  || WinPos.flags & SWP_STATECHANGED ||
       !(WinPos.flags & SWP_NOCLIENTSIZE) || !(WinPos.flags & SWP_NOCLIENTMOVE) ||
@@ -4340,6 +4374,7 @@ NtUserSetWindowRgn(
    PWINPOS_ENTRY Entry;
    INT flags = (SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE|SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOSIZE|SWP_NOMOVE|SWP_NOZORDER);
    INT Ret = 0;
+   BOOL RefreshFrame;
 
    TRACE("Enter NtUserSetWindowRgn\n");
    UserEnterExclusive();
@@ -4366,6 +4401,12 @@ NtUserSetWindowRgn(
          goto Exit; // Return 0
    }
 
+   RefreshFrame = !hrgnCopy && Window->hrgnClip &&
+                  UserIsDesktopWindow(Window->spwndParent) &&
+                  (Window->style & WS_CAPTION) == WS_CAPTION &&
+                  IntCompositionIsEnabled() &&
+                  AtomDwmThemedFrame && UserGetProp(Window, AtomDwmThemedFrame, FALSE);
+
    WinPosBatchInit(&Batch);
    WinPosBatchAddRequest(&Batch, Window, HWND_TOP, 0, 0, 0, 0,
                          bRedraw ? flags : (flags | SWP_NOREDRAW));
@@ -4373,10 +4414,26 @@ NtUserSetWindowRgn(
    if (Entry)
    {
        Entry->hrgnClip = hrgnCopy ? hrgnCopy : HRGN_WINDOW;
+       Entry->bRefreshFrame = RefreshFrame;
        hrgnCopy = NULL;
        Ret = (INT)co_WinPosBatchRun(&Batch);
    }
    WinPosBatchFree(&Batch);
+
+   if (Ret && RefreshFrame && (Window = UserGetWindowObject(hWnd)))
+   {
+      WinPosBatchInit(&Batch);
+      WinPosBatchAddRequest(&Batch, Window, HWND_TOP, 0, 0, 0, 0,
+                            bRedraw ? flags : (flags | SWP_NOREDRAW));
+      Entry = WinPosBatchFind(&Batch, Window);
+      if (Entry)
+      {
+         Entry->bRefreshFrame = !AtomDwmNcRenderingPolicy ||
+            UserGetProp(Window, AtomDwmNcRenderingPolicy, FALSE) != (HANDLE)(ULONG_PTR)DWM_NC_RENDERING_DISABLED;
+         co_WinPosBatchRun(&Batch);
+      }
+      WinPosBatchFree(&Batch);
+   }
 
 Exit:
    if (hrgnCopy)

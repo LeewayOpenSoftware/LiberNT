@@ -100,6 +100,7 @@ list(APPEND SOURCE
     SetScrollRange.c
     SetWindowPlacement.c
     WindowDisplayAffinity.c
+    WindowRegionFrame.c
     ShellWindowQueries.c
     ShowWindow.c
     SwitchToThisWindow.c
