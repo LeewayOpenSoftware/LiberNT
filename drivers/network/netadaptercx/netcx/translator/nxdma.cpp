@@ -372,6 +372,7 @@ NxDmaAdapter::FlushIoBuffers(
 
     for (auto& packet : PacketRange)
     {
+        UNREFERENCED_PARAMETER(packet);
         KeFlushIoBuffers(
             GetDmaContextForPacket(packet).MdlChain,
             FALSE,
