@@ -31,6 +31,16 @@ static void PumpMessages(void)
         DispatchMessageW(&msg);
 }
 
+static void InjectInput(void)
+{
+    INPUT input = { 0 };
+
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE;
+    ok_int(SendInput(1, &input, sizeof(input)), 1);
+    PumpMessages();
+}
+
 static HWND CreateTestWindow(DWORD Style, HWND *phwndChild)
 {
     HWND hwnd;
@@ -101,6 +111,14 @@ START_TEST(ForegroundRight)
     PumpMessages();
     ok_int(NcActivate, 0);
     ok(GetForegroundWindow() != hwnd, "The window took the foreground\n");
+    DestroyWindow(hwnd);
+    PumpMessages();
+
+    InjectInput();
+    hwnd = ActivateOnShow();
+    ok_int(NcActivate, 0);
+    ok(GetActiveWindow() == hwnd, "The window is not active\n");
+    ok(GetForegroundWindow() != hwnd, "The window took the foreground after injecting input\n");
     DestroyWindow(hwnd);
     PumpMessages();
 

@@ -846,9 +846,7 @@ CanActivateForeground(PTHREADINFO pti)
    PPROCESSINFO ppi = pti->ppi;
 
    return pti->MessageQueue == gpqForeground ||
-          (gptiForeground && gptiForeground->ppi == ppi) ||
           (ptiLastInput && ptiLastInput->ppi == ppi) ||
-          gppiInputProvider == ppi ||
           ppi == ppiScrnSaver ||
           (pti->TIF_flags & (TIF_SYSTEMTHREAD | TIF_CSRSSTHREAD | TIF_ALLOWFOREGROUNDACTIVATE)) ||
           (ppi->W32PF_flags & W32PF_ALLOWFOREGROUNDACTIVATE);
