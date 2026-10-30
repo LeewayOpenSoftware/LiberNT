@@ -210,7 +210,7 @@ function(mesa_stage_dll _target _dll _stage_dir)
 endfunction()
 
 mesa_stage_dll(mesa_gallium "${MESA_WGL_DLL}" "${CMAKE_CURRENT_BINARY_DIR}/mesa-icd")
-if(NOT ARCH STREQUAL "riscv64" AND (_mesa_llvmpipe_from_source OR NOT ENABLE_MESA_LLVMPIPE))
+if(_mesa_llvmpipe_from_source OR NOT ENABLE_MESA_LLVMPIPE)
     add_optional_registry_inf(INF mesa-gallium.inf REQUIRES "${_mesa_stage}")
 endif()
 if(_mesa_d3d_umd_name)
