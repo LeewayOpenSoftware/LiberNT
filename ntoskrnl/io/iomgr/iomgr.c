@@ -716,6 +716,8 @@ IoInitSystem(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
      * We can finally load other drivers from the boot volume. */
     PnPBootDriversInitialized = TRUE;
 
+    KdInitializeBootLog(LoaderBlock);
+
     /* Load system start drivers */
     IopInitializeSystemDrivers();
     PnpSystemInit = TRUE;
@@ -730,8 +732,6 @@ IoInitSystem(IN PLOADER_PARAMETER_BLOCK LoaderBlock)
         DPRINT1("IopReassignSystemRoot failed: %lx\n", Status);
         return FALSE;
     }
-
-    KdInitializeBootLog(LoaderBlock);
 
     /* Let internal KD file providers open their targets against the final boot-volume path. */
 #ifndef _WINKD_
