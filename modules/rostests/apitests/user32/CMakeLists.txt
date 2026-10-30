@@ -109,6 +109,7 @@ list(APPEND SOURCE
     SystemParametersInfo.c
     TrackMouseEvent.c
     TrackPopupMenuEx.c
+    UncoveredWindow.c
     UpdateRegion.c
     UserHandleGrantAccess.c
     VirtualKey.c

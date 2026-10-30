@@ -165,9 +165,32 @@ co_VIS_WindowLayoutChanged(
                          Wnd->rcWindow.top - Parent->rcClient.top);
 
        UserRefObjectCo(Parent, &Ref);
-       co_UserRedrawWindow(Parent, NULL, TempRgn,
-                           RDW_ERASE | RDW_INVALIDATE |
-                           RDW_ALLCHILDREN);
+       if (UserIsDesktopWindow(Parent) && IntCompositionIsEnabled())
+       {
+           PWND Child;
+           PREGION ChildRgn = IntIsWindowDrawable(Parent) ? IntSysCreateRectpRgn(0, 0, 0, 0) : NULL;
+
+           co_UserRedrawWindow(Parent, NULL, TempRgn,
+                               RDW_ERASE | RDW_INVALIDATE |
+                               RDW_NOCHILDREN);
+           for (Child = Parent->spwndChild; Child && ChildRgn; Child = Child->spwndNext)
+           {
+               if (!(Child->style & WS_VISIBLE) || IntCompositionGetRedirectSurface(Child))
+                   continue;
+               IntGdiCombineRgn(ChildRgn, TempRgn, NULL, RGN_COPY);
+               IntInvalidateWindows(Child, ChildRgn,
+                                    RDW_ERASE | RDW_FRAME | RDW_INVALIDATE |
+                                    RDW_ALLCHILDREN);
+           }
+           if (ChildRgn)
+               REGION_Delete(ChildRgn);
+       }
+       else
+       {
+           co_UserRedrawWindow(Parent, NULL, TempRgn,
+                               RDW_ERASE | RDW_INVALIDATE |
+                               RDW_ALLCHILDREN);
+       }
        UserDerefObjectCo(Parent);
 
        REGION_Delete(TempRgn);
