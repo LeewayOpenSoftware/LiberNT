@@ -845,6 +845,10 @@ HKLM,"SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000426","Layout File",
 HKLM,"SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000426","Layout Text",0x00000000,%LATVIAN%
 HKLM,"SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000426","Layout Display Name",0x00000000,"@%SystemRoot%\system32\input.dll,-5043"
 
+HKLM,"SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000429","Layout File",0x00000000,"kbdfa.dll"
+HKLM,"SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000429","Layout Text",0x00000000,%PERSIAN%
+HKLM,"SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000429","Layout Display Name",0x00000000,"@%SystemRoot%\system32\input.dll,-5124"
+
 ; HKLM,"SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00010426","Layout File",0x00000000,"kbdlv1.dll"
 ; HKLM,"SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00010426","Layout Text",0x00000000,%LATVIAN_QWERTY%
 ; HKLM,"SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00010426","Layout Id",0x00000000,"0015"
@@ -2581,8 +2585,8 @@ HKLM,"SYSTEM\CurrentControlSet\Control\PriorityControl","Win32PrioritySeparation
 HKLM,"SYSTEM\CurrentControlSet\Control\FontAssoc\Associated Charset","ANSI(00)",0x00000000,"NO"
 HKLM,"SYSTEM\CurrentControlSet\Control\FontAssoc\Associated Charset","OEM(FF)",0x00000000,"NO"
 HKLM,"SYSTEM\CurrentControlSet\Control\FontAssoc\Associated Charset","SYMBOL(02)",0x00000000,"NO"
-HKLM,"SYSTEM\CurrentControlSet\Control\FontAssoc\Associated DefaultFonts","AssocSystemFont",0x00000000,"DroidSansFallback.ttf"
-HKLM,"SYSTEM\CurrentControlSet\Control\FontAssoc\Associated DefaultFonts","FontPackage",0x00000000,"Droid Sans Fallback"
+HKLM,"SYSTEM\CurrentControlSet\Control\FontAssoc\Associated DefaultFonts","AssocSystemFont",0x00000000,"NotoSansJP-Regular.otf"
+HKLM,"SYSTEM\CurrentControlSet\Control\FontAssoc\Associated DefaultFonts","FontPackage",0x00000000,"Noto Sans JP"
 
 [AddReg.NTarm]
 ; RAM Disk class driver
@@ -2690,6 +2694,7 @@ DEVANAGARI = "Devanagari - INSCRIPT"
 DUTCH = "Dutch"
 ESPERANTO = "Esperanto"
 ESTONIAN = "Estonian"
+PERSIAN = "Persian"
 GERMAN_ERGO = "German (de_ergo)"
 GERMAN_EXTENDED1 = "German Extended (E1)"
 GERMAN_IBM = "German (IBM)"

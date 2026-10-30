@@ -21,7 +21,7 @@ extern ULONG PsMinimumWorkingSet, PsMaximumWorkingSet;
 POBJECT_TYPE PsProcessType = NULL;
 
 LIST_ENTRY PsActiveProcessHead;
-KGUARDED_MUTEX PspActiveProcessMutex;
+EX_PUSH_LOCK PspActiveProcessLock;
 
 LARGE_INTEGER ShortPsLockDelay;
 
@@ -135,7 +135,8 @@ PsGetNextProcess(IN PEPROCESS OldProcess)
     PSTRACE(PS_PROCESS_DEBUG, "Process: %p\n", OldProcess);
 
     /* Acquire the Active Process Lock */
-    KeAcquireGuardedMutex(&PspActiveProcessMutex);
+    KeEnterCriticalRegion();
+    ExAcquirePushLockShared(&PspActiveProcessLock);
 
     /* Check if we're already starting somewhere */
     if (OldProcess)
@@ -164,7 +165,8 @@ PsGetNextProcess(IN PEPROCESS OldProcess)
     }
 
     /* Release the lock */
-    KeReleaseGuardedMutex(&PspActiveProcessMutex);
+    ExReleasePushLockShared(&PspActiveProcessLock);
+    KeLeaveCriticalRegion();
 
     /* Dereference the Process we had referenced earlier */
     if (OldProcess) ObDereferenceObject(OldProcess);
@@ -857,9 +859,11 @@ PspCreateProcess(OUT PHANDLE ProcessHandle,
     }
 
     /* The process can now be activated */
-    KeAcquireGuardedMutex(&PspActiveProcessMutex);
+    KeEnterCriticalRegion();
+    ExAcquirePushLockExclusive(&PspActiveProcessLock);
     InsertTailList(&PsActiveProcessHead, &Process->ActiveProcessLinks);
-    KeReleaseGuardedMutex(&PspActiveProcessMutex);
+    ExReleasePushLockExclusive(&PspActiveProcessLock);
+    KeLeaveCriticalRegion();
 
     /* Create an access state */
     Status = SeCreateAccessStateEx(CurrentThread,
@@ -2070,23 +2074,7 @@ PspPrepareWow64Thread(IN HANDLE ProcessHandle,
 
     RtlZeroMemory(ThreadContext, sizeof(*ThreadContext));
     ThreadContext->ContextFlags = CONTEXT_FULL;
-#ifdef _M_AMD64
-    ThreadContext->Rip = CpuInit.Context.Eip;
-    ThreadContext->Rax = CpuInit.Context.Eax;
-    ThreadContext->Rsp = (CpuAddress - 2 * sizeof(PVOID)) & ~15ULL;
-    ThreadContext->EFlags = EFLAGS_INTERRUPT_MASK;
-    ThreadContext->SegCs = KGDT64_R3_CODE | RPL_MASK;
-    ThreadContext->SegDs = KGDT64_R3_DATA | RPL_MASK;
-    ThreadContext->SegEs = KGDT64_R3_DATA | RPL_MASK;
-    ThreadContext->SegFs = KGDT64_R3_CMTEB | RPL_MASK;
-    ThreadContext->SegGs = KGDT64_R3_DATA | RPL_MASK;
-    ThreadContext->SegSs = KGDT64_R3_DATA | RPL_MASK;
-    ThreadContext->MxCsr = INITIAL_MXCSR;
-#elif defined(_M_ARM64)
-    ThreadContext->Pc = CpuInit.Context.Eip;
-    ThreadContext->Sp = CpuAddress & ~15ULL;
-    ThreadContext->Cpsr = 0;
-#endif
+    KiInitializeWow64ThreadContext(ThreadContext, CpuInit.Context.Eip, CpuInit.Context.Eax, CpuAddress);
     return STATUS_SUCCESS;
 }
 #endif

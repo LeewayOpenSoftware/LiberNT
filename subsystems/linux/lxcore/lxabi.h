@@ -87,6 +87,10 @@
 #define LX_ENOMEDIUM        123
 #define LX_ECANCELED        125
 #define LX_ENOKEY           126
+#define LX_EDQUOT           122
+#define LX_EKEYEXPIRED      127
+#define LX_EKEYREVOKED      128
+#define LX_EKEYREJECTED     129
 #define LX_EHWPOISON        133
 
 #define LX_O_ACCMODE        03
@@ -183,6 +187,7 @@
 #define LX_SEEK_SET         0
 #define LX_SEEK_CUR         1
 #define LX_SEEK_END         2
+#define LX_SEEK_DATA        3
 
 #define LX_S_IFMT           0170000
 #define LX_S_ISUID          0004000
@@ -423,6 +428,7 @@ typedef struct _LX_SCHED_ATTR
 #define LX_ECHOK            0000040
 #define LX_ECHONL           0000100
 #define LX_NOFLSH           0000200
+#define LX_TOSTOP           0000400
 #define LX_IEXTEN           0100000
 #define LX_ECHOCTL          0001000
 #define LX_ECHOKE           0004000
@@ -464,6 +470,7 @@ typedef struct _LX_SCHED_ATTR
 #define LX_SIG_DFL          0
 #define LX_SIG_IGN          1
 
+#define LX_SA_NOCLDSTOP     0x00000001
 #define LX_SA_SIGINFO       0x00000004
 #define LX_SA_RESTORER      0x04000000
 #define LX_SA_ONSTACK       0x08000000
@@ -491,6 +498,8 @@ typedef struct _LX_SCHED_ATTR
 #define LX_BUS_ADRERR       2
 #define LX_BUS_MCEERR_AR    4
 #define LX_TRAP_BRKPT       1
+#define LX_TRAP_TRACE       2
+#define LX_TRAP_HWBKPT      4
 #define LX_FPE_INTDIV       1
 #define LX_CLD_EXITED       1
 #define LX_CLD_KILLED       2
@@ -757,6 +766,69 @@ typedef struct _LX_MSGINFO
 #define LX_MEMBARRIER_CMD_FLAG_CPU                  0x001
 
 #define LX_PKEY_ACCESS_MASK     0x0F
+
+#define LX_KEY_SPEC_THREAD_KEYRING          (-1)
+#define LX_KEY_SPEC_PROCESS_KEYRING         (-2)
+#define LX_KEY_SPEC_SESSION_KEYRING         (-3)
+#define LX_KEY_SPEC_USER_KEYRING            (-4)
+#define LX_KEY_SPEC_USER_SESSION_KEYRING    (-5)
+#define LX_KEY_SPEC_GROUP_KEYRING           (-6)
+#define LX_KEY_SPEC_REQKEY_AUTH_KEY         (-7)
+#define LX_KEY_SPEC_REQUESTOR_KEYRING       (-8)
+
+#define LX_KEY_REQKEY_DEFL_NO_CHANGE            (-1)
+#define LX_KEY_REQKEY_DEFL_DEFAULT              0
+#define LX_KEY_REQKEY_DEFL_THREAD_KEYRING       1
+#define LX_KEY_REQKEY_DEFL_PROCESS_KEYRING      2
+#define LX_KEY_REQKEY_DEFL_SESSION_KEYRING      3
+#define LX_KEY_REQKEY_DEFL_USER_KEYRING         4
+#define LX_KEY_REQKEY_DEFL_USER_SESSION_KEYRING 5
+#define LX_KEY_REQKEY_DEFL_GROUP_KEYRING        6
+#define LX_KEY_REQKEY_DEFL_REQUESTOR_KEYRING    7
+
+#define LX_KEYCTL_GET_KEYRING_ID        0
+#define LX_KEYCTL_JOIN_SESSION_KEYRING  1
+#define LX_KEYCTL_UPDATE                2
+#define LX_KEYCTL_REVOKE                3
+#define LX_KEYCTL_CHOWN                 4
+#define LX_KEYCTL_SETPERM               5
+#define LX_KEYCTL_DESCRIBE              6
+#define LX_KEYCTL_CLEAR                 7
+#define LX_KEYCTL_LINK                  8
+#define LX_KEYCTL_UNLINK                9
+#define LX_KEYCTL_SEARCH                10
+#define LX_KEYCTL_READ                  11
+#define LX_KEYCTL_INSTANTIATE           12
+#define LX_KEYCTL_NEGATE                13
+#define LX_KEYCTL_SET_REQKEY_KEYRING    14
+#define LX_KEYCTL_SET_TIMEOUT           15
+#define LX_KEYCTL_ASSUME_AUTHORITY      16
+#define LX_KEYCTL_GET_SECURITY          17
+#define LX_KEYCTL_SESSION_TO_PARENT     18
+#define LX_KEYCTL_REJECT                19
+#define LX_KEYCTL_INSTANTIATE_IOV       20
+#define LX_KEYCTL_INVALIDATE            21
+#define LX_KEYCTL_GET_PERSISTENT        22
+#define LX_KEYCTL_DH_COMPUTE            23
+#define LX_KEYCTL_PKEY_QUERY            24
+#define LX_KEYCTL_PKEY_ENCRYPT          25
+#define LX_KEYCTL_PKEY_DECRYPT          26
+#define LX_KEYCTL_PKEY_SIGN             27
+#define LX_KEYCTL_PKEY_VERIFY           28
+#define LX_KEYCTL_RESTRICT_KEYRING      29
+#define LX_KEYCTL_MOVE                  30
+#define LX_KEYCTL_CAPABILITIES          31
+#define LX_KEYCTL_WATCH_KEY             32
+
+#define LX_KEYCTL_MOVE_EXCL                 0x00000001
+#define LX_KEYCTL_CAPS0_CAPABILITIES        0x01
+#define LX_KEYCTL_CAPS0_PERSISTENT_KEYRINGS 0x02
+#define LX_KEYCTL_CAPS0_BIG_KEY             0x10
+#define LX_KEYCTL_CAPS0_INVALIDATE          0x20
+#define LX_KEYCTL_CAPS0_RESTRICT_KEYRING    0x40
+#define LX_KEYCTL_CAPS0_MOVE                0x80
+#define LX_KEYCTL_CAPS1_NS_KEYRING_NAME     0x01
+#define LX_KEYCTL_CAPS1_NS_KEY_TAG          0x02
 #define LX_UIO_MAXIOV           1024
 
 #define LX_CAP_CHOWN            0
@@ -780,8 +852,10 @@ typedef struct _LX_MSGINFO
 #define LX_CAP_SYS_RESOURCE     24
 #define LX_CAP_SYS_TIME         25
 #define LX_CAP_MKNOD            27
+#define LX_CAP_AUDIT_CONTROL    30
 #define LX_CAP_SETFCAP          31
 #define LX_CAP_MAC_OVERRIDE     32
+#define LX_CAP_SYSLOG           34
 #define LX_CAP_BPF              39
 #define LX_CAP_CHECKPOINT_RESTORE 40
 #define LX_CAP_LAST_CAP         40
@@ -1395,6 +1469,103 @@ C_ASSERT(sizeof(LX_FLOCK) == 32);
 #define LX_PR_GET_PDEATHSIG         2
 #define LX_PR_GET_DUMPABLE          3
 #define LX_PR_SET_DUMPABLE          4
+#define LX_PTRACE_TRACEME               0
+#define LX_PTRACE_PEEKTEXT              1
+#define LX_PTRACE_PEEKDATA              2
+#define LX_PTRACE_PEEKUSR               3
+#define LX_PTRACE_POKETEXT              4
+#define LX_PTRACE_POKEDATA              5
+#define LX_PTRACE_POKEUSR               6
+#define LX_PTRACE_CONT                  7
+#define LX_PTRACE_KILL                  8
+#define LX_PTRACE_SINGLESTEP            9
+#define LX_PTRACE_ATTACH                16
+#define LX_PTRACE_DETACH                17
+#define LX_PTRACE_SYSCALL               24
+#define LX_PTRACE_SETOPTIONS            0x4200
+#define LX_PTRACE_GETEVENTMSG           0x4201
+#define LX_PTRACE_GETSIGINFO            0x4202
+#define LX_PTRACE_SETSIGINFO            0x4203
+#define LX_PTRACE_GETREGSET             0x4204
+#define LX_PTRACE_SETREGSET             0x4205
+#define LX_PTRACE_SEIZE                 0x4206
+#define LX_PTRACE_INTERRUPT             0x4207
+#define LX_PTRACE_LISTEN                0x4208
+#define LX_PTRACE_PEEKSIGINFO           0x4209
+#define LX_PTRACE_GETSIGMASK            0x420A
+#define LX_PTRACE_SETSIGMASK            0x420B
+#define LX_PTRACE_GET_SYSCALL_INFO      0x420E
+#define LX_PTRACE_GET_RSEQ_CONFIGURATION 0x420F
+#define LX_PTRACE_O_TRACESYSGOOD        0x00000001
+#define LX_PTRACE_O_TRACEFORK           0x00000002
+#define LX_PTRACE_O_TRACEVFORK          0x00000004
+#define LX_PTRACE_O_TRACECLONE          0x00000008
+#define LX_PTRACE_O_TRACEEXEC           0x00000010
+#define LX_PTRACE_O_TRACEVFORKDONE      0x00000020
+#define LX_PTRACE_O_TRACEEXIT           0x00000040
+#define LX_PTRACE_O_TRACESECCOMP        0x00000080
+#define LX_PTRACE_O_EXITKILL            0x00100000
+#define LX_PTRACE_O_SUSPEND_SECCOMP     0x00200000
+#define LX_PTRACE_O_MASK                (0x000000FF | LX_PTRACE_O_EXITKILL | LX_PTRACE_O_SUSPEND_SECCOMP)
+#define LX_PTRACE_EVENT_FORK            1
+#define LX_PTRACE_EVENT_VFORK           2
+#define LX_PTRACE_EVENT_CLONE           3
+#define LX_PTRACE_EVENT_EXEC            4
+#define LX_PTRACE_EVENT_VFORK_DONE      5
+#define LX_PTRACE_EVENT_EXIT            6
+#define LX_PTRACE_EVENT_SECCOMP         7
+#define LX_PTRACE_EVENT_STOP            128
+#define LX_PTRACE_SYSCALL_INFO_NONE     0
+#define LX_PTRACE_SYSCALL_INFO_ENTRY    1
+#define LX_PTRACE_SYSCALL_INFO_EXIT     2
+#define LX_PTRACE_SYSCALL_INFO_SECCOMP  3
+#define LX_PTRACE_PEEKSIGINFO_SHARED    1
+#define LX_NT_PRSTATUS                  1
+#define LX_NT_PRFPREG                   2
+#define LX_NT_ARM_TLS                   0x401
+#define LX_NT_ARM_HW_BREAK              0x402
+#define LX_NT_ARM_HW_WATCH              0x403
+#define LX_NT_ARM_SYSTEM_CALL           0x404
+#define LX_PR_SET_PTRACER               0x59616D61
+#define LX_PR_SET_PTRACER_ANY           ((ULONG64)-1)
+
+typedef struct _LX_PTRACE_SYSCALL_INFO
+{
+    UCHAR Op;
+    UCHAR Pad[3];
+    ULONG Arch;
+    ULONG64 InstructionPointer;
+    ULONG64 StackPointer;
+    union
+    {
+        struct
+        {
+            ULONG64 Nr;
+            ULONG64 Args[6];
+            ULONG RetData;
+        } Entry;
+        struct
+        {
+            LONG64 Rval;
+            UCHAR IsError;
+        } Exit;
+    };
+} LX_PTRACE_SYSCALL_INFO, *PLX_PTRACE_SYSCALL_INFO;
+
+C_ASSERT(FIELD_OFFSET(LX_PTRACE_SYSCALL_INFO, Entry.Args) == 32);
+C_ASSERT(sizeof(LX_PTRACE_SYSCALL_INFO) == 88);
+
+typedef struct _LX_PTRACE_PEEKSIGINFO_ARGS
+{
+    ULONG64 Off;
+    ULONG Flags;
+    LONG Nr;
+} LX_PTRACE_PEEKSIGINFO_ARGS, *PLX_PTRACE_PEEKSIGINFO_ARGS;
+
+#define LX_PER_LINUX32              0x0008
+#define LX_PER_ADDR_NO_RANDOMIZE    0x00040000
+#define LX_PER_READ_IMPLIES_EXEC    0x00400000
+#define LX_PER_CLEAR_ON_SETID       0x00740000
 #define LX_PR_GET_KEEPCAPS          7
 #define LX_PR_SET_KEEPCAPS          8
 #define LX_PR_SET_NAME              15
@@ -1415,7 +1586,17 @@ C_ASSERT(sizeof(LX_FLOCK) == 32);
 #define LX_PR_GET_TID_ADDRESS       40
 #define LX_PR_SET_THP_DISABLE       41
 #define LX_PR_GET_THP_DISABLE       42
+#define LX_PR_THP_DISABLE_EXCEPT_ADVISED 0x02
 #define LX_PR_CAP_AMBIENT           47
+#define LX_PR_GET_SPECULATION_CTRL  52
+#define LX_PR_SET_SPECULATION_CTRL  53
+#define LX_PR_SPEC_STORE_BYPASS     0
+#define LX_PR_SPEC_NOT_AFFECTED     0
+#define LX_PR_SPEC_PRCTL            0x01
+#define LX_PR_SPEC_ENABLE           0x02
+#define LX_PR_SPEC_DISABLE          0x04
+#define LX_PR_SPEC_FORCE_DISABLE    0x08
+#define LX_PR_SPEC_DISABLE_NOEXEC   0x10
 
 #define LX_REBOOT_MAGIC1            0xFEE1DEAD
 #define LX_REBOOT_MAGIC2            672274793

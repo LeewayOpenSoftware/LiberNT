@@ -1169,6 +1169,7 @@ typedef struct _PROPLISTITEM
 } PROPLISTITEM, *PPROPLISTITEM;
 
 #define PROPERTY_FLAG_SYSTEM 1
+#define PROPERTY_FLAG_PRIVATE 2
 
 typedef struct _PROPERTY
 {
@@ -1931,17 +1932,21 @@ NtUserCloseWindowStation(
 /* Console commands for NtUserConsoleControl */
 typedef enum _CONSOLECONTROL
 {
-    ConsoleCtrlDesktopConsoleThread = 0,
-    GuiConsoleWndClassAtom = 1,
-    ConsoleMakePalettePublic = 5,
-    ConsoleAcquireDisplayOwnership,
+    Reserved1,
+    ConsoleNotifyConsoleApplication,
+    Reserved2,
+    ConsoleSetCaretInfo,
+    Reserved3,
+    ConsoleSetForeground,
+    ConsoleSetWindowOwner,
+    ConsoleEndTask,
 } CONSOLECONTROL, *PCONSOLECONTROL;
 
-typedef struct _DESKTOP_CONSOLE_THREAD
+typedef struct _CONSOLESETFOREGROUND
 {
-    HDESK DesktopHandle;
-    ULONG_PTR ThreadId;
-} DESKTOP_CONSOLE_THREAD, *PDESKTOP_CONSOLE_THREAD;
+    HANDLE hProcess;
+    BOOL bForeground;
+} CONSOLESETFOREGROUND, *PCONSOLESETFOREGROUND;
 
 NTSTATUS
 APIENTRY

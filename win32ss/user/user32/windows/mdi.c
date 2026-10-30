@@ -735,7 +735,11 @@ static LONG MDI_ChildActivate( HWND client, HWND child )
     clientInfo->hwndActiveChild = child;
     if (child)
     {
+#ifdef __REACTOS__
+        if (IsZoomed(prevActiveWnd) && (GetWindowLongW(child, GWL_STYLE) & WS_MAXIMIZEBOX))
+#else
         if (IsZoomed(prevActiveWnd))
+#endif
             ShowWindow(child, SW_MAXIMIZE);
         SetWindowPos(child, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
@@ -1466,6 +1470,9 @@ LRESULT WINAPI DefFrameProcA( HWND hwnd, HWND hwndMDIClient,
 {
     if (hwndMDIClient)
     {
+        if (!IsWindow(hwndMDIClient))
+            return 0;
+
 	switch (message)
 	{
         case WM_SETTEXT:
@@ -1498,7 +1505,12 @@ LRESULT WINAPI DefFrameProcA( HWND hwnd, HWND hwndMDIClient,
 LRESULT WINAPI DefFrameProcW( HWND hwnd, HWND hwndMDIClient,
                                 UINT message, WPARAM wParam, LPARAM lParam)
 {
-    MDICLIENTINFO *ci = get_client_info( hwndMDIClient );
+    MDICLIENTINFO *ci;
+
+    if (hwndMDIClient && !IsWindow(hwndMDIClient))
+        return 0;
+
+    ci = get_client_info( hwndMDIClient );
 
     TRACE("%p %p %04x (%s) %08lx %08lx\n", hwnd, hwndMDIClient, message, SPY_GetMsgName(message, hwnd), wParam, lParam);
 
@@ -1770,7 +1782,14 @@ LRESULT WINAPI DefMDIChildProcW( HWND hwnd, UINT message,
 
         if (wParam == SIZE_MINIMIZED)
         {
+#ifdef __REACTOS__
+            HWND switchTo = NULL;
+
+            if (GetActiveWindow() == GetParent(client))
+                switchTo = MDI_GetWindow(ci, hwnd, TRUE, WS_MINIMIZE);
+#else
             HWND switchTo = MDI_GetWindow(ci, hwnd, TRUE, WS_MINIMIZE);
+#endif
 
             if (!switchTo) switchTo = hwnd;
             SendMessageW(switchTo, WM_CHILDACTIVATE, 0, 0);

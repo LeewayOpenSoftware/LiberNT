@@ -676,7 +676,10 @@ LRESULT co_UserFreeWindow(PWND Window,
          if ((Child = IntGetWindowObject(*ChildHandle)))
          {
             if (!IntWndBelongsToThread(Child, ThreadData))
+            {
+               IntSetStyle(Child, 0, WS_VISIBLE);
                IntUnlinkWindow(Child);
+            }
             else
                co_UserFreeWindow(Child, ProcessData, ThreadData, SendMessages);
 
@@ -799,7 +802,8 @@ LRESULT co_UserFreeWindow(PWND Window,
         (Menu = UserGetMenuObject((HMENU)Window->IDMenu)))
    {
       TRACE("UFW: IDMenu %p\n",Window->IDMenu);
-      IntDestroyMenuObject(Menu, TRUE);
+      if (Menu->hWnd != UserHMGetHandle(Window) || !IntUnlockWindowMenu(Menu))
+         IntDestroyMenuObject(Menu, TRUE);
       Window->IDMenu = 0;
    }
 
@@ -823,6 +827,8 @@ LRESULT co_UserFreeWindow(PWND Window,
 
    IntUnregisterSessionNotification(Window, TRUE);
    IntUnlinkWindow(Window);
+
+   DefWndDestroySmallIcon2(Window);
 
    if (Window->PropListItems)
    {
@@ -1431,7 +1437,8 @@ co_UserSetParent(HWND hWndChild, HWND hWndNewParent)
       return NULL;
    }
 
-   if (Wnd->state2 & WNDS2_INDESTROY)
+   if ((Wnd->state2 & WNDS2_INDESTROY) ||
+       (Wnd->spwndParent && (Wnd->spwndParent->state & WNDS_DESTROYED)))
    {
       EngSetLastError(ERROR_INVALID_PARAMETER);
       return NULL;
@@ -3168,7 +3175,20 @@ BOOLEAN co_UserDestroyWindow(PVOID Object)
 
    if (IntIsWindow(hWnd) && Window->head.pti == ti && ti->MessageQueue->spwndActive == Window)
    {
-      co_WinPosActivateOtherWindow(Window);
+      if (ti->MessageQueue == IntGetFocusMessageQueue())
+      {
+         co_WinPosActivateOtherWindow(Window);
+      }
+      if (IntIsWindow(hWnd) && ti->MessageQueue->spwndActive == Window &&
+          ti->MessageQueue != IntGetFocusMessageQueue())
+      {
+         ti->MessageQueue->spwndFocus = NULL;
+         ti->MessageQueue->spwndActive = NULL;
+         if (ti->MessageQueue->CaretInfo.hWnd)
+            co_IntDestroyCaret(ti);
+         else
+            IntNotifyWinEvent(EVENT_OBJECT_HIDE, NULL, OBJID_CARET, CHILDID_SELF, 0);
+      }
    }
 
    /* Adjust last active */

@@ -39,6 +39,20 @@ KiTrapReturn:
     bl      KiRestoreTrapFrameIrql
 .Lirql_restored:
 
+    ldr     w16, [x20, #TfSpsr]
+    tst     w16, #0xF
+    b.ne    .Luser_debug_done
+    ldr     x16, [x18, #PcCurrentPrcb]
+    ldr     w16, [x16, #PbNumber]
+    ldr     x17, =KiArm64UserDebugArmed
+    ldrb    w16, [x17, x16]
+    ldrb    w17, [x20, #TfDebugRegistersValid]
+    orr     w16, w16, w17
+    cbz     w16, .Luser_debug_done
+    mov     x0, x20
+    bl      KiArm64LoadUserDebugState
+.Luser_debug_done:
+
     /* Preserve fallback frame pointer/link register */
     ldr     x24, [x20, #TfFp]
     ldr     x25, [x20, #TfLr]
@@ -114,6 +128,25 @@ KiTrapReturn:
     cbnz    w16, .Lspsr_ready
     orr     w27, w27, #0x100       /* Keep SError masked for EL0 returns */
     str     w27, [x20, #TfSpsr]
+    mrs     x16, tpidr_el1
+    ldr     x16, [x16, #PcCurrentPrcb]
+    ldr     w16, [x16, #PbNumber]
+    ldr     x17, =KiArm64UserStepArmed
+    add     x17, x17, x16
+    tbnz    w27, #21, .Lstep_arm
+    ldrb    w16, [x17]
+    cbz     w16, .Lspsr_ready
+    mrs     x16, mdscr_el1
+    bic     x16, x16, #1
+    msr     mdscr_el1, x16
+    strb    wzr, [x17]
+    b       .Lspsr_ready
+.Lstep_arm:
+    mrs     x16, mdscr_el1
+    orr     x16, x16, #1
+    msr     mdscr_el1, x16
+    mov     w16, #1
+    strb    w16, [x17]
 .Lspsr_ready:
     msr     spsr_el1, x27
     msr     elr_el1, x28

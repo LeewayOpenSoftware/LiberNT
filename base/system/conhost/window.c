@@ -860,7 +860,9 @@ static HFONT select_font_config( struct console_config *config, unsigned int cp,
 {
     HFONT font, old_font;
     TEXTMETRICW tm;
+#ifndef __REACTOS__
     CPINFO cpinfo;
+#endif
     HDC dc;
 
     if (!(dc = GetDC( hwnd ))) return NULL;
@@ -880,9 +882,11 @@ static HFONT select_font_config( struct console_config *config, unsigned int cp,
     config->font_weight = tm.tmWeight;
     lstrcpyW( config->face_name, lf->lfFaceName );
 
+#ifndef __REACTOS__
     /* FIXME: use maximum width for DBCS codepages since some chars take two cells */
     if (GetCPInfo( cp, &cpinfo ) && cpinfo.MaxCharSize == 2)
         config->cell_width  = tm.tmMaxCharWidth;
+#endif
 
     return font;
 }
@@ -914,7 +918,9 @@ static BOOL set_console_font( struct console *console, const LOGFONTW *logfont )
     HFONT font, old_font;
     TEXTMETRICW tm;
     WCHAR face_name[LF_FACESIZE];
+#ifndef __REACTOS__
     CPINFO cpinfo;
+#endif
     HDC dc;
 
     TRACE( "%s\n", debugstr_logfont( logfont, 0 ));
@@ -952,9 +958,11 @@ static BOOL set_console_font( struct console *console, const LOGFONTW *logfont )
     font_info->face_name = malloc( font_info->face_len * sizeof(WCHAR) );
     memcpy( font_info->face_name, face_name, font_info->face_len * sizeof(WCHAR) );
 
+#ifndef __REACTOS__
     /* FIXME: use maximum width for DBCS codepages since some chars take two cells */
     if (GetCPInfo( console->output_cp, &cpinfo ) && cpinfo.MaxCharSize == 2)
         font_info->width  = tm.tmMaxCharWidth;
+#endif
 
     if (console->window->font) DeleteObject( console->window->font );
     console->window->font = font;
@@ -2630,6 +2638,50 @@ static LRESULT window_create( HWND hwnd, const CREATESTRUCTW *create )
     return 0;
 }
 
+#ifdef __REACTOS__
+typedef struct
+{
+    HANDLE hProcess;
+    BOOL bForeground;
+} CONSOLESETFOREGROUND;
+
+#define ConsoleSetForeground 5
+
+NTSTATUS WINAPI ConsoleControl( ULONG command, void *info, DWORD length );
+
+static void set_processes_foreground( struct console *console, BOOL foreground )
+{
+    CONSOLESETFOREGROUND info;
+    DWORD *pids, size = 64 * sizeof(DWORD);
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+    ULONG i;
+
+    if (!(pids = malloc( size ))) return;
+    status = NtDeviceIoControlFile( console->server, NULL, NULL, NULL, &io, IOCTL_CONDRV_GET_PROCESS_LIST,
+                                    NULL, 0, pids, size );
+    if (status == STATUS_BUFFER_OVERFLOW)
+    {
+        size = pids[0] * sizeof(DWORD);
+        free( pids );
+        if (!(pids = malloc( size ))) return;
+        status = NtDeviceIoControlFile( console->server, NULL, NULL, NULL, &io, IOCTL_CONDRV_GET_PROCESS_LIST,
+                                        NULL, 0, pids, size );
+    }
+    if (status == STATUS_SUCCESS)
+    {
+        for (i = 0; i < io.Information / sizeof(DWORD); i++)
+        {
+            if (!(info.hProcess = OpenProcess( PROCESS_SET_INFORMATION, FALSE, pids[i] ))) continue;
+            info.bForeground = foreground;
+            ConsoleControl( ConsoleSetForeground, &info, sizeof(info) );
+            CloseHandle( info.hProcess );
+        }
+    }
+    free( pids );
+}
+
+#endif
 static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     struct console *console = (struct console *)GetWindowLongPtrW( hwnd, 0 );
@@ -2950,6 +3002,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         }
 #ifdef __REACTOS__
         if (console->window) vt_focus_event( console, TRUE );
+        set_processes_foreground( console, TRUE );
 #endif
         break;
 
@@ -2958,6 +3011,7 @@ static LRESULT WINAPI window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
             DestroyCaret();
 #ifdef __REACTOS__
         if (console->window) vt_focus_event( console, FALSE );
+        set_processes_foreground( console, FALSE );
 #endif
         break;
 

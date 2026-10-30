@@ -24,9 +24,6 @@
 /* The maximum size of an environment value (in bytes) */
 #define MAX_ENVVAL_SIZE 1024
 
-extern LIST_ENTRY HandleTableListHead;
-extern EX_PUSH_LOCK HandleTableListLock;
-
 FAST_MUTEX ExpEnvironmentLock;
 ERESOURCE ExpFirmwareTableResource;
 LIST_ENTRY ExpFirmwareTableProviderListHead;
@@ -1751,6 +1748,7 @@ QSI_DEF(SystemHandleInformation)
 {
     PSYSTEM_HANDLE_INFORMATION HandleInformation;
     PLIST_ENTRY NextTableEntry;
+    ULONG TableBucket;
     PHANDLE_TABLE HandleTable;
     PHANDLE_TABLE_ENTRY HandleTableEntry;
     EXHANDLE Handle;
@@ -1789,13 +1787,10 @@ QSI_DEF(SystemHandleInformation)
     /* Enter a critical region */
     KeEnterCriticalRegion();
 
-    /* Acquire the handle table lock */
-    ExAcquirePushLockShared(&HandleTableListLock);
-
     /* Enumerate all system handles */
-    for (NextTableEntry = HandleTableListHead.Flink;
-         NextTableEntry != &HandleTableListHead;
-         NextTableEntry = NextTableEntry->Flink)
+    for (NextTableEntry = ExpFirstHandleTableEntry(&TableBucket);
+         NextTableEntry != NULL;
+         NextTableEntry = ExpNextHandleTableEntry(&TableBucket, NextTableEntry))
     {
         /* Get current handle table */
         HandleTable = CONTAINING_RECORD(NextTableEntry, HANDLE_TABLE, HandleTableList);
@@ -1859,9 +1854,6 @@ QSI_DEF(SystemHandleInformation)
             Handle.Value += 1 << HANDLE_TAG_BITS;
         }
     }
-
-    /* Release the lock */
-    ExReleasePushLockShared(&HandleTableListLock);
 
     /* Leave the critical region */
     KeLeaveCriticalRegion();
@@ -3006,12 +2998,12 @@ QSI_DEF(SystemEmulationProcessorInformation)
     if (NT_SUCCESS(Status))
     {
         PSYSTEM_PROCESSOR_INFORMATION Spi = (PSYSTEM_PROCESSOR_INFORMATION)Buffer;
-#if defined(_M_AMD64)
-        Spi->ProcessorArchitecture = PROCESSOR_ARCHITECTURE_INTEL;
-#elif defined(_M_ARM64)
+#if defined(_M_ARM64)
         Spi->ProcessorArchitecture = (PsGetCurrentProcess()->Machine == IMAGE_FILE_MACHINE_I386) ?
                                      PROCESSOR_ARCHITECTURE_INTEL : PROCESSOR_ARCHITECTURE_ARM;
-#endif /* _M_AMD64 | _M_ARM64 */
+#else
+        Spi->ProcessorArchitecture = PROCESSOR_ARCHITECTURE_INTEL;
+#endif
     }
 #endif /* defined(_M_AMD64) || defined(_M_ARM64) */
 
@@ -3023,6 +3015,7 @@ QSI_DEF(SystemExtendedHandleInformation)
 {
     PSYSTEM_HANDLE_INFORMATION_EX HandleInformation;
     PLIST_ENTRY NextTableEntry;
+    ULONG TableBucket;
     PHANDLE_TABLE HandleTable;
     PHANDLE_TABLE_ENTRY HandleTableEntry;
     EXHANDLE Handle;
@@ -3061,13 +3054,10 @@ QSI_DEF(SystemExtendedHandleInformation)
     /* Enter a critical region */
     KeEnterCriticalRegion();
 
-    /* Acquire the handle table lock */
-    ExAcquirePushLockShared(&HandleTableListLock);
-
     /* Enumerate all system handles */
-    for (NextTableEntry = HandleTableListHead.Flink;
-         NextTableEntry != &HandleTableListHead;
-         NextTableEntry = NextTableEntry->Flink)
+    for (NextTableEntry = ExpFirstHandleTableEntry(&TableBucket);
+         NextTableEntry != NULL;
+         NextTableEntry = ExpNextHandleTableEntry(&TableBucket, NextTableEntry))
     {
         /* Get current handle table */
         HandleTable = CONTAINING_RECORD(NextTableEntry, HANDLE_TABLE, HandleTableList);
@@ -3133,9 +3123,6 @@ QSI_DEF(SystemExtendedHandleInformation)
             Handle.Value += 1 << HANDLE_TAG_BITS;
         }
     }
-
-    /* Release the lock */
-    ExReleasePushLockShared(&HandleTableListLock);
 
     /* Leave the critical region */
     KeLeaveCriticalRegion();

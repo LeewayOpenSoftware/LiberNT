@@ -754,7 +754,7 @@ LxExecImage(
     CHAR Shebang[LX_SHEBANG_MAX];
     ULONG64 StackPointer, Entry, Device;
     ULONG Depth, Mode, FileUid, FileGid;
-    BOOLEAN SetUid = FALSE, SetGid = FALSE;
+    BOOLEAN SetUid = FALSE, SetGid = FALSE, Randomize = FALSE;
     PVOID Deny = NULL;
     LX_CRED_SAVE Old;
     LONG Error;
@@ -843,6 +843,7 @@ LxExecImage(
     }
 
     LxExecKillOtherThreads(Thread);
+    LxKeyExec(Thread);
     LxFutexExitRobustList(Thread);
     LxMmReset(Process);
     if (Process->ExeDeny != NULL)
@@ -860,12 +861,16 @@ LxExecImage(
         Process->Uid[1] = FileUid;
     if (SetGid)
         Process->Gid[1] = FileGid;
+    if (SetUid || SetGid)
+        Process->Personality &= ~LX_PER_CLEAR_ON_SETID;
+    Process->Personality = LxArchExecPersonality(Process->Personality);
     LxCredExec(Process, &Old);
     ExReleaseFastMutex(&Process->Lock);
 
-    Error = LxElfMap(Process, &Main, LxArchImageBase(FALSE), &MainInfo);
+    Randomize = LxMmPickLayout(Process);
+    Error = LxElfMap(Process, &Main, LxArchImageBase(FALSE) + (Randomize ? LxMmRandomOffset() : 0), &MainInfo);
     if ((Error == 0) && (Interp.File != NULL))
-        Error = LxElfMap(Process, &Interp, LxArchImageBase(TRUE), &InterpInfo);
+        Error = LxElfMap(Process, &Interp, LxArchImageBase(TRUE) - (Randomize ? LxMmRandomOffset() : 0), &InterpInfo);
     if (Error == 0)
     {
         Process->StartCode = MainInfo.StartCode;
@@ -873,6 +878,8 @@ LxExecImage(
         Process->StartData = MainInfo.StartData;
         Process->EndData = MainInfo.EndData;
         Process->BrkBase = LX_ALIGN_UP(MainInfo.ImageEnd, LX_ALLOC_GRANULARITY);
+        if (Randomize && (LxMmRandomizeVaSpace() > 1))
+            Process->BrkBase = LxMmRandomizeBrk(Process->BrkBase);
         Process->BrkCurrent = Process->BrkBase;
         Process->BrkCommitted = Process->BrkBase;
         Process->BrkLimit = Process->BrkBase;
@@ -898,6 +905,7 @@ LxExecImage(
         LxProcessSetCommand(Process, Request->Args, Request->ArgLength, Request->Env, Request->EnvLength, ExecPath, Request->FileName);
         LxPosixTimersRelease(Process, TRUE);
         Process->Execed = TRUE;
+        LxSpecExec(Thread);
         RtlZeroMemory(&Thread->AltStack, sizeof(Thread->AltStack));
         Thread->AltStack.Flags = LX_SS_DISABLE;
         RtlCopyMemory(Thread->Comm, Process->Comm, sizeof(Thread->Comm));

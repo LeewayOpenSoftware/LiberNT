@@ -33,6 +33,14 @@
 
 #define NUMBER_POOL_LOOKASIDE_LISTS 32
 
+/* Selectors seeded into a WoW64 guest context: the AMD64 WoW64 layout that the x86 CPU backend requires. */
+#define RPL_MASK              0x0003
+#define KGDT64_R3_CMCODE      0x0020
+#define KGDT64_R3_DATA        0x0028
+#define KGDT64_R3_CMTEB       0x0050
+
+#define EFLAGS_INTERRUPT_MASK 0x200L
+
 #define PRCB_BUILD_DEBUG        1
 #define PRCB_BUILD_UNIPROCESSOR 2
 
@@ -185,9 +193,12 @@ struct _KPRCB
     ULONG Number;
     ULONG MHz;
     KPROCESSOR_STATE ProcessorState;
-    KAFFINITY SetMember;
+    union
+    {
+        KAFFINITY GroupSetMember;
+        KAFFINITY SetMember;
+    };
     KSPIN_LOCK PrcbLock;
-    BOOLEAN DpcThreadActive;
     BOOLEAN DpcRoutineActive;
     ULONG ReadySummary;
     ULONG QueueIndex;
@@ -196,6 +207,7 @@ struct _KPRCB
     LIST_ENTRY WaitListHead;
     KSPIN_LOCK WaitLock;
     KSPIN_LOCK_QUEUE LockQueue[LockQueueMaximumLock];
+    KSPIN_LOCK_QUEUE TimerTableLockQueue[LOCK_QUEUE_TIMER_TABLE_LOCKS];
     PP_LOOKASIDE_LIST PPLookasideList[16];
     GENERAL_LOOKASIDE_POOL PPNPagedLookasideList[NUMBER_POOL_LOOKASIDE_LISTS];
     GENERAL_LOOKASIDE_POOL PPPagedLookasideList[NUMBER_POOL_LOOKASIDE_LISTS];
@@ -207,8 +219,31 @@ struct _KPRCB
     LONG MaximumDpcQueueDepth;
     ULONG DpcRequestRate;
     ULONG MinimumDpcRate;
-    UCHAR DpcInterruptRequested;
-    UCHAR DpcThreadRequested;
+    union
+    {
+        volatile LONG DpcRequestSummary;
+        SHORT DpcRequestSlot[2];
+        struct
+        {
+            SHORT NormalDpcState;
+            SHORT ThreadDpcState;
+        };
+        struct
+        {
+            ULONG DpcNormalProcessingActive:1;
+            ULONG DpcNormalProcessingRequested:1;
+            ULONG DpcNormalThreadSignal:1;
+            ULONG DpcNormalTimerExpiration:1;
+            ULONG DpcNormalDpcPresent:1;
+            ULONG DpcNormalLocalInterrupt:1;
+            ULONG DpcNormalPriorityAntiStarvation:1;
+            ULONG DpcNormalSwapToDpcDelegate:1;
+            ULONG DpcNormalSpare:8;
+            ULONG DpcThreadActive:1;
+            ULONG DpcThreadRequested:1;
+            ULONG DpcThreadSpare:14;
+        };
+    };
     UCHAR ThreadDpcEnable;
     UCHAR QuantumEnd;
     UCHAR IdleSchedule;
@@ -234,6 +269,26 @@ struct _KPRCB
     struct _KNODE *ParentNode;
     KAFFINITY MultiThreadProcessorSet;
     PKPRCB MultiThreadSetMaster;
+    UCHAR Group;
+    UCHAR GroupIndex;
+    ULONG CoresPerPhysicalProcessor;
+    ULONG LogicalProcessorsPerCore;
+    PVOID SchedulerSubNode;
+    union
+    {
+        ULONG TopologyId[5];
+        struct
+        {
+            ULONG ProcessorId;
+            ULONG CoreId;
+            ULONG ModuleId;
+            ULONG DieId;
+            ULONG PackageId;
+        };
+    };
+    KAFFINITY CoreProcessorSet;
+    KAFFINITY ScanSiblingMask;
+    KAFFINITY LLCMask;
 
     /* Counters consumed by the common scheduler, I/O manager and system queries. */
     ULONG KeSystemCalls;
@@ -245,6 +300,8 @@ struct _KPRCB
     ULONG DpcTime;
     ULONG InterruptTime;
     ULONG InterruptCount;
+    ULONG ClockInterrupts;
+    ULONG DeviceInterrupts;
     volatile LONG MmPageFaultCount;
     volatile LONG MmCopyOnWriteCount;
     volatile LONG MmDemandZeroCount;

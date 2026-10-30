@@ -7,6 +7,7 @@ list(APPEND SOURCE
     AddFontResourceEx.c
     AlphaBlend.c
     BeginPath.c
+    CjkFaceNames.c
     CombineRgn.c
     CombineTransform.c
     CreateBitmap.c
@@ -25,9 +26,11 @@ list(APPEND SOURCE
     EngCreateSemaphore.c
     EngReleaseSemaphore.c
     EnumFontFamilies.c
+    FontFolder.c
     ExcludeClipRect.c
     ExtCreatePen.c
     ExtCreateRegion.c
+    ExtTextOut.c
     FrameRgn.c
     GdiConvertBitmap.c
     GdiConvertBrush.c

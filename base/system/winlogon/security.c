@@ -23,8 +23,6 @@
 #define DESKTOP_INTERACTIVE_LIMITED (STANDARD_RIGHTS_READ | DESKTOP_ENUMERATE | \
     DESKTOP_READOBJECTS | DESKTOP_CREATEWINDOW)
 
-#define DESKTOP_WINLOGON_ADMINS_LIMITED (STANDARD_RIGHTS_REQUIRED | DESKTOP_ENUMERATE)
-
 #define WINSTA_ALL (WINSTA_ENUMDESKTOPS | WINSTA_READATTRIBUTES | \
     WINSTA_ACCESSCLIPBOARD | WINSTA_CREATEDESKTOP | \
     WINSTA_WRITEATTRIBUTES | WINSTA_ACCESSGLOBALATOMS | \
@@ -97,6 +95,56 @@ ConvertToSelfRelative(
     return RelativeSd;
 }
 
+static
+BOOL
+SetLowIntegrityLabel(
+    _Inout_ PSECURITY_DESCRIPTOR AbsoluteSd,
+    _Out_ PACL *Sacl)
+{
+    SID_IDENTIFIER_AUTHORITY MandatoryLabelAuthority = {SECURITY_MANDATORY_LABEL_AUTHORITY};
+    PSID LowLabelSid = NULL;
+    DWORD SaclSize;
+    BOOL Success = FALSE;
+
+    *Sacl = NULL;
+    if (!AllocateAndInitializeSid(&MandatoryLabelAuthority,
+                                  1,
+                                  SECURITY_MANDATORY_LOW_RID,
+                                  0, 0, 0, 0, 0, 0, 0,
+                                  &LowLabelSid))
+    {
+        ERR("SetLowIntegrityLabel(): Failed to create the low label SID (error code %lu)\n", GetLastError());
+        return FALSE;
+    }
+
+    SaclSize = sizeof(ACL) + sizeof(SYSTEM_MANDATORY_LABEL_ACE) - sizeof(DWORD) + GetLengthSid(LowLabelSid);
+    *Sacl = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, SaclSize);
+    if (*Sacl == NULL)
+    {
+        ERR("SetLowIntegrityLabel(): Failed to allocate memory buffer for SACL!\n");
+        goto Quit;
+    }
+
+    if (!InitializeAcl(*Sacl, SaclSize, ACL_REVISION) ||
+        !AddMandatoryAce(*Sacl, ACL_REVISION, 0, SYSTEM_MANDATORY_LABEL_NO_WRITE_UP, LowLabelSid))
+    {
+        ERR("SetLowIntegrityLabel(): Failed to set up the low label (error code %lu)\n", GetLastError());
+        goto Quit;
+    }
+
+    if (!SetSecurityDescriptorSacl(AbsoluteSd, TRUE, *Sacl, FALSE))
+    {
+        ERR("SetLowIntegrityLabel(): Failed to set up SACL to absolute security descriptor (error code %lu)\n", GetLastError());
+        goto Quit;
+    }
+
+    Success = TRUE;
+
+Quit:
+    FreeSid(LowLabelSid);
+    return Success;
+}
+
 /**
  * @brief
  * Creates a security descriptor for the default
@@ -118,9 +166,7 @@ CreateWinstaSecurity(
     SECURITY_DESCRIPTOR AbsoluteSd;
     PSECURITY_DESCRIPTOR RelativeSd = NULL;
     PSID WinlogonSid = NULL, AdminsSid = NULL, NetworkServiceSid = NULL; /* NetworkServiceSid is a HACK, see the comment below for information */
-    PSID LowLabelSid = NULL;
-    SID_IDENTIFIER_AUTHORITY MandatoryLabelAuthority = {SECURITY_MANDATORY_LABEL_AUTHORITY};
-    DWORD DaclSize, SaclSize;
+    DWORD DaclSize;
     PACL Dacl = NULL, Sacl = NULL;
 
     /* Create the Winlogon SID */
@@ -300,36 +346,8 @@ CreateWinstaSecurity(
         goto Quit;
     }
 
-    if (!AllocateAndInitializeSid(&MandatoryLabelAuthority,
-                                  1,
-                                  SECURITY_MANDATORY_LOW_RID,
-                                  0, 0, 0, 0, 0, 0, 0,
-                                  &LowLabelSid))
-    {
-        ERR("CreateWinstaSecurity(): Failed to create the low label SID (error code %lu)\n", GetLastError());
+    if (!SetLowIntegrityLabel(&AbsoluteSd, &Sacl))
         goto Quit;
-    }
-
-    SaclSize = sizeof(ACL) + sizeof(SYSTEM_MANDATORY_LABEL_ACE) - sizeof(DWORD) + GetLengthSid(LowLabelSid);
-    Sacl = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, SaclSize);
-    if (Sacl == NULL)
-    {
-        ERR("CreateWinstaSecurity(): Failed to allocate memory buffer for SACL!\n");
-        goto Quit;
-    }
-
-    if (!InitializeAcl(Sacl, SaclSize, ACL_REVISION) ||
-        !AddMandatoryAce(Sacl, ACL_REVISION, 0, SYSTEM_MANDATORY_LABEL_NO_WRITE_UP, LowLabelSid))
-    {
-        ERR("CreateWinstaSecurity(): Failed to set up the low label (error code %lu)\n", GetLastError());
-        goto Quit;
-    }
-
-    if (!SetSecurityDescriptorSacl(&AbsoluteSd, TRUE, Sacl, FALSE))
-    {
-        ERR("CreateWinstaSecurity(): Failed to set up SACL to absolute security descriptor (error code %lu)\n", GetLastError());
-        goto Quit;
-    }
 
     /* Convert it to self-relative format */
     RelativeSd = ConvertToSelfRelative(&AbsoluteSd);
@@ -360,11 +378,6 @@ Quit:
         FreeSid(NetworkServiceSid);
     }
     /* END HACK */
-
-    if (LowLabelSid != NULL)
-    {
-        FreeSid(LowLabelSid);
-    }
 
     if (Sacl != NULL)
     {
@@ -409,7 +422,7 @@ CreateApplicationDesktopSecurity(
     PSECURITY_DESCRIPTOR RelativeSd = NULL;
     PSID WinlogonSid = NULL, AdminsSid = NULL, NetworkServiceSid = NULL; /* NetworkServiceSid is a HACK, see the comment in CreateWinstaSecurity for information */
     DWORD DaclSize;
-    PACL Dacl = NULL;
+    PACL Dacl = NULL, Sacl = NULL;
 
     /* Create the Winlogon SID */
     if (!AllocateAndInitializeSid(&NtAuthority,
@@ -520,6 +533,9 @@ CreateApplicationDesktopSecurity(
         goto Quit;
     }
 
+    if (!SetLowIntegrityLabel(&AbsoluteSd, &Sacl))
+        goto Quit;
+
     /* Conver it to self-relative format */
     RelativeSd = ConvertToSelfRelative(&AbsoluteSd);
     if (RelativeSd == NULL)
@@ -550,6 +566,11 @@ Quit:
     }
     /* END HACK */
 
+    if (Sacl != NULL)
+    {
+        RtlFreeHeap(RtlGetProcessHeap(), 0, Sacl);
+    }
+
     if (Dacl != NULL)
     {
         RtlFreeHeap(RtlGetProcessHeap(), 0, Dacl);
@@ -571,8 +592,7 @@ Quit:
  * Creates a security descriptor for the default
  * Winlogon desktop. This descriptor serves as a
  * security measure for the winlogon desktop so
- * that only Winlogon itself (and admins) can
- * interact with it.
+ * that only Winlogon itself can interact with it.
  *
  * @param[out] WinlogonDesktopSd
  * A pointer to a created security descriptor for
@@ -589,7 +609,7 @@ CreateWinlogonDesktopSecurity(
     BOOL Success = FALSE;
     SECURITY_DESCRIPTOR AbsoluteSd;
     PSECURITY_DESCRIPTOR RelativeSd = NULL;
-    PSID WinlogonSid = NULL, AdminsSid = NULL;
+    PSID WinlogonSid = NULL;
     DWORD DaclSize;
     PACL Dacl = NULL;
 
@@ -604,27 +624,9 @@ CreateWinlogonDesktopSecurity(
         return FALSE;
     }
 
-    /* Create the admins SID */
-    if (!AllocateAndInitializeSid(&NtAuthority,
-                                  2,
-                                  SECURITY_BUILTIN_DOMAIN_RID,
-                                  DOMAIN_ALIAS_RID_ADMINS,
-                                  0, 0, 0, 0, 0, 0,
-                                  &AdminsSid))
-    {
-        ERR("CreateWinlogonDesktopSecurity(): Failed to create the admins SID (error code %lu)\n", GetLastError());
-        goto Quit;
-    }
-
-    /*
-     * Build up the DACL size. This includes a number
-     * of two ACEs of two different SIDs. The first ACE
-     * gives full access to Winlogon, the last one gives
-     * limited desktop access to admins.
-     */
+    /* Build up the DACL size. Its only ACE gives full access to Winlogon. */
     DaclSize = sizeof(ACL) +
-               sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + GetLengthSid(WinlogonSid) +
-               sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + GetLengthSid(AdminsSid);
+               sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + GetLengthSid(WinlogonSid);
 
     /* Allocate the DACL now */
     Dacl = RtlAllocateHeap(RtlGetProcessHeap(),
@@ -654,17 +656,6 @@ CreateWinlogonDesktopSecurity(
         goto Quit;
     }
 
-    /* Second ACE -- Give limited desktop access to admins */
-    if (!AddAccessAllowedAceEx(Dacl,
-                               ACL_REVISION,
-                               0,
-                               DESKTOP_WINLOGON_ADMINS_LIMITED,
-                               AdminsSid))
-    {
-        ERR("CreateWinlogonDesktopSecurity(): Failed to set ACE for admins (error code %lu)\n", GetLastError());
-        goto Quit;
-    }
-
     /* Initialize the security descriptor */
     if (!InitializeSecurityDescriptor(&AbsoluteSd, SECURITY_DESCRIPTOR_REVISION))
     {
@@ -676,6 +667,12 @@ CreateWinlogonDesktopSecurity(
     if (!SetSecurityDescriptorDacl(&AbsoluteSd, TRUE, Dacl, FALSE))
     {
         ERR("CreateWinlogonDesktopSecurity(): Failed to set up DACL to absolute security descriptor (error code %lu)\n", GetLastError());
+        goto Quit;
+    }
+
+    if (!SetSecurityDescriptorOwner(&AbsoluteSd, WinlogonSid, FALSE))
+    {
+        ERR("CreateWinlogonDesktopSecurity(): Failed to set the owner of the security descriptor (error code %lu)\n", GetLastError());
         goto Quit;
     }
 
@@ -695,11 +692,6 @@ Quit:
     if (WinlogonSid != NULL)
     {
         FreeSid(WinlogonSid);
-    }
-
-    if (AdminsSid != NULL)
-    {
-        FreeSid(AdminsSid);
     }
 
     if (Dacl != NULL)

@@ -4,6 +4,9 @@ extern ATOM AtomMessage;
 extern ATOM AtomWndObj; /* WNDOBJ list */
 extern ATOM AtomLayer;
 extern ATOM AtomFlashWndState;
+extern ATOM AtomIconSmall2;
+
+VOID FASTCALL DefWndDestroySmallIcon2(PWND pWnd);
 
 #define HAS_DLGFRAME(Style, ExStyle) \
             (((ExStyle) & WS_EX_DLGMODALFRAME) || \
@@ -113,8 +116,9 @@ HWND FASTCALL IntFindWindow(PWND Parent, PWND ChildAfter, RTL_ATOM ClassAtom,
 // The IME window's class name is "IME".
 // The IME UI window behaves the User Interface of IME for the user.
 #define IS_WND_IMELIKE(pWnd) \
-    (((pWnd)->pcls->style & CS_IME) || \
-     ((pWnd)->pcls->atomClassName == gpsi->atomSysClass[ICLS_IME]))
+    ((pWnd)->pcls && \
+     (((pWnd)->pcls->style & CS_IME) || \
+      ((pWnd)->pcls->atomClassName == gpsi->atomSysClass[ICLS_IME])))
 
 extern BOOL gfIMEShowStatus;
 

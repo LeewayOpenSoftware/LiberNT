@@ -154,6 +154,7 @@ LX_SYSCALL(LxSysTimerDelete);
 LX_SYSCALL(LxSysGetitimer);
 
 LX_SYSCALL(LxSysExit);
+LX_SYSCALL(LxSysPtrace);
 LX_SYSCALL(LxSysExitGroup);
 LX_SYSCALL(LxSysWait4);
 LX_SYSCALL(LxSysWaitid);
@@ -260,4 +261,6 @@ LX_SYSCALL(LxSysSchedGetattr);
 LX_SYSCALL(LxSysSetpriority);
 LX_SYSCALL(LxSysSchedGetPriorityMax);
 LX_SYSCALL(LxSysIoprioGet);
+LX_SYSCALL(LxSysAddKey);
+LX_SYSCALL(LxSysRequestKey);
 LX_SYSCALL(LxSysKeyctl);
