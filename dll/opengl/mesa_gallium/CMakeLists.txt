@@ -52,6 +52,14 @@ elseif(ARCH STREQUAL "riscv64")
     set(_mesa_processor riscv64)
     set(_mesa_triple riscv64-w64-mingw32)
     set(_mesa_arch_flags -march=${OARCH} -mabi=lp64 -mcmodel=medany -mno-relax)
+    if(RV64X_COMPILER_LAUNCHER)
+        list(APPEND _mesa_arch_flags -mllvm -riscv-rv64x)
+        set(_mesa_compiler_launcher
+            -DCMAKE_C_COMPILER_LAUNCHER:FILEPATH=${RV64X_COMPILER_LAUNCHER}
+            -DCMAKE_CXX_COMPILER_LAUNCHER:FILEPATH=${RV64X_COMPILER_LAUNCHER})
+    else()
+        set(_mesa_compiler_launcher -DCMAKE_C_COMPILER_LAUNCHER:FILEPATH= -DCMAKE_CXX_COMPILER_LAUNCHER:FILEPATH=)
+    endif()
     set(_mesa_features -DMESA_IMAGINATION:BOOL=ON -DMESA_ZINK:BOOL=ON)
     set(_mesa_support_targets pvrkmt)
     set(_mesa_d3d_umd_name d3d10zink)
@@ -164,6 +172,7 @@ ExternalProject_Add(mesa_gallium_build
         -DMESA_ARCH:STRING=${_mesa_arch}
         -DMESA_WGL_DLL_NAME:STRING=mesa_gallium
         -DMESA_ASSERTIONS:BOOL=${_mesa_assertions}
+        ${_mesa_compiler_launcher}
         ${_mesa_features}
     BUILD_COMMAND ${MESA_NINJA} -C <BINARY_DIR> -t recompact
         COMMAND ${CMAKE_COMMAND} -E env CCACHE_DISABLE=1 SCCACHE_DISABLE=1

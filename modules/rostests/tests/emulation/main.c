@@ -585,6 +585,95 @@ TestIndirectCalls(VOID)
     CHECK(DoubleTarget(0.5f, -3.0, 9) == 7.5);
 }
 
+#if defined(_M_AMD64) || defined(__x86_64__)
+#include <reactos/emuhost.h>
+#include "rv64xtest.h"
+
+#define RV64X_STRING2(Value) #Value
+#define RV64X_STRING(Value) RV64X_STRING2(Value)
+
+__attribute__((naked))
+static
+ULONG64
+Rv64xLoadHost(
+    _In_ PCWSTR Name)
+{
+    __asm__ __volatile__("movq %rcx, %r10\n\t"
+                         "movl $" RV64X_STRING(EMU_HOST_SERVICE_LOAD) ", %eax\n\t"
+                         "syscall\n\t"
+                         "ret");
+}
+
+static
+int
+Rv64xIntCallback(
+    _In_ int A,
+    _In_ short B,
+    _In_ unsigned char C,
+    _In_ float D,
+    _In_ double E,
+    _In_ int F,
+    _In_ float G,
+    _In_ long long H,
+    _In_ int I,
+    _In_ double J)
+{
+    CHECK(A == -7 && B == -2 && C == 250 && D == 1.5f && E == -2.25 && F == 100000 && G == 0.5f &&
+          H == -5000000000LL && I == 3 && J == 9.0);
+    return -5;
+}
+
+static
+float
+Rv64xFloatCallback(
+    _In_ float A,
+    _In_ double B)
+{
+    CHECK(A == 1.25f && B == 2.5);
+    return A + (float)B;
+}
+
+static
+VOID
+TestRv64X(VOID)
+{
+    WCHAR Directory[MAX_PATH];
+    PRV64X_TEST_TABLE Table;
+    char Buffer[64] = { 0 };
+    UINT Length;
+
+    Length = GetWindowsDirectoryW(Directory, MAX_PATH - 16);
+    if (!Length || Length >= MAX_PATH - 16) return;
+    wcscat(Directory, L"\\SystemAMD64");
+    if (GetFileAttributesW(Directory) == INVALID_FILE_ATTRIBUTES) return;
+
+    Table = (PRV64X_TEST_TABLE)(ULONG_PTR)Rv64xLoadHost(RV64X_TEST_LIBRARY);
+    if (!Table)
+    {
+        printf("EMUTEST: no RV64X host library\n");
+        return;
+    }
+    CHECK(Table->Size >= sizeof(*Table));
+    CHECK(((int (*)(int, short, unsigned char, long long))(ULONG_PTR)Table->Add)(-5, -300, 200, 10000000000LL) ==
+          (int)(-5 - 300 + 200 + 10000000000LL));
+    CHECK(((double (*)(float, double, int, float, double, int, float, double, signed char, unsigned short))
+           (ULONG_PTR)Table->Mix)(1.5f, 2.25, -3, 4.5f, -5.25, 6, 7.5f, 8.25, -9, 65000) ==
+          1.5f + 2.25 * 2 + -3 * 4 + 4.5f * 8 + -5.25 * 16 + 6 * 32 + 7.5f * 64 + 8.25 * 128 + -9 * 256 + 65000 * 512.0);
+    CHECK(((int (*)(PRV64X_INT_CALLBACK))(ULONG_PTR)Table->CallInt)(Rv64xIntCallback) == -15);
+    CHECK(((float (*)(PRV64X_FLOAT_CALLBACK))(ULONG_PTR)Table->CallFloat)(Rv64xFloatCallback) == 7.5f);
+    CHECK(((int (*)(PRV64X_FORMAT_CALLBACK, char *, size_t))(ULONG_PTR)Table->CallFormat)(
+              (PRV64X_FORMAT_CALLBACK)_snprintf, Buffer, sizeof(Buffer)) == 13);
+    CHECK(!strcmp(Buffer, "42 3.25 x 0.5"));
+    printf("EMUTEST: RV64X entry descriptors and exit thunks verified\n");
+}
+#else
+static
+VOID
+TestRv64X(VOID)
+{
+}
+#endif
+
 int
 main(
     int ArgumentCount,
@@ -612,6 +701,7 @@ main(
     TestFloatingStateAcrossFault();
     EmuTestCxxExceptions();
     TestIndirectCalls();
+    TestRv64X();
 
     printf("EMUTEST: END checks=%ld failures=%ld\n", EmuTestChecks, EmuTestFailures);
     DbgPrint("EMUTEST: END checks=%ld failures=%ld\n", EmuTestChecks, EmuTestFailures);
