@@ -18,6 +18,7 @@ list(APPEND SOURCE
     CreateIconFromResourceEx.c
     CreateWindowEx.c
     DeferWindowPos.c
+    DefFrameProc.c
     DeskWallpaper.c
     DestroyCursorIcon.c
     DestroyWindow.c
