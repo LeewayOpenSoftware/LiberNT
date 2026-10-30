@@ -15,6 +15,14 @@ public interface ICcwItem
     int Value();
 }
 
+[StructLayout(LayoutKind.Sequential)]
+public struct CcwRecord
+{
+    [MarshalAs(UnmanagedType.BStr)]
+    public string Name;
+    public int Value;
+}
+
 [ComVisible(true), Guid("7E4A9D21-3B6F-4F0A-8C5E-1A2B3C4D5E6F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 public interface ICcwItems
 {
@@ -23,6 +31,12 @@ public interface ICcwItems
 
     [PreserveSig]
     int Sum(uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)] ICcwItem[] items);
+
+    [PreserveSig]
+    int GetRecords(uint count, [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)] CcwRecord[] records);
+
+    [PreserveSig]
+    int SumRecords(uint count, [In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)] CcwRecord[] records);
 }
 
 [ComVisible(true), ClassInterface(ClassInterfaceType.None)]
@@ -46,6 +60,22 @@ public class CcwItems : ICcwItems
         return 0;
     }
 
+    public int GetRecords(uint count, CcwRecord[] records)
+    {
+        for (int i = 0; i < records.Length; i++)
+            records[i] = new CcwRecord { Name = "record" + i, Value = 10 + i };
+        return records.Length;
+    }
+
+    public int SumRecords(uint count, CcwRecord[] records)
+    {
+        int sum = 0;
+
+        foreach (CcwRecord record in records)
+            sum += record.Value + (record.Name == null ? 0 : record.Name.Length * 100);
+        return sum;
+    }
+
     public int Sum(uint count, ICcwItem[] items)
     {
         int sum = 0;
@@ -66,6 +96,9 @@ public static class Program
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     delegate int SumFn(IntPtr self, uint count, IntPtr items);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    delegate int RecordsFn(IntPtr self, uint count, IntPtr records);
 
     static int failures;
 
@@ -112,6 +145,34 @@ public static class Program
         Check(sum == 5, "Sum of the elements passed in " + sum);
         Check(Marshal.ReadIntPtr(buffer, 0) == element, "Sum leaves the caller's array unchanged");
         Marshal.Release(element);
+
+        int recordSize = IntPtr.Size * 2;
+        IntPtr records = Marshal.AllocCoTaskMem(2 * recordSize);
+        for (int i = 0; i < 2 * recordSize; i++)
+            Marshal.WriteByte(records, i, 0);
+        int count = Slot<RecordsFn>(itf, 5)(itf, 2, records);
+        Check(count == 2, "GetRecords result " + count);
+        for (int i = 0; i < 2; i++)
+        {
+            IntPtr name = Marshal.ReadIntPtr(records, i * recordSize);
+            int value = Marshal.ReadInt32(records, i * recordSize + IntPtr.Size);
+            string text = name == IntPtr.Zero ? null : Marshal.PtrToStringBSTR(name);
+            Check(text == "record" + i, "GetRecords element " + i + " name " + (text ?? "(null)"));
+            Check(value == 10 + i, "GetRecords element " + i + " value " + value);
+            if (name != IntPtr.Zero)
+                Marshal.FreeBSTR(name);
+        }
+
+        IntPtr abc = Marshal.StringToBSTR("abc");
+        Marshal.WriteIntPtr(records, 0, abc);
+        Marshal.WriteInt32(records, IntPtr.Size, 5);
+        Marshal.WriteIntPtr(records, recordSize, IntPtr.Zero);
+        Marshal.WriteInt32(records, recordSize + IntPtr.Size, 7);
+        int total = Slot<RecordsFn>(itf, 6)(itf, 2, records);
+        Check(total == 312, "SumRecords of the records passed in " + total);
+        Check(Marshal.ReadIntPtr(records, 0) == abc, "SumRecords leaves the caller's records unchanged");
+        Marshal.FreeBSTR(abc);
+        Marshal.FreeCoTaskMem(records);
 
         Marshal.FreeCoTaskMem(buffer);
         Marshal.Release(itf);
