@@ -16,7 +16,7 @@ const nothrow_t nothrow{};
 }
 
 extern "C"
-void
+int
 __cdecl
 _purecall(
     void);

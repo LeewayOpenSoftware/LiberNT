@@ -42,6 +42,10 @@ LiberNT changes:
   netcx/adapter/nxoffload.cpp: configuration pointer initialised before its conditional creation
   netcx/adapter/nxqueueverifier.cpp: fragment fields poisoned to all ones by decrement
   netcx/adapter/nxextension.cpp: #pragma once removed from the source file
+  netcx/translator/queuecontrol.cpp: unused created state no longer read
+  netcx/translator/nxdma.cpp: DMA context passed straight to KeFlushIoBuffers, which expands to nothing on x86 and x64
+  netcx/translator/metadata/metadatatranslator.cpp: RSC timestamp delta widened through ULONG_PTR before it becomes NBL info
+  netcx/adapter/nxadapter.cpp: device bus address read inside the TraceLoggingWrite arguments
 LiberNT files:
   inc/, lib/: private headers and libraries the public sources do not include; layouts and
     values follow the NetAdapterCx and ndis 10.0.22621 x64 public symbols, so their size checks apply to 64-bit targets

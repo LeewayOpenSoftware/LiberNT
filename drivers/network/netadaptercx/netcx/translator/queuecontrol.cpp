@@ -501,7 +501,6 @@ QueueControl::SynchronizeDatapathState(
     case DatapathState::Stopping:
         for (auto & queue : m_txQueues)
         {
-            auto const created = queue->IsCreated();
             auto const started = queue->IsStarted();
             auto const stopping = queue->IsStopping();
 

@@ -372,9 +372,8 @@ NxDmaAdapter::FlushIoBuffers(
 
     for (auto& packet : PacketRange)
     {
-        auto& dmaContext = GetDmaContextForPacket(packet);
         KeFlushIoBuffers(
-            dmaContext.MdlChain,
+            GetDmaContextForPacket(packet).MdlChain,
             FALSE,
             TRUE);
     }

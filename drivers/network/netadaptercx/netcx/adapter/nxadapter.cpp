@@ -2850,14 +2850,12 @@ NxAdapter::EvtLogTransition(
     }
     else
     {
-        NxDevice* nxDevice = GetNxDeviceFromHandle(m_device);
-
         TraceLoggingWrite(
             g_hNetAdapterCxEtwProvider,
             "NxAdapterStateTransition",
             TraceLoggingDescription("NxAdapterStateTransition"),
             TraceLoggingKeyword(NET_ADAPTER_CX_NXADAPTER_STATE_TRANSITION),
-            TraceLoggingUInt32(nxDevice->GetDeviceBusAddress(), "DeviceBusAddress"),
+            TraceLoggingUInt32(GetNxDeviceFromHandle(m_device)->GetDeviceBusAddress(), "DeviceBusAddress"),
             TraceLoggingHexUInt64(GetNetLuid().Value, "AdapterNetLuid"),
             TraceLoggingHexInt32(static_cast<INT32>(SourceState), "AdapterStateTransitionFrom"),
             TraceLoggingHexInt32(static_cast<INT32>(ProcessedEvent), "AdapterStateTransitionEvent"),

@@ -149,7 +149,7 @@ RxMetadataTranslator::TranslatePacketRscTimestamp(
     }
 
     auto const rsc = NetExtensionGetPacketRscTimestamp(&m_extensions.Extension.RscTimestamp, PacketIndex);
-    void * info = reinterpret_cast<void *>(rsc->TCP.RscTcpTimestampDelta);
+    void * info = reinterpret_cast<void *>(static_cast<ULONG_PTR>(rsc->TCP.RscTcpTimestampDelta));
 
     NetBufferList.NetBufferListInfo[RscTcpTimestampDelta] = info;
 }
@@ -771,7 +771,7 @@ RxMetadataTranslator::TranslatePacketRscTimestamp(
         return;
     }
 
-    void * info = reinterpret_cast<void *>(Rsc->TCP.RscTcpTimestampDelta);
+    void * info = reinterpret_cast<void *>(static_cast<ULONG_PTR>(Rsc->TCP.RscTcpTimestampDelta));
 
     NetBufferList.NetBufferListInfo[RscTcpTimestampDelta] = info;
 }
