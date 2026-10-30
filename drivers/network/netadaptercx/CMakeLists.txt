@@ -72,8 +72,13 @@ target_compile_definitions(netadaptercx PRIVATE
 
 target_compile_options(netadaptercx PRIVATE
     -U_WIN32_WINNT -D_WIN32_WINNT=0xA00
-    -UNTDDI_VERSION -DNTDDI_VERSION=0x0A000011
-    -include ${CMAKE_CURRENT_SOURCE_DIR}/inc/netcx_prelude.h)
+    -UNTDDI_VERSION -DNTDDI_VERSION=0x0A000011)
+
+if(MSVC)
+    target_compile_options(netadaptercx PRIVATE /FI${CMAKE_CURRENT_SOURCE_DIR}/inc/netcx_prelude.h)
+else()
+    target_compile_options(netadaptercx PRIVATE -include ${CMAKE_CURRENT_SOURCE_DIR}/inc/netcx_prelude.h)
+endif()
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
     target_compile_options(netadaptercx PRIVATE
