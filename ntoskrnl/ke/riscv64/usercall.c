@@ -322,7 +322,6 @@ KeUserModeCallback(
     CallbackFrame.Context.Pc = (ULONG_PTR)KeUserCallbackDispatcher;
     CallbackFrame.Context.Sp = UserStack;
     CallbackFrame.Context.Ra = 0;
-    CallbackFrame.Context.Tp = (ULONG_PTR)Thread->Teb;
     CallbackFrame.Context.A0 = RoutineIndex;
     CallbackFrame.Context.A1 = UserArguments;
     CallbackFrame.Context.A2 = ArgumentLength;
