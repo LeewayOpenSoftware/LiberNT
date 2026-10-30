@@ -21,6 +21,7 @@ list(APPEND SOURCE
     DefFrameProc.c
     DeskWallpaper.c
     DestroyCursorIcon.c
+    DestroyActiveWindow.c
     DestroyWindow.c
     DialogDpiChangeBehavior.c
     DM_REPOSITION.c
@@ -31,6 +32,7 @@ list(APPEND SOURCE
     EmptyClipboard.c
     EnableScrollBar.c
     EnumDisplaySettings.c
+    ForegroundRetake.c
     ForegroundRight.c
     ForegroundStartup.c
     GetClassInfo.c

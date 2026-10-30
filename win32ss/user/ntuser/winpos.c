@@ -272,6 +272,18 @@ SelectWindowRgn(PWND Window, HRGN hRgnClip)
     }
 }
 
+static BOOL FASTCALL
+co_WinPosSetOtherForegroundWindow(PWND Wnd)
+{
+    PTHREADINFO pti = gptiCurrent;
+    ULONG AllowForeground = pti->TIF_flags & TIF_ALLOWFOREGROUNDACTIVATE;
+    BOOL Ret = co_IntSetForegroundWindow(Wnd);
+
+    if (!Wnd || Wnd->head.pti != pti)
+        pti->TIF_flags |= AllowForeground;
+    return Ret;
+}
+
 //
 // This helps with CORE-6129 forcing modal dialog active when another app is minimized or closed.
 //
@@ -311,7 +323,7 @@ BOOL FASTCALL ActivateOtherWindowMin(PWND Wnd)
              {
                 UserRefObjectCo(pWndSetActive, &Ref);
                 //ERR("ActivateOtherWindowMin Set FG 1\n");
-                co_IntSetForegroundWindow(pWndSetActive);
+                co_WinPosSetOtherForegroundWindow(pWndSetActive);
                 UserDerefObjectCo(pWndSetActive);
                 //ERR("AOWM 2 Exit Good %p\n", UserHMGetHandle(pWndSetActive));
                 return TRUE;
@@ -348,7 +360,7 @@ BOOL FASTCALL ActivateOtherWindowMin(PWND Wnd)
     {
        UserRefObjectCo(pWndSetActive, &Ref);
        //ERR("ActivateOtherWindowMin Set FG 2\n");
-       co_IntSetForegroundWindow(pWndSetActive);
+       co_WinPosSetOtherForegroundWindow(pWndSetActive);
        UserDerefObjectCo(pWndSetActive);
        //ERR("AOWM 3 Exit Good %p\n", UserHMGetHandle(pWndSetActive));
        return TRUE;
@@ -456,7 +468,7 @@ done:
 
       /* ReactOS can pass WndTo = NULL to co_IntSetForegroundWindow and returns FALSE. */
       //ERR("WinPosActivateOtherWindow Set FG 0x%p hWnd %p\n", WndTo, WndTo ? UserHMGetHandle(WndTo) : NULL);
-      if (co_IntSetForegroundWindow(WndTo) ||
+      if (co_WinPosSetOtherForegroundWindow(WndTo) ||
           (gptiCurrent->MessageQueue == Queue && Queue->spwndActive != ActiveBefore))
       {
          if (WndTo) UserDerefObjectCo(WndTo);
@@ -1983,7 +1995,13 @@ co_WinPosActivateEntry(PWND Window)
          if (Window->head.pti == pti && !CanActivateForeground(pti))
             UserSetActiveWindow(Window);
          else
+         {
+            ULONG AllowForeground = pti->TIF_flags & TIF_ALLOWFOREGROUNDACTIVATE;
+
             co_IntSetForegroundWindow(Window); // Fixes SW_HIDE issues. Wine win test_SetActiveWindow & test_SetForegroundWindow.
+            if (!(Window->style & WS_VISIBLE))
+               pti->TIF_flags |= AllowForeground;
+         }
       }
    }
 }
@@ -2198,6 +2216,11 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
       }
 
       IntUpdatePaintCountVisibility(Window, FALSE);
+      if (Window == Window->head.pti->MessageQueue->spwndActive &&
+          Window->head.pti->MessageQueue == gpqForeground)
+      {
+         Window->head.pti->TIF_flags |= TIF_ALLOWFOREGROUNDACTIVATE;
+      }
       Window->style &= ~WS_VISIBLE; //IntSetStyle( Window, 0, WS_VISIBLE );
       Window->head.pti->cVisWindows--;
       IntNotifyWinEvent(EVENT_OBJECT_HIDE, Window, OBJID_WINDOW, CHILDID_SELF, WEF_SETBYWNDPTI);
@@ -3349,7 +3372,15 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
          if (style & (WS_MINIMIZE | WS_MAXIMIZE))
          {
             Swp |= SWP_FRAMECHANGED | co_WinPosMinMaximize(Wnd, Cmd, &NewPos);
-            if (style & WS_MINIMIZE) EventMsg = EVENT_SYSTEM_MINIMIZEEND;
+            if (style & WS_MINIMIZE)
+            {
+               EventMsg = EVENT_SYSTEM_MINIMIZEEND;
+               if (!(Swp & SWP_NOACTIVATE) && Wnd->head.pti == pti &&
+                   Wnd != pti->MessageQueue->spwndActive)
+               {
+                  pti->TIF_flags |= TIF_ALLOWFOREGROUNDACTIVATE;
+               }
+            }
          }
          else
          {
@@ -3459,9 +3490,6 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
           {
               co_WinPosActivateOtherWindow(Wnd);
           }
-
-          if (Cmd == SW_HIDE && IntGetFocusMessageQueue() != pti->MessageQueue)
-              pti->TIF_flags |= TIF_ALLOWFOREGROUNDACTIVATE;
       }
 
       /* Revert focus to parent */

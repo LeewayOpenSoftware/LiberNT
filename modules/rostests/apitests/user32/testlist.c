@@ -19,6 +19,7 @@ extern void func_DeferWindowPos(void);
 extern void func_DefFrameProc(void);
 extern void func_DeskWallpaper(void);
 extern void func_DestroyCursorIcon(void);
+extern void func_DestroyActiveWindow(void);
 extern void func_DestroyWindow(void);
 extern void func_DialogDpiChangeBehavior(void);
 extern void func_DM_REPOSITION(void);
@@ -31,6 +32,7 @@ extern void func_ClipboardAccess(void);
 extern void func_ClipboardData(void);
 extern void func_EnableScrollBar(void);
 extern void func_EnumDisplaySettings(void);
+extern void func_ForegroundRetake(void);
 extern void func_ForegroundRight(void);
 extern void func_ForegroundStartup(void);
 extern void func_GetClassInfo(void);
@@ -133,6 +135,7 @@ const struct test winetest_testlist[] =
     { "DefFrameProc", func_DefFrameProc },
     { "DeskWallpaper", func_DeskWallpaper },
     { "DestroyCursorIcon", func_DestroyCursorIcon },
+    { "DestroyActiveWindow", func_DestroyActiveWindow },
     { "DestroyWindow", func_DestroyWindow },
     { "DialogDpiChangeBehavior", func_DialogDpiChangeBehavior },
     { "DM_REPOSITION", func_DM_REPOSITION },
@@ -145,6 +148,7 @@ const struct test winetest_testlist[] =
     { "ClipboardData", func_ClipboardData },
     { "EnableScrollBar", func_EnableScrollBar },
     { "EnumDisplaySettings", func_EnumDisplaySettings },
+    { "ForegroundRetake", func_ForegroundRetake },
     { "ForegroundRight", func_ForegroundRight },
     { "ForegroundStartup", func_ForegroundStartup },
     { "GetClassInfo", func_GetClassInfo },
