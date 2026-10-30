@@ -963,12 +963,17 @@ set(LIBERNT_RAM_IMAGE_FREE_MB 512 CACHE STRING
     "Free space in MB added to the payload of the RAM disk image system partition (liberntramimg)")
 set(_preinstall_ram_image_file ${REACTOS_BINARY_DIR}/LiberNT-ram.img)
 set(_preinstall_ram_partition_file ${CMAKE_CURRENT_BINARY_DIR}/partition.ram.ntfs)
+if(TARGET native-ntfsimg)
+    set(_preinstall_ram_ntfsimg $<TARGET_FILE:native-ntfsimg>)
+else()
+    set(_preinstall_ram_ntfsimg native-ntfsimg)
+endif()
 string(UUID _ram_disk NAMESPACE 354fa6e5-5e45-49af-91bf-1fd2754e470a NAME "LiberNT RAM disk image" TYPE SHA1)
 string(SUBSTRING "${_ram_disk}" 0 8 _ram_signature)
 add_custom_target(liberntramimg
     COMMAND ${CMAKE_COMMAND} -E rm -f ${_preinstall_ram_image_file} ${_preinstall_ram_partition_file}
     COMMAND ${CMAKE_COMMAND}
-        -DNTFSIMG=$<TARGET_FILE:native-ntfsimg>
+        -DNTFSIMG=${_preinstall_ram_ntfsimg}
         -DLIST=${CMAKE_CURRENT_BINARY_DIR}/preinstall.effective.lst
         -DPARTITION=${_preinstall_ram_partition_file}
         -DHIDDEN_SECTORS=${_preinstall_system_partition_start}
