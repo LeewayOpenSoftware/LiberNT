@@ -141,6 +141,43 @@ VIS_ComputeVisibleRegion(
    return VisRgn;
 }
 
+PREGION FASTCALL
+VIS_ComputeRedirectedRegion(
+   PWND Wnd,
+   BOOLEAN ClientArea)
+{
+   PREGION VisRgn, ClipRgn;
+   PWND Parent = Wnd->spwndParent;
+
+   if (!(Wnd->style & WS_VISIBLE) || !Parent || !(Parent->style & WS_VISIBLE))
+      return NULL;
+
+   VisRgn = IntSysCreateRectpRgnIndirect(ClientArea ? &Wnd->rcClient : &Wnd->rcWindow);
+   if (!VisRgn)
+      return NULL;
+
+   ClipRgn = IntSysCreateRectpRgnIndirect(&Parent->rcClient);
+   if (ClipRgn)
+   {
+      IntGdiCombineRgn(VisRgn, VisRgn, ClipRgn, RGN_AND);
+      REGION_Delete(ClipRgn);
+   }
+
+   if (Wnd->hrgnClip && !(Wnd->style & WS_MINIMIZE))
+   {
+      PREGION WndRgnClip = REGION_LockRgn(Wnd->hrgnClip);
+      if (WndRgnClip)
+      {
+          REGION_bOffsetRgn(VisRgn, -Wnd->rcWindow.left, -Wnd->rcWindow.top);
+          IntGdiCombineRgn(VisRgn, VisRgn, WndRgnClip, RGN_AND);
+          REGION_bOffsetRgn(VisRgn, Wnd->rcWindow.left, Wnd->rcWindow.top);
+          REGION_UnlockRgn(WndRgnClip);
+      }
+   }
+
+   return VisRgn;
+}
+
 VOID FASTCALL
 co_VIS_WindowLayoutChanged(
    PWND Wnd,

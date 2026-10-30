@@ -2105,7 +2105,8 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
                              SWP_HIDEWINDOW | SWP_FRAMECHANGED)) !=
             (SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER))
       {
-         VisBefore = VIS_ComputeVisibleRegion(Window, FALSE, FALSE,
+         VisBefore = CompositionSurfaceBefore ? VIS_ComputeRedirectedRegion(Window, FALSE) :
+                     VIS_ComputeVisibleRegion(Window, FALSE, FALSE,
                                               (Window->style & WS_CLIPSIBLINGS) ? TRUE : FALSE);
 
          if ( VisBefore != NULL &&
@@ -2122,7 +2123,8 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
          /* Calculate the non client area for resizes, as this is used in the copy region */
          if ((WinPos.flags & (SWP_NOSIZE | SWP_FRAMECHANGED)) != SWP_NOSIZE)
          {
-             VisBeforeJustClient = VIS_ComputeVisibleRegion(Window, TRUE, FALSE,
+             VisBeforeJustClient = CompositionSurfaceBefore ? VIS_ComputeRedirectedRegion(Window, TRUE) :
+                 VIS_ComputeVisibleRegion(Window, TRUE, FALSE,
                  (Window->style & WS_CLIPSIBLINGS) ? TRUE : FALSE);
 
              if ( VisBeforeJustClient != NULL &&
@@ -2322,7 +2324,8 @@ co_WinPosBatchApply(PWINPOS_ENTRY Entry)
         ((WinPos.flags & SWP_NOZORDER) && (WinPos.flags & SWP_NOOWNERZORDER))))
    {
       /* Determine the new visible region */
-      VisAfter = VIS_ComputeVisibleRegion(Window, FALSE, FALSE,
+      VisAfter = bComposited ? VIS_ComputeRedirectedRegion(Window, FALSE) :
+                 VIS_ComputeVisibleRegion(Window, FALSE, FALSE,
                                           (Window->style & WS_CLIPSIBLINGS) ? TRUE : FALSE);
 
       if ( VisAfter != NULL &&

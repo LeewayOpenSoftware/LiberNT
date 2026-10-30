@@ -16,6 +16,7 @@ list(APPEND SOURCE
     CursorPresentation.c
     CreateDialog.c
     CreateIconFromResourceEx.c
+    CoveredWindow.c
     CreateWindowEx.c
     DeferWindowPos.c
     DefFrameProc.c
