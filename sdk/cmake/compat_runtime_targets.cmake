@@ -65,9 +65,11 @@ set(COMPAT_RUNTIME_MODULES
     d3dxof
     dciman32
     devenum
+    devobj
     dinput
     dispex
     dpnhpast
+    drvstore
     dsrole
     dssenh
     dxdiagn
