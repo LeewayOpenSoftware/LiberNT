@@ -287,6 +287,8 @@ KeUserModeCallback(
         Thread->ApcState.KernelApcInProgress || Thread->ApcStateIndex != OriginalApcEnvironment ||
         Thread->CombinedApcDisable || !OuterFrame || !KiUserTrap(OuterFrame))
         return STATUS_INVALID_DEVICE_STATE;
+    if (Thread->CallbackNestingLevel >= KI_MAX_USER_CALLBACK_NESTING)
+        return STATUS_STACK_OVERFLOW;
     if (!Result || !ResultLength || (ArgumentLength && !Argument))
         return STATUS_INVALID_PARAMETER;
     if (!KiRiscvUserControlAddress((ULONG_PTR)KeUserCallbackDispatcher) ||
@@ -333,7 +335,9 @@ KeUserModeCallback(
     if (!NT_SUCCESS(Status))
         return Status;
 
+    Thread->CallbackNestingLevel++;
     CallbackStatus = KiRiscvCallUserMode(&CallbackFrame, Result, ResultLength);
+    Thread->CallbackNestingLevel--;
     ASSERT(Thread->TrapFrame == OuterFrame);
     /* POP_STACK supplies a new user continuation; ordinary callbacks leave
      * the interrupted context untouched, including its complete FP bank. */

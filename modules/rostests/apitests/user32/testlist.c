@@ -5,6 +5,7 @@
 extern void func_RegisterTouchWindow(void);
 extern void func_AttachThreadInput(void);
 extern void func_CalculatePopupWindowPosition(void);
+extern void func_CallbackNesting(void);
 extern void func_CharFuncs(void);
 extern void func_CloseWindow(void);
 extern void func_ComboBox(void);
@@ -116,6 +117,7 @@ const struct test winetest_testlist[] =
     { "RegisterTouchWindow", func_RegisterTouchWindow },
     { "AttachThreadInput", func_AttachThreadInput },
     { "CalculatePopupWindowPosition", func_CalculatePopupWindowPosition },
+    { "CallbackNesting", func_CallbackNesting },
     { "CharFuncs", func_CharFuncs },
     { "CloseWindow", func_CloseWindow },
     { "ComboBox", func_ComboBox },

@@ -156,6 +156,7 @@ extern KSCHEDULER_SUBNODE KiNode0SubNode;
 #ifndef KI_MAX_NUMA_NODES
 #define KI_MAX_NUMA_NODES 1
 #endif
+#define KI_MAX_USER_CALLBACK_NESTING 31
 #ifndef KiPrcbTimerTableLockQueue
 #define KiPrcbTimerTableLockQueue(Prcb, Index) (&(Prcb)->LockQueue[LockQueueTimerTableLock + (Index)])
 #endif

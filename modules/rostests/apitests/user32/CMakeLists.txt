@@ -5,6 +5,7 @@ list(APPEND SOURCE
     ../include/msgtrace.c
     CalculatePopupWindowPosition.c
     CallWindowProc.c
+    CallbackNesting.c
     CharFuncs.c
     CloseWindow.c
     ClipboardAccess.c
