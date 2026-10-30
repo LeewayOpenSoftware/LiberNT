@@ -432,6 +432,7 @@ static const CATEGORY_RULE Rules[] =
     { "xcopy_winetest", "*", "shell:cmd" },
     { "browseui_apitest", "*", "shell:explorer" },
     { "browseui_winetest", "*", "shell:explorer" },
+    { "explorer_apitest", "*", "shell:explorer" },
     { "fanlaunch_apitest", "*", "shell:explorer" },
     { "folder_execute_apitest", "*", "shell:explorer" },
     { "netshell_apitest", "*", "shell:explorer" },

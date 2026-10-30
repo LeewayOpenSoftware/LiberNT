@@ -3961,7 +3961,11 @@ TfyRequestMaster(IMMDevice *pDevice, int nPercent, int nMute)
 }
 
 #define TFY_TIMER_OSDHIDE  0x53
+#define TFY_TIMER_OSDSLIDE 0x58
 #define TFY_OSD_VISIBLE_MS 2000
+#define TFY_OSD_GAP        14
+#define TFY_OSD_SHOW_MS    500
+#define TFY_OSD_HIDE_MS    170
 
 struct TFYMEDIA
 {
@@ -4069,11 +4073,13 @@ public:
     BOOL m_bFrameStarted;
     int m_nPercent;
     BOOL m_bHover;
+    BOOL m_bAnimate;
     SIZE m_size;
     RECT m_rcIcon, m_rcBar, m_rcValue;
+    int m_yHidden, m_yNow, m_ySlideFrom;
 
     CTrayOsdWnd() : m_hFont(NULL), m_uIcon(0), m_pszGlyph(NULL), m_bFrameStarted(FALSE),
-                    m_nPercent(0), m_bHover(FALSE)
+                    m_nPercent(0), m_bHover(FALSE), m_bAnimate(TRUE), m_yHidden(0), m_yNow(0), m_ySlideFrom(0)
     {
         ZeroMemory(&m_Pal, sizeof(m_Pal));
         ZeroMemory(&m_size, sizeof(m_size));
@@ -4090,12 +4096,43 @@ public:
         SetRect(&m_rcValue, Sc(152), 0, Sc(180), m_size.cy);
     }
 
+    VOID StepSlide()
+    {
+        UINT Ms = (m_AnimPhase == TFY_CLOSE) ? TFY_OSD_HIDE_MS : TFY_OSD_SHOW_MS;
+        double x = m_bAnimate ? min(1.0, (double)(GetTickCount64() - m_AnimT0) / Ms) : 1.0;
+        double s = (m_AnimPhase == TFY_CLOSE) ? x * x * x : 1.0 - (1.0 - x) * (1.0 - x) * (1.0 - x);
+        int yTo = (m_AnimPhase == TFY_CLOSE) ? m_yHidden : m_ptFinal.y;
+
+        m_yNow = m_ySlideFrom + (int)floor((yTo - m_ySlideFrom) * s + 0.5);
+        SetWindowPos(NULL, m_ptFinal.x, m_yNow, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        if (x < 1.0)
+            return;
+        KillTimer(TFY_TIMER_OSDSLIDE);
+        if (m_AnimPhase == TFY_CLOSE)
+            DestroyWindow();
+        else
+            m_AnimPhase = TFY_NONE;
+    }
+
+    VOID BeginSlide(int Phase)
+    {
+        ANIMATIONINFO ai = { sizeof(ai) };
+
+        m_AnimPhase = Phase;
+        m_AnimT0 = GetTickCount64();
+        m_ySlideFrom = m_yNow;
+        m_bAnimate = SystemParametersInfoW(SPI_GETANIMATION, sizeof(ai), &ai, 0) && ai.iMinAnimate;
+        SetTimer(TFY_TIMER_OSDSLIDE, TFY_ANIM_INTERVAL, NULL);
+        StepSlide();
+    }
+
     VOID Show(UINT uIcon, LPCWSTR pszGlyph, int nPercent)
     {
         HWND hwndTray = FindWindowW(L"Shell_TrayWnd", NULL);
+        HWND hwndAfter = HWND_TOPMOST;
         MONITORINFO mi = { sizeof(mi) };
         RECT rcBar;
-        POINT pt;
+        int yEdge;
 
         m_uIcon = uIcon;
         m_pszGlyph = pszGlyph;
@@ -4104,10 +4141,12 @@ public:
         m_nPercent = max(0, min(nPercent, 100));
         SetTimer(TFY_TIMER_OSDHIDE, TFY_OSD_VISIBLE_MS, NULL);
 
-        if (IsWindowVisible() && m_AnimPhase != TFY_CLOSE)
+        if (IsWindowVisible())
         {
             InvalidateRect(NULL, FALSE);
             UpdateWindow();
+            if (m_AnimPhase == TFY_CLOSE)
+                BeginSlide(TFY_OPEN);
             return;
         }
 
@@ -4118,12 +4157,27 @@ public:
         if (!hwndTray || !::GetWindowRect(hwndTray, &rcBar))
             SetRectEmpty(&rcBar);
         GetMonitorInfoW(MonitorFromRect(&rcBar, MONITOR_DEFAULTTOPRIMARY), &mi);
-        pt.x = (mi.rcMonitor.left + mi.rcMonitor.right - m_size.cx) / 2;
         if (hwndTray && rcBar.top > (mi.rcMonitor.top + mi.rcMonitor.bottom) / 2)
-            pt.y = rcBar.top - Sc(15) - m_size.cy;
+        {
+            yEdge = rcBar.top;
+            if (::GetWindowLongPtrW(hwndTray, GWL_EXSTYLE) & WS_EX_TOPMOST)
+                hwndAfter = hwndTray;
+        }
         else
-            pt.y = mi.rcWork.bottom - Sc(15) - m_size.cy;
-        BeginFlyoutOpen(m_hWnd, pt.x, pt.y, m_size.cx, m_size.cy, m_Pal.PanelBg, FALSE);
+        {
+            yEdge = mi.rcWork.bottom;
+        }
+        m_ptFinal.x = (mi.rcMonitor.left + mi.rcMonitor.right - m_size.cx) / 2;
+        m_ptFinal.y = yEdge - Sc(TFY_OSD_GAP) - m_size.cy;
+        m_yHidden = yEdge;
+        m_yNow = yEdge;
+        RefreshFlyoutMaterial(m_hWnd, m_Pal.PanelBg);
+        SetLayeredWindowAttributes(m_hWnd, 0, 255, LWA_ALPHA);
+        SetPropW(m_hWnd, DWM_PROP_CORNER_RADIUS, (HANDLE)(ULONG_PTR)TfyFlyoutRadius());
+        SetWindowPos(hwndAfter, m_ptFinal.x, m_yNow, m_size.cx, m_size.cy, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        InvalidateRect(NULL, FALSE);
+        UpdateWindow();
+        BeginSlide(TFY_OPEN);
     }
 
     LRESULT OnPaint(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled)
@@ -4198,12 +4252,15 @@ public:
 
     LRESULT OnTimer(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled)
     {
-        if (HandleFlyoutAnimation(m_hWnd, wParam))
+        if (wParam == TFY_TIMER_OSDSLIDE)
+        {
+            StepSlide();
             return 0;
+        }
         if (wParam == TFY_TIMER_OSDHIDE && !m_bHover)
         {
             KillTimer(TFY_TIMER_OSDHIDE);
-            BeginFlyoutClose(m_hWnd);
+            BeginSlide(TFY_CLOSE);
         }
         return 0;
     }
@@ -4232,7 +4289,7 @@ public:
 
     LRESULT OnDestroy(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL &bHandled)
     {
-        KillTimer(TFY_TIMER_ANIM);
+        KillTimer(TFY_TIMER_OSDSLIDE);
         KillTimer(TFY_TIMER_OSDHIDE);
         if (m_hFont) { DeleteObject(m_hFont); m_hFont = NULL; }
         if (m_bFrameStarted)
@@ -4268,12 +4325,6 @@ void CTrayOsdWnd::OnFinalMessage(HWND hWnd)
 static VOID
 TrayOsd_Show(UINT uIcon, LPCWSTR pszGlyph, int nPercent)
 {
-    if (g_pTrayOsd && g_pTrayOsd->IsWindow() && g_pTrayOsd->m_AnimPhase == TFY_CLOSE)
-    {
-        ::DestroyWindow(g_pTrayOsd->m_hWnd);
-        g_pTrayOsd = NULL;
-    }
-
     if (!g_pTrayOsd)
     {
         CTrayOsdWnd *pOsd = new CTrayOsdWnd();
