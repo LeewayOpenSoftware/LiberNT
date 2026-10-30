@@ -2927,7 +2927,7 @@ LxCaptureVector(
     ULONG64 Pointer;
     PSTR String;
     LONG64 Result;
-    ULONG StringLength;
+    ULONG StringLength, Capacity = 0;
     PSTR NewList;
 
     *List = NULL;
@@ -2955,18 +2955,23 @@ LxCaptureVector(
             return -LX_E2BIG;
         }
 
-        NewList = LxAlloc(*Length + StringLength);
-        if (NewList == NULL)
+        if (*Length + StringLength > Capacity)
         {
-            LxFree(String);
-            return -LX_ENOMEM;
+            Capacity = max(max(Capacity * 2, *Length + StringLength), 256UL);
+            Capacity = min(Capacity, (ULONG)LX_MAX_ARG_TOTAL);
+            NewList = LxAlloc(Capacity);
+            if (NewList == NULL)
+            {
+                LxFree(String);
+                return -LX_ENOMEM;
+            }
+            if (*List != NULL)
+                RtlCopyMemory(NewList, *List, *Length);
+            LxFree(*List);
+            *List = NewList;
         }
-        if (*List != NULL)
-            RtlCopyMemory(NewList, *List, *Length);
-        RtlCopyMemory(NewList + *Length, String, StringLength);
+        RtlCopyMemory(*List + *Length, String, StringLength);
         LxFree(String);
-        LxFree(*List);
-        *List = NewList;
         *Length += StringLength;
         (*Count)++;
     }
