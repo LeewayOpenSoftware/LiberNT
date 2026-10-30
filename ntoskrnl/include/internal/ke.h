@@ -1065,6 +1065,17 @@ KeTrapFrameToContext(
     IN OUT PCONTEXT Context
 );
 
+#ifdef _WIN64
+VOID
+NTAPI
+KiInitializeWow64ThreadContext(
+    _Inout_ PCONTEXT Context,
+    _In_ ULONG Eip,
+    _In_ ULONG Eax,
+    _In_ ULONG_PTR CpuArea
+);
+#endif
+
 DECLSPEC_NORETURN
 VOID
 NTAPI
