@@ -33,6 +33,7 @@ if [ ! -d "$M/.git" ]; then
     git -C "$M" apply "$HERE/patches/mono-registered-wait-thread.patch"
     git -C "$M" apply "$HERE/patches/mono-com-event-provider.patch"
     git -C "$M" apply "$HERE/patches/mono-rcw-release-iunknown.patch"
+    git -C "$M" apply "$HERE/patches/mono-marshal-cleanup-unused-objects.patch"
     git -C "$E/corefx" apply "$HERE/patches/corefx-certificatechoices.patch"
     git -C "$E/corefx" apply "$HERE/patches/corefx-pipe-end-wait-closed.patch"
 fi
