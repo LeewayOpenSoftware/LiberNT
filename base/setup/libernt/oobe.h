@@ -18,6 +18,7 @@ typedef struct _OOBE_APP
     ULONG SpaceMb;
     BOOL Msi;
     BOOL Present;
+    BOOL Unattended;
     BOOL Selected;
     DWORD Result;
 } OOBE_APP, *POOBE_APP;

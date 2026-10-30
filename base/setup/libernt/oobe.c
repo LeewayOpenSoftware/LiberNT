@@ -960,6 +960,27 @@ StoragePageProc(
     return FALSE;
 }
 
+static VOID
+InstallUnattendedComponents(VOID)
+{
+    OOBE_PROGRESS Progress = { NULL, NULL, NULL };
+    POOBE_APP Apps;
+    ULONG Count, Index;
+    HRESULT hrCom;
+
+    Count = LoadOobeApps(&Apps, FALSE);
+    hrCom = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    for (Index = 0; Index < Count; Index++)
+    {
+        if (Apps[Index].Unattended)
+            InstallOobeApp(&Apps[Index], &Progress);
+    }
+    if (SUCCEEDED(hrCom))
+        CoUninitialize();
+    if (Apps)
+        HeapFree(ProcessHeap, 0, Apps);
+}
+
 int WINAPI
 wWinMain(
     HINSTANCE hInst,
@@ -979,7 +1000,10 @@ wWinMain(
     if (!ComponentsOnly)
         DPRINT1("Disk signature check finished with exit code %lu\n", RunExpandStorage(L"/u"));
     if (!ComponentsOnly && (IsUnattendedFirstBoot() || HasAutomationPayload()))
+    {
+        InstallUnattendedComponents();
         return OOBE_SKIPPED;
+    }
 
     iccx.dwSize = sizeof(iccx);
     iccx.dwICC = ICC_LISTVIEW_CLASSES | ICC_PROGRESS_CLASS;

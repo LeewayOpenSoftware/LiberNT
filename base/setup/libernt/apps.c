@@ -88,6 +88,7 @@ LoadOobeApps(
     WCHAR AppSection[128];
     WCHAR Type[16];
     WCHAR Space[16];
+    WCHAR Unattended[8];
     INFCONTEXT Context;
     POOBE_APP Items = NULL, NewItems;
     ULONG Count = 0;
@@ -138,6 +139,8 @@ LoadOobeApps(
             GetInfString(hInf, AppSection, L"Sha256", App->Sha256, ARRAYSIZE(App->Sha256));
             if (GetInfString(hInf, AppSection, L"Space", Space, ARRAYSIZE(Space)))
                 App->SpaceMb = wcstoul(Space, NULL, 10);
+            if (GetInfString(hInf, AppSection, L"Unattended", Unattended, ARRAYSIZE(Unattended)))
+                App->Unattended = (_wcsicmp(Unattended, L"yes") == 0);
             if (!App->Signer[0] && !App->Sha256[0])
             {
                 DPRINT1("Component %S has neither a signer nor a hash\n", AppSection);
