@@ -80,7 +80,8 @@ IsOobeAppPresent(
 
 ULONG
 LoadOobeApps(
-    _Out_ POOBE_APP* Apps)
+    _Out_ POOBE_APP* Apps,
+    _In_ BOOL IncludePresent)
 {
     WCHAR Path[MAX_PATH];
     WCHAR Section[64];
@@ -142,14 +143,15 @@ LoadOobeApps(
                 DPRINT1("Component %S has neither a signer nor a hash\n", AppSection);
                 continue;
             }
-            if (IsOobeAppPresent(hInf, AppSection))
+            App->Present = IsOobeAppPresent(hInf, AppSection);
+            if (App->Present && !IncludePresent)
             {
                 DPRINT("Component %S is already present\n", App->Name);
                 continue;
             }
 
             App->Msi = (_wcsicmp(Type, L"msi") == 0);
-            App->Selected = TRUE;
+            App->Selected = !App->Present;
             App->Result = ERROR_SUCCESS;
             Count++;
         } while (SetupFindNextLine(&Context, &Context));
@@ -205,6 +207,8 @@ FillAppList(
     LVCOLUMNW Column;
     LVITEMW Item;
     WCHAR Text[128];
+    WCHAR Format[64];
+    WCHAR Name[192];
     ULONG Index;
     RECT rc;
 
@@ -215,7 +219,7 @@ FillAppList(
     Column.mask = LVCF_TEXT | LVCF_WIDTH;
     LoadStringW(GetModuleHandleW(NULL), IDS_APPS_COL_NAME, Text, ARRAYSIZE(Text));
     Column.pszText = Text;
-    Column.cx = (rc.right - rc.left) * 3 / 5;
+    Column.cx = (rc.right - rc.left) * 2 / 3;
     ListView_InsertColumn(hList, 0, &Column);
     LoadStringW(GetModuleHandleW(NULL), IDS_APPS_COL_SOURCE, Text, ARRAYSIZE(Text));
     Column.pszText = Text;
@@ -228,6 +232,12 @@ FillAppList(
         Item.mask = LVIF_TEXT | LVIF_PARAM;
         Item.iItem = (INT)Index;
         Item.pszText = OobeApps[Index].Name;
+        if (OobeApps[Index].Present &&
+            LoadStringW(GetModuleHandleW(NULL), IDS_APPS_INSTALLED, Format, ARRAYSIZE(Format)) &&
+            SUCCEEDED(StringCchPrintfW(Name, ARRAYSIZE(Name), Format, OobeApps[Index].Name)))
+        {
+            Item.pszText = Name;
+        }
         Item.lParam = Index;
         Item.iItem = ListView_InsertItem(hList, &Item);
         ListView_SetItemText(hList, Item.iItem, 1,
@@ -618,7 +628,8 @@ RunPackage(
     if (App->Msi)
     {
         MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
-        return MsiInstallProductW(Path, L"REBOOT=ReallySuppress");
+        return MsiInstallProductW(Path, App->Present ? L"REBOOT=ReallySuppress REINSTALL=ALL REINSTALLMODE=amus"
+                                                     : L"REBOOT=ReallySuppress");
     }
 
     if (FAILED(StringCchPrintfW(CommandLine, ARRAYSIZE(CommandLine), L"\"%s\" %s", Path, App->Arguments)))

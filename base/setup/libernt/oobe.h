@@ -17,6 +17,7 @@ typedef struct _OOBE_APP
     WCHAR Sha256[65];
     ULONG SpaceMb;
     BOOL Msi;
+    BOOL Present;
     BOOL Selected;
     DWORD Result;
 } OOBE_APP, *POOBE_APP;
@@ -30,7 +31,8 @@ typedef struct _OOBE_PROGRESS
 
 ULONG
 LoadOobeApps(
-    _Out_ POOBE_APP* Apps);
+    _Out_ POOBE_APP* Apps,
+    _In_ BOOL IncludePresent);
 
 BOOL
 GetSystemDriveSpace(

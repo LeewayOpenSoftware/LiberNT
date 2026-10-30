@@ -978,7 +978,7 @@ wWinMain(
     FirstBootRun = EndFirstBootSetup();
     if (!ComponentsOnly)
         DPRINT1("Disk signature check finished with exit code %lu\n", RunExpandStorage(L"/u"));
-    if (IsUnattendedFirstBoot() || HasAutomationPayload())
+    if (!ComponentsOnly && (IsUnattendedFirstBoot() || HasAutomationPayload()))
         return OOBE_SKIPPED;
 
     iccx.dwSize = sizeof(iccx);
@@ -994,7 +994,7 @@ wWinMain(
     SetupData.TimeZoneIndex = (ULONG)-1;
     GetTimeZoneListIndex(&SetupData.TimeZoneIndex);
     SetupData.AutoDaylight = TRUE;
-    OobeAppCount = LoadOobeApps(&OobeApps);
+    OobeAppCount = LoadOobeApps(&OobeApps, ComponentsOnly);
     DPRINT1("First-boot setup lists %lu components\n", OobeAppCount);
 
     if (!ComponentsOnly)
