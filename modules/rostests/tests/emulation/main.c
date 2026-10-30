@@ -113,7 +113,7 @@ TestThreads(VOID)
     CHECK(TlsFree(TlsIndex));
     CloseHandle(Gate);
     DeleteCriticalSection(&Lock);
-    printf("EMUTEST: %u threads finished, counter=%ld, TLS intact\n", WORKER_COUNT, Counter);
+    printf("EMUTEST: %d threads finished, counter=%ld, TLS intact\n", WORKER_COUNT, Counter);
 }
 
 static
@@ -256,6 +256,268 @@ SumAcrossStore(
     return V0 + V1 * 2 + V2 * 3 + V3 * 4 + V4 * 5 + V5 * 6 + V6 * 7 + V7 * 8 + V8 * 9 + V9 * 10 + V10 * 11 + V11 * 12;
 }
 
+static LONG UserApcs;
+static ULONG_PTR UserApcData;
+static LONG IoCompletions;
+static DWORD IoCompletionBytes;
+static LONG TimerApcs;
+
+static
+VOID
+CALLBACK
+UserApc(
+    _In_ ULONG_PTR Data)
+{
+    UserApcData = Data;
+    InterlockedIncrement(&UserApcs);
+}
+
+static
+VOID
+CALLBACK
+IoCompletion(
+    _In_ DWORD ErrorCode,
+    _In_ DWORD Bytes,
+    _In_ LPOVERLAPPED Overlapped)
+{
+    CHECK(ErrorCode == ERROR_SUCCESS);
+    IoCompletionBytes = Bytes;
+    InterlockedIncrement(&IoCompletions);
+}
+
+static
+VOID
+CALLBACK
+TimerCompletion(
+    _In_opt_ PVOID Context,
+    _In_ DWORD Low,
+    _In_ DWORD High)
+{
+    CHECK(Context == (PVOID)(ULONG_PTR)0x7135);
+    InterlockedIncrement(&TimerApcs);
+}
+
+static
+VOID
+TestApcs(VOID)
+{
+    static const CHAR Message[] = "asynchronous procedure call";
+    WCHAR Directory[MAX_PATH], Name[MAX_PATH];
+    OVERLAPPED Overlapped = { 0 };
+    LARGE_INTEGER Due;
+    HANDLE File, Timer;
+    ULONG Index;
+
+    CHECK(QueueUserAPC(UserApc, GetCurrentThread(), 0x5A5A) != 0);
+    CHECK(UserApcs == 0);
+    CHECK(SleepEx(0, TRUE) == WAIT_IO_COMPLETION);
+    CHECK(UserApcs == 1 && UserApcData == 0x5A5A);
+    CHECK(SleepEx(0, TRUE) == 0);
+
+    CHECK(GetTempPathW(RTL_NUMBER_OF(Directory), Directory) != 0);
+    CHECK(GetTempFileNameW(Directory, L"apc", 0, Name) != 0);
+    File = CreateFileW(Name, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                       FILE_FLAG_OVERLAPPED | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+    CHECK(File != INVALID_HANDLE_VALUE);
+    if (File != INVALID_HANDLE_VALUE)
+    {
+        CHECK(WriteFileEx(File, Message, sizeof(Message), &Overlapped, IoCompletion));
+        for (Index = 0; Index < 100 && !IoCompletions; Index++) SleepEx(10, TRUE);
+        CHECK(IoCompletions == 1 && IoCompletionBytes == sizeof(Message));
+        CloseHandle(File);
+    }
+
+    Timer = CreateWaitableTimerW(NULL, FALSE, NULL);
+    CHECK(Timer != NULL);
+    if (Timer)
+    {
+        Due.QuadPart = -10 * 1000 * 10;
+        CHECK(SetWaitableTimer(Timer, &Due, 0, TimerCompletion, (PVOID)(ULONG_PTR)0x7135, FALSE));
+        for (Index = 0; Index < 100 && !TimerApcs; Index++) SleepEx(10, TRUE);
+        CHECK(TimerApcs == 1);
+        CloseHandle(Timer);
+    }
+
+    printf("EMUTEST: %ld user, %ld I/O and %ld timer APCs delivered\n", UserApcs, IoCompletions, TimerApcs);
+}
+
+#if defined(_M_AMD64) || defined(__x86_64__)
+#define CONTEXT_PC(Context) ((Context)->Rip)
+#define CONTEXT_SP(Context) ((Context)->Rsp)
+#define CALL_RETURN_SLOT    sizeof(PVOID)
+#elif defined(_M_IX86) || defined(__i386__)
+#define CONTEXT_PC(Context) ((Context)->Eip)
+#define CONTEXT_SP(Context) ((Context)->Esp)
+#define CALL_RETURN_SLOT    sizeof(PVOID)
+#else
+#define CONTEXT_PC(Context) ((Context)->Pc)
+#define CONTEXT_SP(Context) ((Context)->Sp)
+#define CALL_RETURN_SLOT    0
+#endif
+
+static volatile LONG SpinStop;
+static volatile LONG SpinRounds;
+static volatile ULONG_PTR SpinMarker;
+static volatile LONG WaiterStarted;
+
+static
+DWORD
+WINAPI
+Spinner(
+    _In_ PVOID Parameter)
+{
+    volatile UCHAR Marker = 0;
+    double Sum = 0.0;
+    LONG Rounds = 0;
+
+    SpinMarker = (ULONG_PTR)&Marker;
+    while (!SpinStop)
+    {
+        Sum += 1.0;
+        Rounds++;
+        SpinRounds = Rounds;
+    }
+    return Sum == (double)Rounds ? 0 : 1;
+}
+
+static
+DECLSPEC_NOINLINE
+VOID
+WINAPI
+Redirected(VOID)
+{
+    ExitThread(0x42);
+}
+
+static
+DWORD
+WINAPI
+Waiter(
+    _In_ PVOID Parameter)
+{
+    InterlockedExchange(&WaiterStarted, 1);
+    return WaitForSingleObject((HANDLE)Parameter, INFINITE) == WAIT_OBJECT_0 ? 0x33 : 1;
+}
+
+static
+BOOLEAN
+InModule(
+    _In_ ULONG_PTR Address,
+    _In_opt_ HMODULE Module)
+{
+    PIMAGE_NT_HEADERS Headers = Module ? RtlImageNtHeader(Module) : NULL;
+
+    return Headers && Address >= (ULONG_PTR)Module &&
+           Address < (ULONG_PTR)Module + Headers->OptionalHeader.SizeOfImage;
+}
+
+static
+HANDLE
+StartSpinner(VOID)
+{
+    HANDLE Thread;
+    ULONG Index;
+
+    SpinStop = 0;
+    SpinRounds = 0;
+    Thread = CreateThread(NULL, 0, Spinner, NULL, 0, NULL);
+    CHECK(Thread != NULL);
+    for (Index = 0; Thread && Index < 5000 && !SpinRounds; Index++) Sleep(1);
+    CHECK(SpinRounds != 0);
+    return Thread;
+}
+
+static
+VOID
+TestThreadContext(VOID)
+{
+    HMODULE Ntdll = GetModuleHandleW(L"ntdll.dll");
+    CONTEXT Context, Again;
+    HANDLE Thread, Event;
+    BOOLEAN Waiting;
+    DWORD ExitCode;
+    LONG Before;
+    ULONG Index;
+
+    Thread = StartSpinner();
+    if (!Thread) return;
+    for (Index = 0; Index < 16; Index++)
+    {
+        CHECK(SuspendThread(Thread) == 0);
+        Before = SpinRounds;
+        Sleep(5);
+        CHECK(SpinRounds == Before);
+        Context.ContextFlags = CONTEXT_FULL;
+        CHECK(GetThreadContext(Thread, &Context));
+        CHECK(InModule(CONTEXT_PC(&Context), GetModuleHandleW(NULL)));
+        CHECK(CONTEXT_SP(&Context) <= SpinMarker && SpinMarker - CONTEXT_SP(&Context) < 0x1000);
+        CHECK(ResumeThread(Thread) == 1);
+        Sleep(1);
+    }
+
+    CHECK(SuspendThread(Thread) == 0);
+    CHECK(SuspendThread(Thread) == 1);
+    Context.ContextFlags = CONTEXT_FULL;
+    Again.ContextFlags = CONTEXT_FULL;
+    CHECK(GetThreadContext(Thread, &Context));
+    CHECK(GetThreadContext(Thread, &Again));
+    CHECK(CONTEXT_PC(&Context) == CONTEXT_PC(&Again) && CONTEXT_SP(&Context) == CONTEXT_SP(&Again));
+    CHECK(ResumeThread(Thread) == 2);
+    CONTEXT_PC(&Context) = (ULONG_PTR)Redirected;
+    CONTEXT_SP(&Context) = ((CONTEXT_SP(&Context) - 0x100) & ~(ULONG_PTR)15) - CALL_RETURN_SLOT;
+    CHECK(SetThreadContext(Thread, &Context));
+    CHECK(ResumeThread(Thread) == 1);
+    CHECK(WaitForSingleObject(Thread, 30000) == WAIT_OBJECT_0);
+    CHECK(GetExitCodeThread(Thread, &ExitCode) && ExitCode == 0x42);
+    CloseHandle(Thread);
+
+    Thread = StartSpinner();
+    if (!Thread) return;
+    for (Index = 0; Index < 32; Index++)
+    {
+        CHECK(SuspendThread(Thread) == 0);
+        Context.ContextFlags = CONTEXT_FULL | CONTEXT_FLOATING_POINT;
+        CHECK(GetThreadContext(Thread, &Context));
+        CHECK(ResumeThread(Thread) == 1);
+        Sleep(1);
+    }
+    SpinStop = 1;
+    CHECK(WaitForSingleObject(Thread, 30000) == WAIT_OBJECT_0);
+    CHECK(GetExitCodeThread(Thread, &ExitCode) && ExitCode == 0);
+    CloseHandle(Thread);
+
+    Event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    CHECK(Event != NULL);
+    if (!Event) return;
+    WaiterStarted = 0;
+    Thread = CreateThread(NULL, 0, Waiter, Event, 0, NULL);
+    CHECK(Thread != NULL);
+    if (Thread)
+    {
+        for (Index = 0; Index < 5000 && !WaiterStarted; Index++) Sleep(1);
+        CHECK(WaiterStarted != 0);
+        Waiting = FALSE;
+        for (Index = 0; Index < 500; Index++)
+        {
+            Sleep(10);
+            CHECK(SuspendThread(Thread) == 0);
+            Context.ContextFlags = CONTEXT_FULL;
+            CHECK(GetThreadContext(Thread, &Context));
+            Waiting = InModule(CONTEXT_PC(&Context), Ntdll);
+            if (Waiting || sizeof(PVOID) != 8) break;
+            CHECK(ResumeThread(Thread) == 1);
+        }
+        if (sizeof(PVOID) == 8) CHECK(Waiting);
+        CHECK(ResumeThread(Thread) == 1);
+        CHECK(SetEvent(Event));
+        CHECK(WaitForSingleObject(Thread, 30000) == WAIT_OBJECT_0);
+        CHECK(GetExitCodeThread(Thread, &ExitCode) && ExitCode == 0x33);
+        CloseHandle(Thread);
+    }
+    CloseHandle(Event);
+    printf("EMUTEST: suspended thread contexts read, redirected and resumed\n");
+}
+
 static
 VOID
 TestFloatingStateAcrossFault(VOID)
@@ -288,6 +550,41 @@ TestFloatingStateAcrossFault(VOID)
     printf("EMUTEST: floating-point registers survived a continued fault (%ld continued)\n", FaultsContinued);
 }
 
+typedef int (*PINDIRECT_INT)(int, short, float, double);
+typedef double (*PINDIRECT_DOUBLE)(float, double, int);
+
+static
+int
+IndirectInt(
+    _In_ int A,
+    _In_ short B,
+    _In_ float C,
+    _In_ double D)
+{
+    return A * B - (int)(C * 2) - (int)D;
+}
+
+static
+double
+IndirectDouble(
+    _In_ float A,
+    _In_ double B,
+    _In_ int C)
+{
+    return A * B + C;
+}
+
+static
+VOID
+TestIndirectCalls(VOID)
+{
+    static PINDIRECT_INT volatile IntTarget = IndirectInt;
+    static PINDIRECT_DOUBLE volatile DoubleTarget = IndirectDouble;
+
+    CHECK(IntTarget(-6, 7, 1.5f, 4.0) == -49);
+    CHECK(DoubleTarget(0.5f, -3.0, 9) == 7.5);
+}
+
 int
 main(
     int ArgumentCount,
@@ -296,6 +593,7 @@ main(
     PIMAGE_NT_HEADERS Headers = RtlImageNtHeader(GetModuleHandleW(NULL));
     SYSTEM_INFO System;
 
+    setvbuf(stdout, NULL, _IONBF, 0);
     GetSystemInfo(&System);
     printf("EMUTEST: hello from a machine %04x image, %u-bit pointers, processor architecture %u\n",
            Headers->FileHeader.Machine,
@@ -308,9 +606,12 @@ main(
 
     TestThreads();
     TestFiles();
+    TestApcs();
+    TestThreadContext();
     TestStructuredExceptions();
     TestFloatingStateAcrossFault();
     EmuTestCxxExceptions();
+    TestIndirectCalls();
 
     printf("EMUTEST: END checks=%ld failures=%ld\n", EmuTestChecks, EmuTestFailures);
     DbgPrint("EMUTEST: END checks=%ld failures=%ld\n", EmuTestChecks, EmuTestFailures);
